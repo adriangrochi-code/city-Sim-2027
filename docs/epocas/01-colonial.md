@@ -24,9 +24,13 @@ traen (o dejan de traer) los barcos.
 ## 2. El mapa: grande, pero se conquista por parcelas
 
 **Decisión: mapa grande que se adquiere por parcelas a medida que pasa el tiempo** (el
-modelo clásico del género). El mapa total es de unos **10 × 10 km**, dividido en una
-cuadrícula de **25 parcelas de 2 × 2 km**. Se empieza con **una sola parcela** y las
-demás se van comprando.
+modelo clásico del género). El mapa de la ciudad mide unos **24 × 24 km** (≈575 km², del
+tamaño del departamento de Montevideo) y se divide en una cuadrícula de **64 parcelas de
+3 × 3 km**. Se empieza con **una sola parcela** y las demás se van comprando.
+
+Más allá del mapa de la ciudad está el **mapa del país** (del tamaño de Uruguay, ver GDD 4.9).
+En la época colonial no se gestiona: se ve como un paisaje vivo de estancias, villas y caminos
+que comercian con la capital.
 
 **Cómo se adquieren parcelas**
 - **Se desbloquean con el progreso**: hitos de población y de etapa (fundación → villa →
@@ -53,7 +57,7 @@ significa **pasar a gobernarla** (zonificarla, construir, cobrar impuestos), no 
 | Villa | 2–3 | Tierra firme junto a la península: el ejido y las primeras chacras |
 | Ciudad | 4–5 | Un arroyo (agua, saladero) y más chacras |
 | Plaza fuerte | 6–7 | Estancias cercanas, el cerro de la bahía, una punta para el lazareto |
-| Épocas 2–6 | hasta 25 | El resto del mapa, a medida que la ciudad crece |
+| Épocas 2–6 | hasta 64 | El resto del mapa, a medida que la ciudad crece |
 
 **Los anillos coloniales dentro de las parcelas**
 Siguiendo el ordenamiento real de las ciudades coloniales del Río de la Plata, el territorio

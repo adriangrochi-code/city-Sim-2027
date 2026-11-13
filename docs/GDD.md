@@ -1,6 +1,6 @@
 # City Sim 2027: documento de diseño (v0.5)
 
-> Estado: **borrador de visión (v0.9: mapas grandes por parcelas; trabajo actual en la época 1)**. Este
+> Estado: **borrador de visión (v0.10: ciudad del tamaño de Montevideo y país del tamaño de Uruguay; trabajo actual en la época 1)**. Este
 > documento define la intención, la estética y las mecánicas base *antes* de escribir código.
 > Todo está abierto a discusión; las preguntas pendientes están en la sección 9.
 
@@ -323,8 +323,9 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
   el aspecto de la ciudad.
 
 ### 4.8 Terreno y medio ambiente
-- **Expansión por parcelas**: el mapa se divide en 25 parcelas de 2 × 2 km. Se empieza con una
-  y las demás se desbloquean con el progreso y se compran (detalle en
+- **Expansión por parcelas**: el mapa de ciudad (unos 24 × 24 km, del tamaño de un
+  departamento como Montevideo) se divide en 64 parcelas de 3 × 3 km. Se empieza con una y las
+  demás se desbloquean con el progreso y se compran (detalle en
   [epocas/01-colonial.md](epocas/01-colonial.md), sección 2).
 - Mapas con **costa sobre el río**, penínsulas, bahías, arroyos, **cuchillas** (colinas suaves)
   y playas.
@@ -333,12 +334,39 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
 - La contaminación del aire, de los arroyos y de las playas se propaga de forma visible; una
   playa contaminada se cierra y baja el turismo.
 
-### 4.9 Región
-- Varias ciudades en un mapa regional: la ciudad portuaria, pueblos del interior, balnearios
-  en la costa. **Un jugador o cooperativo asíncrono opcional**, siempre jugable sin conexión.
-- Comercio entre ciudades (ganado del interior → frigoríficos de la capital → puerto), vecinos
-  que viajan entre ellas y **grandes proyectos regionales** (ferrocarril central, puerto de
-  aguas profundas, parque eólico).
+### 4.9 Dos escalas: la ciudad y el país (decidido)
+El objetivo a largo plazo es **gobernar un país del tamaño de Uruguay** (≈176.000 km²), ficticio
+pero rioplatense. Como no es viable simular todo ese territorio edificio a edificio, el juego
+funciona en **dos escalas conectadas**:
+
+| | **Escala ciudad** | **Escala país** |
+|---|---|---|
+| Tamaño | Unos **24 × 24 km** (≈575 km², como el departamento de Montevideo) | Unos **400 × 450 km**, el país completo a escala real |
+| Detalle | Edificio a edificio, agente a agente (todo lo descrito en este documento) | Simulación agregada: cada ciudad y pueblo es un nodo con población, producción y servicios |
+| Qué hace el jugador | Zonificar, trazar calles, servicios, puerto… | Fundar pueblos, trazar caminos, ferrocarriles y rutas nacionales, puertos, represas, parques eólicos, políticas nacionales |
+| Expansión | Por parcelas (64 de 3 × 3 km) | Por departamentos o regiones que se integran al país |
+
+**Cómo se conectan**
+- Desde el mapa del país se puede **entrar a cualquier ciudad** y jugarla en detalle. Las
+  ciudades secundarias tienen mapas más chicos (por ejemplo, 6 × 6 o 12 × 12 km).
+- Las ciudades que no estás jugando **siguen creciendo solas** con la simulación agregada (con
+  una gestión automática configurable), y puedes intervenir en cualquier momento.
+- Lo que ocurre en una escala se nota en la otra: un ferrocarril trazado en el mapa del país
+  llega como una estación y una vía a la ciudad; un frigorífico nuevo en la capital aumenta la
+  demanda de ganado de las estancias del interior.
+- El puerto de la capital sigue siendo la válvula con el mundo (4.10), pero en el país aparecen
+  otros puertos (fluviales y oceánicos) que compiten o se complementan.
+
+**Progresión de la escala país**
+| Época | Qué se gobierna |
+|---|---|
+| 1. Colonial | Solo la capital. El país existe como paisaje vivo (estancias, villas, caminos) pero no se gestiona |
+| 2. Ciudad Nueva | Se desbloquea el mapa del país: fundar pueblos y trazar caminos |
+| 3. Inmigración | Ferrocarril, puertos del interior; varias ciudades jugables |
+| 4–6 | Rutas nacionales, represas, energía eólica, balnearios de la costa; el país completo |
+
+**Multijugador** (opcional, a largo plazo): cooperativo asíncrono en el que cada jugador gobierna
+una ciudad del mismo país. Siempre jugable sin conexión.
 
 ### 4.10 Amenazas: la naturaleza y los flujos del puerto
 **No hay guerras, asedios ni combates en la ciudad.** Las dificultades vienen de dos fuentes, y
@@ -427,9 +455,9 @@ puede desviarse hacia una historia alternativa.
    cambios del mundo que llegan por el puerto, con **historias alternativas** distintas en cada
    partida y una crónica de la ciudad.
 3. **Calles curvas** con herramientas cómodas y parcelas que siguen la curva.
-4. **Mapas grandes (decidido)**, de unos 10 × 10 km, gracias a la simulación con niveles de
-   detalle. **Se adquieren por parcelas** (25 de 2 × 2 km) a medida que pasa el tiempo y crece
-   la ciudad; las parcelas no compradas se ven vivas, con campo que se desarrolla solo.
+4. **Escala enorme en dos niveles (decidido)**: ciudades de unos 24 × 24 km (del tamaño de
+   Montevideo) que se adquieren por parcelas a medida que pasa el tiempo, dentro de un mapa
+   del país del tamaño de Uruguay con simulación agregada.
 5. **Rutas inteligentes** y transporte multimodal real.
 6. **Legibilidad**: el panel "¿por qué?" está en todo, y se puede seguir a cualquier agente.
 7. **Clima, estaciones y ciclo día/noche** con efecto en la simulación.
@@ -481,7 +509,8 @@ Solo como referencia para el futuro. Todavía **no** se ha empezado.
 | El trazado libre con curvas es caro de programar (intersecciones, parcelas curvas, ajuste) | Es lo primero que se prototipa: calles por curvas de Bézier y arcos, parcelas generadas a lo largo de la curva |
 | Que los agentes se perciban "tontos" | Asignación casa/trabajo estable y rutas por tiempo, con congestión |
 | Ambientación demasiado local para el público internacional | La identidad se transmite por la estética y la vida de barrio, no por exigir conocer la historia; textos explicativos breves y opcionales |
-| Alcance excesivo (región, multijugador) | La región y el cooperativo quedan para después del primer juego completo de una sola ciudad |
+| Alcance excesivo (escala país, multijugador) | Primero una ciudad completa (época 1 en la escala ciudad); la escala país llega con la época 2 y el cooperativo, al final |
+| Un mapa de ciudad de ~575 km² exige mucho rendimiento (unas 3 veces el de los city builders actuales más grandes) | Carga por zonas, niveles de detalle agresivos, y que las parcelas lejanas sin comprar usen un campo simplificado |
 
 ---
 
