@@ -8,6 +8,7 @@ const Parcels = preload("res://scripts/world/parcels.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 
 signal lots_changed
+signal lot_level_changed(id: int, old_level: int, new_level: int)
 
 const W := 12.0          # frente del solar
 const D := 24.0          # fondo del solar
@@ -102,6 +103,11 @@ func lot_at(p: Vector2) -> int:
 		if Geometry2D.is_point_in_polygon(p, lot_corners(lots[id])):
 			return id
 	return -1
+
+
+## Punto de la calle frente al solar (donde salen y llegan los vecinos).
+func front_point(lot: Dictionary) -> Vector2:
+	return lot["c"] + lot["f"] * (D * 0.5 + 1.0)
 
 
 func land_value(lot: Dictionary) -> float:
@@ -237,7 +243,7 @@ func _valid(c: Vector2, f: Vector2) -> bool:
 func _add_lot(c: Vector2, f: Vector2) -> int:
 	var id := _next
 	_next += 1
-	lots[id] = {"c": c, "f": f, "zone": 0, "level": 0, "age": 0, "seed": randi() % VARIANTS, "node": null}
+	lots[id] = {"id": id, "c": c, "f": f, "zone": 0, "level": 0, "age": 0, "seed": randi() % VARIANTS, "node": null}
 	var k := _cell(c)
 	if not _hash.has(k):
 		_hash[k] = []
@@ -247,6 +253,8 @@ func _add_lot(c: Vector2, f: Vector2) -> int:
 
 func _remove_lot(id: int) -> void:
 	var lot: Dictionary = lots[id]
+	if lot["level"] > 0:
+		lot_level_changed.emit(id, lot["level"], 0)
 	if lot["node"] != null:
 		(lot["node"] as Node).queue_free()
 	(_hash[_cell(lot["c"])] as Array).erase(id)
@@ -340,7 +348,10 @@ func age_lots() -> void:
 
 
 func _set_level(lot: Dictionary, lvl: int) -> void:
+	var old: int = lot["level"]
 	lot["level"] = lvl
+	if old != lvl:
+		lot_level_changed.emit(lot["id"], old, lvl)
 	lot["age"] = 0
 	if lot["node"] != null:
 		(lot["node"] as Node).queue_free()

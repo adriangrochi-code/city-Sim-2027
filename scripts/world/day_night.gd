@@ -3,7 +3,9 @@ extends Node
 ## De noche la ciudad colonial queda casi a oscuras: solo brillan velas y faroles.
 
 var time := 0.32           # 0 = medianoche, 0.25 = 6:00, 0.5 = mediodía
-var day_length := 300.0    # segundos reales por día a velocidad 1
+var day_length := 480.0    # segundos reales por día a velocidad 1
+var day_index := 0
+const WEEKDAYS := ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 var speed := 1.0
 var sun: DirectionalLight3D
 var env: Environment
@@ -41,8 +43,23 @@ func setup(world: Node3D) -> void:
 
 
 func _process(delta: float) -> void:
-	time = fmod(time + delta * speed / day_length, 1.0)
+	advance(delta * speed / day_length)
 	apply()
+
+
+func advance(fraction: float) -> void:
+	time += fraction
+	while time >= 1.0:
+		time -= 1.0
+		day_index += 1
+
+
+func weekday() -> int:
+	return day_index % 7
+
+
+func hour() -> float:
+	return time * 24.0
 
 
 func is_night() -> bool:

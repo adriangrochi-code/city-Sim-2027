@@ -302,6 +302,9 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
   grúas; la usina, con generadores. Se crece por piezas en lugar de reconstruir.
 
 ### 4.6 Vecinos (simulación por agentes)
+> Detalle del comportamiento y la conducción realista en
+> [sistemas/agentes-y-conduccion.md](sistemas/agentes-y-conduccion.md).
+
 - Cada vecino tiene casa, trabajo o escuela, nivel educativo, riqueza, origen (criollo,
   inmigrante italiano o español…) y estado de ánimo.
 - Se puede **seguir a cualquier vecino**: ver su rutina, su trayecto y sus quejas.

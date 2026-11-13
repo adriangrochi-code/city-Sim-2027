@@ -137,6 +137,30 @@ func clearance(p: Vector2, maxd: float = 30.0) -> float:
 	return best
 
 
+## Posición y dirección a `s` metros desde el nodo `a` del tramo.
+func edge_point(eid: int, s: float) -> Array:
+	var e: Dictionary = edges[eid]
+	var pts: PackedVector2Array = e["pts"]
+	var cum: PackedFloat32Array = e["cum"]
+	s = clampf(s, 0.0, cum[cum.size() - 1])
+	var i := clampi(cum.bsearch(s) - 1, 0, pts.size() - 2)
+	var seg := maxf(cum[i + 1] - cum[i], 0.0001)
+	var tan := (pts[i + 1] - pts[i]) / seg
+	return [pts[i].lerp(pts[i + 1], clampf((s - cum[i]) / seg, 0.0, 1.0)), tan]
+
+
+## Distancia desde el nodo `a` hasta el punto más cercano del tramo.
+func edge_s_of(eid: int, seg: int, point: Vector2) -> float:
+	var e: Dictionary = edges[eid]
+	var pts: PackedVector2Array = e["pts"]
+	var cum: PackedFloat32Array = e["cum"]
+	return cum[seg] + pts[seg].distance_to(point)
+
+
+func degree(nid: int) -> int:
+	return (node_edges.get(nid, []) as Array).size()
+
+
 func total_length() -> float:
 	var l := 0.0
 	for eid in edges:
@@ -293,7 +317,10 @@ func _add_node(p: Vector2) -> int:
 func _add_edge(a: int, b: int, pts: PackedVector2Array, type: int) -> int:
 	var id := _next_edge
 	_next_edge += 1
-	edges[id] = {"a": a, "b": b, "pts": pts, "type": type}
+	var cum := PackedFloat32Array([0.0])
+	for i in pts.size() - 1:
+		cum.append(cum[i] + pts[i].distance_to(pts[i + 1]))
+	edges[id] = {"a": a, "b": b, "pts": pts, "type": type, "cum": cum, "len": cum[cum.size() - 1]}
 	(node_edges[a] as Array).append(id)
 	(node_edges[b] as Array).append(id)
 	return id

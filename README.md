@@ -16,6 +16,8 @@ Motor previsto: Godot 4.
 
 ![Plaza mayor e iglesia matriz](docs/capturas/prototipo1-close.jpg)
 
+![Carretas de bueyes en el camino de entrada](docs/capturas/prototipo1-carretas.jpg)
+
 Qué incluye:
 - Mapa de 24 × 24 km: península, bahía, cerro, arroyos con monte nativo, cuchillas y el río.
 - Parcelas de 3 × 3 km: se empieza con una y se desbloquean más con la población.
@@ -27,9 +29,13 @@ Qué incluye:
 - Pobladores que llegan en barcos, impuestos, etapas (fundación → villa → ciudad → plaza fuerte).
 - Panel "¿Por qué no crece?" con la herramienta Inspeccionar.
 - Ciclo día/noche: de noche solo brillan algunas ventanas con luz de vela.
+- **Vecinos y carretas con comportamiento realista** ([detalle](docs/sistemas/agentes-y-conduccion.md)):
+  rutinas diarias y semanales, rutas por tiempo medido que se aprenden, conducción con distancia
+  de seguridad (IDM), cesión de paso en los cruces, adelantamiento prudente y temperamentos.
+  Se puede inspeccionar a cualquier vecino y seguirlo con la cámara (F).
 
 Pendiente para los siguientes pasos: agua (aljibes y aguadores), incendios, puerto y flujos,
-agentes (vecinos y carretas) y serenos con faroles.
+muralla con portones y serenos con faroles.
 
 ### Cómo ejecutarlo
 1. Instala [Godot 4.3](https://godotengine.org/download) o superior.

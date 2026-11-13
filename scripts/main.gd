@@ -12,12 +12,13 @@ const RoadRenderer = preload("res://scripts/roads/road_renderer.gd")
 const Lots = preload("res://scripts/city/lots.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
+const Agents = preload("res://scripts/agents/agents.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
 enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS }
 const TOOL_DEFS := [
-	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un solar, una calle o el terreno para ver su información."},
+	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o el terreno para ver su información. F sigue al vecino elegido."},
 	{"key": "2", "name": "Plaza mayor", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
 	{"key": "3", "name": "Calle recta", "hint": "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar."},
 	{"key": "4", "name": "Calle curva", "hint": "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija."},
@@ -44,6 +45,7 @@ var net: RoadNetwork
 var roads: RoadRenderer
 var lots: Lots
 var trees: Trees
+var agents: Agents
 var rig: CameraRig
 var hud: Hud
 
@@ -72,6 +74,7 @@ var _im := ImmediateMesh.new()
 var _tris := PackedVector3Array()
 var _cols := PackedColorArray()
 var _dyn_hint := ""
+var _follow := false
 
 
 func _ready() -> void:
@@ -97,6 +100,9 @@ func _ready() -> void:
 	trees.setup(gen, _tree_blocked)
 	net.changed.connect(trees.mark_dirty)
 	lots.lots_changed.connect(trees.mark_dirty)
+	agents = Agents.new()
+	add_child(agents)
+	agents.setup(net, gen, lots, day)
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.gen = gen
@@ -139,6 +145,13 @@ func _process(delta: float) -> void:
 	_update_preview()
 	var mult: float = SPEEDS[speed]
 	day.speed = mult
+	agents.speed_mult = mult
+	if _follow:
+		var ap = agents.position_of(agents.selected_id)
+		if ap == null:
+			_follow = false
+		else:
+			rig.position = rig.position.lerp(ap, clampf(delta * 6.0, 0.0, 1.0))
 	if plaza_founded:
 		_month_acc += delta * mult
 		while _month_acc >= MONTH_SECONDS:
@@ -195,8 +208,10 @@ func _refresh_hud() -> void:
 		"pool": "Pobladores esperando: %d" % pool,
 		"stage": "Etapa: %s" % _stage_name,
 		"parcels": "Parcelas: %d/%d" % [parcels.owned.size(), parcels.max_owned],
-		"clock": ("Noche " if day.is_night() else "Día ") + day.clock_text(),
+		"clock": "%s %s · %d en las calles" % [DayNight.WEEKDAYS[day.weekday()].capitalize(), day.clock_text(), agents.active_count()],
 	})
+	if agents.selected_id != -1:
+		hud.show_info(agents.describe(agents.selected_id))
 	var base: String = TOOL_DEFS[tool]["hint"]
 	hud.set_hint(base + ("\n" + _dyn_hint if _dyn_hint != "" else ""))
 
@@ -249,6 +264,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_stage = 0
 			else:
 				_select_tool(Tool.INSPECT)
+		elif k == KEY_F and agents.selected_id != -1:
+			_follow = not _follow
 		elif k == KEY_TAB:
 			_select_road_type(1 - road_type)
 		elif k == KEY_SPACE:
@@ -266,7 +283,13 @@ func _on_click() -> void:
 		return
 	match tool:
 		Tool.INSPECT:
-			hud.show_info(_describe(_hover))
+			var aid := agents.pick(_hover, 7.0)
+			agents.selected_id = aid
+			_follow = false
+			if aid != -1:
+				hud.show_info(agents.describe(aid))
+			else:
+				hud.show_info(_describe(_hover))
 		Tool.PLAZA:
 			found_plaza(_hover, plaza_angle)
 		Tool.STRAIGHT:
@@ -548,7 +571,7 @@ func _describe(p: Vector2) -> String:
 	var e := net.nearest_edge(p, 8.0)
 	if e["edge"] != -1:
 		var ed: Dictionary = net.edges[e["edge"]]
-		return "%s\nLargo del tramo: %d m" % [RoadNetwork.NAMES[ed["type"]], int(RoadNetwork.polyline_length(ed["pts"]))]
+		return "%s\nLargo del tramo: %d m\n%s" % [RoadNetwork.NAMES[ed["type"]], int(RoadNetwork.polyline_length(ed["pts"])), agents.lane_info(e["edge"])]
 	var t := parcels.tile_of(p)
 	return "Terreno\nAltura: %.1f m\nParcela %d,%d: %s" % [gen.height(p.x, p.y), t.x, t.y, "tuya" if parcels.is_owned_tile(t) else "sin adquirir"]
 
@@ -655,6 +678,10 @@ func _update_preview() -> void:
 				terrain.set_hover_tile(t)
 				var err := parcels.buy_problem(t)
 				_dyn_hint = "Parcela %d,%d · Precio: %s pesos%s" % [t.x, t.y, Hud.fmt(parcels.price()), (" · " + err) if err != "" else ""]
+	if agents.selected_id != -1:
+		var ap = agents.position_of(agents.selected_id)
+		if ap != null:
+			_circle(Vector2(ap.x, ap.z), 3.5, Color(1.0, 0.85, 0.3, 0.9))
 	_im.clear_surfaces()
 	if _tris.is_empty():
 		return
@@ -742,6 +769,8 @@ func _handle_args() -> void:
 	if args.has("time"):
 		day.time = float(args["time"])
 		day.apply()
+	if args.has("simulate"):
+		simulate(float(args["simulate"]))
 	if args.has("tool"):
 		_select_tool(int(args["tool"]))
 	if args.has("speed"):
@@ -789,6 +818,27 @@ func build_demo() -> void:
 	lots.paint(c, 420.0, 1)
 	lots.paint(exit - f * 400.0, 200.0, 1)
 	_select_tool(Tool.INSPECT)
+
+
+## Avanza el día y los agentes `seconds` segundos reales (para pruebas y capturas).
+func simulate(seconds: float) -> void:
+	var dt := 0.1
+	var t0 := Time.get_ticks_usec()
+	var n := int(seconds / dt)
+	for i in n:
+		day.advance(dt / day.day_length)
+		agents.tick(dt)
+	print("Costo medio por paso de 0,1 s: %.2f ms" % ((Time.get_ticks_usec() - t0) / 1000.0 / maxf(n, 1)))
+	day.apply()
+	agents._render()
+	var stuck := 0
+	var replans := 0
+	for ag in agents.agents:
+		if float(ag["wait"]) > 120.0:
+			stuck += 1
+	for id in agents.residents:
+		replans += int(agents.residents[id]["replans"])
+	print("Agentes: %d en las calles · viajes completados %d · omitidos %d · atascados >2 min: %d · adelantamientos: %d · cambios de ruta aprendidos: %d" % [agents.active_count(), agents.trips_done, agents.trips_skipped, stuck, agents.overtakes, replans])
 
 
 func fast_forward(months: int) -> void:
