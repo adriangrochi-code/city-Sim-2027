@@ -21,26 +21,54 @@ traen (o dejan de traer) los barcos.
 
 ---
 
-## 2. El mapa: grande desde el primer día
+## 2. El mapa: grande, pero se conquista por parcelas
 
-**Decisión: mapas grandes.** La propuesta es un mapa jugable de unos **10 × 10 km**
-(≈100 km²), rodeado de un paisaje regional visible pero no edificable.
+**Decisión: mapa grande que se adquiere por parcelas a medida que pasa el tiempo** (el
+modelo clásico del género). El mapa total es de unos **10 × 10 km**, dividido en una
+cuadrícula de **25 parcelas de 2 × 2 km**. Se empieza con **una sola parcela** y las
+demás se van comprando.
 
-En la época colonial **la ciudad ocupa una parte mínima del mapa** (menos de 1 km²), pero el
-mapa entero ya se usa, siguiendo el ordenamiento real de las ciudades coloniales del Río de
-la Plata, organizado en anillos:
+**Cómo se adquieren parcelas**
+- **Se desbloquean con el progreso**: hitos de población y de etapa (fundación → villa →
+  ciudad → plaza fuerte) y, más adelante, con cada época.
+- **Se compran**: cada parcela tiene un precio que depende de lo que contiene (costa, arroyo,
+  monte, buen pastizal suben el valor).
+- **Deben ser contiguas** a una parcela que ya poseas.
+- **Ambientación**: en la época colonial no se "compra terreno", se obtiene una **merced de
+  tierras** de la Corona (ficticia) que amplía la jurisdicción de la ciudad. En épocas
+  posteriores, la ampliación pasa a ser una **anexión** aprobada por el gobierno o una
+  **compra** de terrenos, según el momento.
+
+**Lo que no es tuyo también está vivo**
+Las parcelas que todavía no posees **no están vacías ni grises**: allí el campo se desarrolla
+solo, con estancias y chacras privadas, caminos de carretas y ranchos dispersos, que comercian
+con tu ciudad. Así el mapa entero se ve vivo desde el principio, y comprar una parcela
+significa **pasar a gobernarla** (zonificarla, construir, cobrar impuestos), no descubrirla.
+
+**Ritmo de parcelas orientativo**
+
+| Momento | Parcelas | Qué se suele sumar |
+|---|---|---|
+| Fundación | 1 | La península con la bahía |
+| Villa | 2–3 | Tierra firme junto a la península: el ejido y las primeras chacras |
+| Ciudad | 4–5 | Un arroyo (agua, saladero) y más chacras |
+| Plaza fuerte | 6–7 | Estancias cercanas, el cerro de la bahía, una punta para el lazareto |
+| Épocas 2–6 | hasta 25 | El resto del mapa, a medida que la ciudad crece |
+
+**Los anillos coloniales dentro de las parcelas**
+Siguiendo el ordenamiento real de las ciudades coloniales del Río de la Plata, el territorio
+que gobierna el jugador se organiza en anillos:
 
 | Anillo | Qué es | Qué hace el jugador |
 |---|---|---|
 | **Intramuros** | La ciudad dentro de la muralla: damero alrededor de la plaza mayor | Zonifica, construye servicios y el puerto |
 | **Ejido** | Campo común justo fuera de la muralla, sin construcciones permanentes | Pastoreo y huertas comunales; reserva para el futuro ensanche |
 | **Chacras** | Parcelas agrícolas medianas | Trigo, maíz, huertas y frutales que alimentan a la ciudad |
-| **Estancias** | Grandes extensiones de ganado hasta el borde del mapa | Ganado para cueros, sebo y tasajo |
+| **Estancias** | Grandes extensiones de ganado | Ganado para cueros, sebo y tasajo |
 
-Así, la vista lejana ya es interesante en la primera hora de juego: un mosaico de chacras y
-estancias atravesado por caminos de carretas que convergen en las puertas de la ciudad.
-Y prepara las épocas siguientes: el ejido vacío será el ensanche de la Ciudad Nueva; las
-chacras, futuros barrios; los caminos reales, futuras avenidas.
+La ciudad y el ejido caben en la parcela inicial; las chacras y estancias propias llegan con
+las parcelas siguientes. Esto prepara las épocas futuras: el ejido será el ensanche de la
+Ciudad Nueva; las chacras, futuros barrios; los caminos reales, futuras avenidas.
 
 **Geografía del mapa inicial**
 - Una **península** rocosa con una bahía abrigada (el fondeadero natural).
@@ -300,9 +328,9 @@ noticias.
 | Etapa | Población orientativa | Hito que la desbloquea | Qué se desbloquea |
 |---|---|---|---|
 | **Fundación** | 0–200 | Trazar la plaza y los primeros solares | Ranchos, fuerte, pozo, muelle básico |
-| **Villa** | 200–1.000 | Primer cabildo | Pulperías, chacras, horno de ladrillos, recova |
-| **Ciudad** | 1.000–4.000 | Iniciar la iglesia matriz | Casas de azotea, saladero, aduana, convento, muralla |
-| **Plaza fuerte** | 4.000+ | Completar la muralla | Casas de altos con mirador, hospital, lazareto, ciudadela |
+| **Villa** | 200–1.000 | Primer cabildo | Pulperías, chacras, horno de ladrillos, recova; 2.ª y 3.ª parcela |
+| **Ciudad** | 1.000–4.000 | Iniciar la iglesia matriz | Casas de azotea, saladero, aduana, convento, muralla; hasta 5 parcelas |
+| **Plaza fuerte** | 4.000+ | Completar la muralla | Casas de altos con mirador, hospital, lazareto, ciudadela; hasta 7 parcelas |
 | **Transición** | — | Matriz terminada + "nuevo orden" | Decisión de la muralla → época 2 |
 
 Duración objetivo de la época: **entre 4 y 8 horas** de juego.
@@ -312,7 +340,8 @@ Duración objetivo de la época: **entre 4 y 8 horas** de juego.
 ## 14. Alcance del primer prototipo (cuando toque desarrollar)
 
 Un recorte mínimo para validar lo esencial de esta época:
-1. Mapa grande con península, bahía, arroyos y cuchillas (sin anillos rurales completos).
+1. Mapa grande con península, bahía, arroyos y cuchillas; parcela inicial más la compra de
+   2–3 parcelas contiguas (el campo no comprado se ve vivo, aunque sea simplificado).
 2. Calles curvas y damero, con parcelas que siguen la calle.
 3. Zona mixta con los tres niveles (rancho → casa de azotea → casa de altos).
 4. Agua por aljibes y aguadores; incendios en ranchos.
@@ -324,8 +353,8 @@ Un recorte mínimo para validar lo esencial de esta época:
 
 ## 15. Preguntas abiertas de la época
 
-1. **¿Fundación libre o sitio fijo?** ¿El jugador elige dónde fundar dentro de un mapa amplio, o
-   cada mapa trae el sitio de la plaza ya definido?
+1. **¿Parcela inicial libre o fija?** ¿El jugador elige la parcela inicial entre varias de la
+   costa, o cada mapa trae la península de inicio ya definida?
 2. **Población indígena y esclavitud**: formaron parte de la historia real de la región. ¿Cómo
    tratarlas con respeto: ausencia, mención histórica en la crónica, o representación cuidadosa?
    Es un tema sensible que conviene decidir pronto.

@@ -1,6 +1,6 @@
 # City Sim 2027: documento de diseño (v0.5)
 
-> Estado: **borrador de visión (v0.8: mapas grandes; trabajo actual en la época 1)**. Este
+> Estado: **borrador de visión (v0.9: mapas grandes por parcelas; trabajo actual en la época 1)**. Este
 > documento define la intención, la estética y las mecánicas base *antes* de escribir código.
 > Todo está abierto a discusión; las preguntas pendientes están en la sección 9.
 
@@ -323,6 +323,9 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
   el aspecto de la ciudad.
 
 ### 4.8 Terreno y medio ambiente
+- **Expansión por parcelas**: el mapa se divide en 25 parcelas de 2 × 2 km. Se empieza con una
+  y las demás se desbloquean con el progreso y se compran (detalle en
+  [epocas/01-colonial.md](epocas/01-colonial.md), sección 2).
 - Mapas con **costa sobre el río**, penínsulas, bahías, arroyos, **cuchillas** (colinas suaves)
   y playas.
 - Herramientas de modelado del terreno (con coste), incluido **ganar terreno al río** para la
@@ -425,7 +428,8 @@ puede desviarse hacia una historia alternativa.
    partida y una crónica de la ciudad.
 3. **Calles curvas** con herramientas cómodas y parcelas que siguen la curva.
 4. **Mapas grandes (decidido)**, de unos 10 × 10 km, gracias a la simulación con niveles de
-   detalle. Desde la época colonial se usa el mapa entero: ciudad, ejido, chacras y estancias.
+   detalle. **Se adquieren por parcelas** (25 de 2 × 2 km) a medida que pasa el tiempo y crece
+   la ciudad; las parcelas no compradas se ven vivas, con campo que se desarrolla solo.
 5. **Rutas inteligentes** y transporte multimodal real.
 6. **Legibilidad**: el panel "¿por qué?" está en todo, y se puede seguir a cualquier agente.
 7. **Clima, estaciones y ciclo día/noche** con efecto en la simulación.
