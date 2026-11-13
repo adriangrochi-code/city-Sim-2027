@@ -1,6 +1,6 @@
 # City Sim 2027: documento de diseño (v0.5)
 
-> Estado: **borrador de visión (v0.7: estética rioplatense, amenazas naturales, flujos del puerto e historia alternativa)**. Este
+> Estado: **borrador de visión (v0.8: mapas grandes; trabajo actual en la época 1)**. Este
 > documento define la intención, la estética y las mecánicas base *antes* de escribir código.
 > Todo está abierto a discusión; las preguntas pendientes están en la sección 9.
 
@@ -424,7 +424,8 @@ puede desviarse hacia una historia alternativa.
    cambios del mundo que llegan por el puerto, con **historias alternativas** distintas en cada
    partida y una crónica de la ciudad.
 3. **Calles curvas** con herramientas cómodas y parcelas que siguen la curva.
-4. **Mapas grandes** gracias a la simulación con niveles de detalle.
+4. **Mapas grandes (decidido)**, de unos 10 × 10 km, gracias a la simulación con niveles de
+   detalle. Desde la época colonial se usa el mapa entero: ciudad, ejido, chacras y estancias.
 5. **Rutas inteligentes** y transporte multimodal real.
 6. **Legibilidad**: el panel "¿por qué?" está en todo, y se puede seguir a cualquier agente.
 7. **Clima, estaciones y ciclo día/noche** con efecto en la simulación.
@@ -435,6 +436,9 @@ puede desviarse hacia una historia alternativa.
 ---
 
 ## 6. Alcance del primer hito jugable (cuando toque desarrollar)
+
+> **Trabajo actual: la época colonial.** El detalle completo está en
+> [epocas/01-colonial.md](epocas/01-colonial.md).
 
 Solo como referencia para el futuro. Todavía **no** se ha empezado.
 
@@ -480,15 +484,14 @@ Solo como referencia para el futuro. Todavía **no** se ha empezado.
 ## 9. Preguntas abiertas
 
 1. **Nombre definitivo:** pendiente. Conviene que hable del tiempo, del río o de la historia.
-2. **Escala de los mapas:** ¿cuántos km² por ciudad?
-3. **Detalle de las herramientas de calle:** ¿hacen falta curvas con dos puntos de control
+2. **Detalle de las herramientas de calle:** ¿hacen falta curvas con dos puntos de control
    (forma de "S") además de la curva simple, o basta con encadenar curvas?
-4. **Profundidad del vecino:** ¿nombres e historias individuales o anonimato con datos?
-5. **Monetización y plataforma:** ¿PC primero (Steam)? ¿Precio único y expansiones?
-6. **¿Multijugador regional?** ¿Imprescindible o un extra a largo plazo?
-7. **¿Cuántas épocas en el lanzamiento?** ¿Las seis o, por ejemplo, de la colonia a la
+3. **Profundidad del vecino:** ¿nombres e historias individuales o anonimato con datos?
+4. **Monetización y plataforma:** ¿PC primero (Steam)? ¿Precio único y expansiones?
+5. **¿Multijugador regional?** ¿Imprescindible o un extra a largo plazo?
+6. **¿Cuántas épocas en el lanzamiento?** ¿Las seis o, por ejemplo, de la colonia a la
    Belle Époque y el resto como expansión?
-8. **¿Tiempo continuo o capítulos?** ¿Una partida recorre los ~300 años, o cada época se
+7. **¿Tiempo continuo o capítulos?** ¿Una partida recorre los ~300 años, o cada época se
    juega como capítulo con un salto de tiempo y un resumen de "lo que pasó"?
-9. **¿Las ciudades de una región pueden estar en épocas distintas?** (Interesante para el
+8. **¿Las ciudades de una región pueden estar en épocas distintas?** (Interesante para el
    comercio, pero difícil de equilibrar.)

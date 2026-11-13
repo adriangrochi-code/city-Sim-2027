@@ -7,5 +7,6 @@ Estética rioplatense a lo largo de las épocas: empieza con una plaza fuerte co
 **Fase actual:** definición de la visión. Todavía no hay código.
 
 - [Documento de diseño (GDD)](docs/GDD.md): intención, pilares, estética, mecánicas base y preguntas abiertas.
+- [Época 1: Plaza fuerte colonial](docs/epocas/01-colonial.md): diseño detallado de la primera época (trabajo actual).
 
 Motor previsto: Godot 4.
