@@ -1,6 +1,6 @@
 # City Sim 2027: documento de diseño (v0.1)
 
-> Estado: **borrador de visión (v0.3: de la Baja Edad Media a la era contemporánea)**. Este documento define la intención, la estética y las
+> Estado: **borrador de visión (v0.4: eras medieval → contemporánea, calles curvas)**. Este documento define la intención, la estética y las
 > mecánicas base *antes* de escribir código. Todo lo que aparece aquí está abierto a discusión.
 > Las preguntas pendientes se reúnen en la sección 9.
 
@@ -208,8 +208,35 @@ cubos, a bomberos profesionales. Las decisiones antiguas pesan: las calles medie
 estrechas limitan el tráfico y la densidad que se podrá alcanzar después.
 
 ### 4.3 Carreteras y transporte
-- **Trazado libre** (imprescindible para que la ciudad medieval tenga calles orgánicas):
-  rectas, curvas, plazas e intersecciones que se generan automáticamente.
+- **Trazado libre con curvas amplias (decidido).** Las calles se dibujan como curvas suaves y
+  no como casillas de una cuadrícula. Las herramientas siguen el modelo clásico del género,
+  porque funciona y los jugadores ya lo conocen:
+
+  | Herramienta | Cómo se usa |
+  |---|---|
+  | **Recta** | Clic en el inicio y clic en el final |
+  | **Curva** | Clic en el inicio y en el final; luego se mueve el ratón para **doblarla** desde un punto de control y un tercer clic la fija |
+  | **Arco** | Tres puntos que definen un arco de circunferencia (ideal para seguir un río o una ladera) |
+  | **Círculo** | Centro y radio: rondas, plazas y glorietas |
+  | **Rectángulo / cuadrícula** | Arrastrar un área para crear una manzana o una retícula de calles (útil para los ensanches) |
+  | **Mejorar vía** | Pasar sobre una calle existente para ensancharla o cambiarla de tipo sin perder lo que hay alrededor |
+
+  Reglas de las curvas:
+  - **Radio mínimo según el tipo de vía**: un callejón medieval admite curvas cerradas; una
+    avenida o una línea de tren exigen curvas amplias. Si la curva es demasiado cerrada, la
+    vista previa se pone en rojo y muestra el radio mínimo.
+  - **Ajuste y guías**: al dibujar aparecen guías para ir en paralelo, en perpendicular o a la
+    distancia ideal de otra calle (la que deja manzanas de fondo justo para las parcelas). Las
+    guías se pueden desactivar.
+  - **Intersecciones automáticas**: al cruzar o tocar otra calle se crea el cruce. Dos calles
+    no pueden cruzarse en un ángulo demasiado agudo.
+  - **Vista previa con coste**: antes de confirmar se ve el trazado, el coste, la densidad que
+    permitirá y los edificios que habría que derribar.
+  - **Zonas pegadas a la calle**: las zonas se pintan con brocha a lo largo de la vía, a ambos
+    lados, y las parcelas se generan siguiendo la curva, con la fachada hacia la calle y el
+    fondo que permite el espacio disponible.
+  - **Puentes y túneles** se crean automáticamente al cruzar agua o terreno elevado (según la era:
+    puente de piedra → hierro → hormigón).
 - El catálogo depende de la era: sendero y camino de tierra → calle empedrada → avenida
   barroca → calle adoquinada con vía de tranvía → calle asfaltada y autopista → calle
   compartida y peatonal.
@@ -304,7 +331,7 @@ Sirven para poner a prueba la red de servicios, no para castigar sin aviso.
 Solo como referencia para el futuro. Todavía **no** se ha empezado.
 
 - **Solo la Baja Edad Media**: una era bien hecha vale más que seis a medias.
-- Terreno con río, calles de trazado libre (sendero, calle empedrada) y una muralla
+- Terreno con río, calles curvas con las herramientas de 4.3 (sendero, calle empedrada) y una muralla
   ampliable.
 - Zona mixta (vivienda + taller) que crece por demanda, mercado y catedral como gran proyecto.
 - Agua por pozos y fuentes; incendios que se propagan entre casas de madera.
@@ -334,7 +361,7 @@ Solo como referencia para el futuro. Todavía **no** se ha empezado.
 | Coste de arte 3D realista con pocas personas | Edificios modulares + generación procedimental de fachadas |
 | Las eras multiplican el arte necesario (×6) | Lanzar con 3–4 eras y añadir el resto después; compartir volúmenes entre eras y cambiar solo fachadas, cubiertas y detalles |
 | Las primeras eras son lentas (poca tecnología, poco que hacer) | Ritmo más rápido en las eras tempranas, con eventos (ferias, asedios, epidemias) y la muralla como reto de planificación |
-| El trazado libre y orgánico es caro de programar | Investigarlo pronto: es imprescindible para la ciudad medieval |
+| El trazado libre con curvas es caro de programar (intersecciones, parcelas curvas, ajuste) | Es lo primero que se prototipa: calles por curvas de Bézier/arcos, parcelas generadas a lo largo de la curva |
 | Equilibrio entre eras (que una sea mucho más fácil o aburrida) | Cada era con un problema central propio (tabla 4.2) y pruebas de juego tempranas |
 | Rendimiento de miles de agentes | Simulación por niveles de detalle; mover el núcleo a C#/C++ pronto |
 | Que los agentes se perciban "tontos" | Asignación casa/trabajo estable y rutas por tiempo, con congestión |
@@ -347,8 +374,8 @@ Solo como referencia para el futuro. Todavía **no** se ha empezado.
 1. **Nombre definitivo:** pendiente. "City Sim 2027" queda como nombre provisional; conviene que
    el definitivo hable del tiempo o de la historia.
 2. **Escala de los mapas:** ¿cuántos km² por ciudad?
-3. **Parcelas con trazado libre:** la ciudad medieval lo hace casi obligatorio. ¿Aceptamos
-   el coste extra o simplificamos (cuadrícula con calles curvas superpuestas)?
+3. **Detalle de las herramientas de calle:** ¿hacen falta curvas con dos puntos de control
+   (forma de "S") además de la curva simple, o basta con encadenar curvas?
 4. **¿Qué tradición arquitectónica?** ¿Europa occidental genérica, mediterránea (ibérica e
    italiana), centroeuropea…? ¿O el jugador elige una "cultura" al empezar?
 5. **Profundidad del ciudadano:** ¿nombres e historias individuales o anonimato con datos?
