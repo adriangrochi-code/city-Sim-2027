@@ -1,6 +1,6 @@
 # City Sim 2027: documento de diseño (v0.5)
 
-> Estado: **borrador de visión (v0.6: estética rioplatense, amenazas naturales y flujos del puerto)**. Este
+> Estado: **borrador de visión (v0.7: estética rioplatense, amenazas naturales, flujos del puerto e historia alternativa)**. Este
 > documento define la intención, la estética y las mecánicas base *antes* de escribir código.
 > Todo está abierto a discusión; las preguntas pendientes están en la sección 9.
 
@@ -375,7 +375,39 @@ diversificada aguanta mejor las crisis; una que depende solo de la carne vive au
 
 Todas las amenazas son configurables (desactivables o más suaves en el modo sandbox).
 
-### 4.11 Modos de juego
+### 4.11 Historia alternativa: guiños a la historia real, sin guion fijo (decidido)
+Los acontecimientos lejanos **recuerdan a la historia real, pero nunca la copian**. El jugador
+reconoce el "eco" (una gran guerra lejana, la gran inmigración, una crisis mundial, la fiebre
+de la lana), pero los nombres, fechas, duración e intensidad son ficticios, y cada partida
+puede desviarse hacia una historia alternativa.
+
+**Cómo funciona**
+- **Mazo de acontecimientos por época.** Cada época tiene un conjunto de acontecimientos
+  "arquetípicos" inspirados en lo que ocurrió en esos años. Ninguno es obligatorio y el orden
+  cambia; los más importantes de la historia real tienen más probabilidad de salir, no la
+  certeza.
+- **Nombres y lugares ficticios.** No hay "Primera Guerra Mundial" ni "1929": hay "la Gran
+  Guerra del Norte" o "el Crac de los mercados de ultramar", con naciones y puertos inventados.
+  Así el juego no toma posición sobre hechos reales y puede inventar libremente.
+- **La ciudad condiciona la historia.** Lo que hace el jugador cambia qué ocurre después. Una
+  ciudad que se volcó al comercio de carne vive el auge exportador con más fuerza y la crisis
+  con más dureza; una que acogió bien a los inmigrantes recibe más barcos en la siguiente ola;
+  una que construyó un puerto de aguas profundas antes que sus vecinas se convierte en el
+  puerto principal de la región.
+- **Ramas alternativas.** Algunos acontecimientos abren caminos distintos en las épocas
+  siguientes. Ejemplos: si el puerto se vuelve el más importante del río, la ciudad crece como
+  capital comercial; si pierde esa carrera, se especializa en turismo y balnearios. Si se
+  apuesta por el ferrocarril, el interior crece; si no, la ciudad concentra a toda la
+  población.
+- **La crónica de la ciudad.** El diario local (gaceta colonial → periódico → noticiero →
+  portal web, según la época) narra los acontecimientos y las decisiones del jugador. Al final
+  de la partida queda una **crónica escrita de la historia alternativa** de esa ciudad, que
+  se puede releer y compartir.
+- **Opción "fiel a la historia".** Para quien lo prefiera, un modo que sigue el orden y la
+  intensidad aproximados de la historia rioplatense, siempre con nombres ficticios.
+
+
+### 4.12 Modos de juego
 - **Carrera** a lo largo de las épocas, con objetivos y desbloqueos progresivos (tutorial
   integrado en la época colonial).
 - **Sandbox** con todo desbloqueado y dinero ilimitado opcional.
@@ -389,7 +421,8 @@ Todas las amenazas son configurables (desactivables o más suaves en el modo san
 1. **Progresión por épocas** de la colonia a la actualidad, con una ciudad que conserva su
    historia.
 2. **Ambientación rioplatense**, rara en el género, y amenazas sin combate: naturaleza y
-   cambios del mundo que llegan por el puerto.
+   cambios del mundo que llegan por el puerto, con **historias alternativas** distintas en cada
+   partida y una crónica de la ciudad.
 3. **Calles curvas** con herramientas cómodas y parcelas que siguen la curva.
 4. **Mapas grandes** gracias a la simulación con niveles de detalle.
 5. **Rutas inteligentes** y transporte multimodal real.
@@ -459,6 +492,3 @@ Solo como referencia para el futuro. Todavía **no** se ha empezado.
    juega como capítulo con un salto de tiempo y un resumen de "lo que pasó"?
 9. **¿Las ciudades de una región pueden estar en épocas distintas?** (Interesante para el
    comercio, pero difícil de equilibrar.)
-10. **¿Los acontecimientos lejanos son históricos o inventados?** ¿Siguen una línea
-    histórica aproximada (los auges exportadores, la gran inmigración, la crisis de 1929) o se
-    generan al azar en cada partida?
