@@ -2,7 +2,7 @@
 
 Constructor de ciudades 3D basado en agentes: un sucesor espiritual de los city builders de principios de los 2010, con mecánicas más modernas y una estética de "realismo estilizado".
 
-Estética uruguaya a lo largo de las épocas: empieza con una plaza fuerte colonial amurallada junto al río y evoluciona hasta la ciudad contemporánea, conservando en sus capas toda su historia.
+Estética rioplatense a lo largo de las épocas: empieza con una plaza fuerte colonial amurallada junto al río y evoluciona hasta la ciudad contemporánea, conservando en sus capas toda su historia. Sin combates: solo amenazas naturales y los cambios del mundo que llegan por el puerto.
 
 **Fase actual:** definición de la visión. Todavía no hay código.
 

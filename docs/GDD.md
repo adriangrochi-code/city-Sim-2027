@@ -1,6 +1,6 @@
 # City Sim 2027: documento de diseño (v0.5)
 
-> Estado: **borrador de visión (v0.5: estética uruguaya a lo largo de las épocas)**. Este
+> Estado: **borrador de visión (v0.6: estética rioplatense, amenazas naturales y flujos del puerto)**. Este
 > documento define la intención, la estética y las mecánicas base *antes* de escribir código.
 > Todo está abierto a discusión; las preguntas pendientes están en la sección 9.
 
@@ -30,10 +30,15 @@ Recuperamos lo que hizo especial a ese estilo de juego y corregimos lo que lo fr
 ### El giro: una ciudad rioplatense que atraviesa la historia
 La partida empieza en el **siglo XVIII con una plaza fuerte colonial amurallada** en una
 península junto a un gran río, y evoluciona por épocas hasta la **ciudad contemporánea**.
-La identidad visual es **uruguaya en todas las épocas**: la luz del Río de la Plata, las
+La identidad visual es **rioplatense en todas las épocas**: la luz del Río de la Plata, las
 azoteas, los adoquines, los plátanos en las veredas, la rambla frente al agua. Lo construido
-antes sigue ahí: **la ciudad final muestra en sus capas toda su historia**, como Montevideo o
-Colonia del Sacramento (ver sección 4.2).
+antes sigue ahí: **la ciudad final muestra en sus capas toda su historia**, como Montevideo,
+Colonia del Sacramento o Buenos Aires (ver sección 4.2).
+
+**Sin guerras ni combates.** Las únicas amenazas son **naturales** (temporales, sudestadas,
+crecidas, sequías) y **los cambios del mundo exterior que llegan por el puerto**: guerras
+lejanas, crisis y olas migratorias que alteran lo que entra y sale, y a los que la ciudad
+tiene que adaptarse (sección 4.10).
 
 Que el escenario sea rioplatense es también un diferencial: casi todos los constructores de
 ciudades se ambientan en Norteamérica o Europa.
@@ -47,9 +52,9 @@ ciudades se ambientan en Norteamérica o Europa.
 ### Propiedad intelectual y lugares reales
 El proyecto es **original**: nombre, edificios, interfaz, música y marca propios. Tomamos el
 *género* y el *tipo de mecánicas* como inspiración, no recursos, nombres ni el aspecto
-reconocible de ningún juego existente. La ciudad es **ficticia pero inspirada en Uruguay**:
-los edificios se diseñan "a la manera de" la arquitectura uruguaya, sin copiar edificios
-reales concretos. "City Sim 2027" es un nombre provisional.
+reconocible de ningún juego existente. La ciudad es **ficticia pero inspirada en el Río de la
+Plata** (Uruguay como referencia principal, con guiños de toda la región): los edificios se
+diseñan "a la manera de" la arquitectura rioplatense, sin copiar edificios reales concretos. "City Sim 2027" es un nombre provisional.
 
 ---
 
@@ -80,11 +85,11 @@ Base **3D realista** (proporciones, materiales y luz creíbles) con un toque cui
 Más cálida y limpia que el realismo fotográfico; más sofisticada que el low-poly.
 
 Referencias de *sensación* (no de copia): fotografía tilt-shift de ciudades reales,
-maquetas de arquitectura, fotografía antigua de Montevideo y Colonia, y los atardeceres sobre
+maquetas de arquitectura, fotografía antigua de Montevideo, Colonia y Buenos Aires, y los atardeceres sobre
 el Río de la Plata.
 
-### 3.2 La identidad uruguaya (constante en todas las épocas)
-Lo que hace que la ciudad se reconozca como uruguaya, sea 1750 o 2020:
+### 3.2 La identidad rioplatense (constante en todas las épocas)
+Lo que hace que la ciudad se reconozca como rioplatense, sea 1750 o 2020:
 
 - **El río como horizonte.** Un estuario enorme, de agua color *león* (marrón dorado), que
   parece mar. La costa y la futura **rambla** son el gran paisaje del juego.
@@ -188,6 +193,8 @@ Las épocas sustituyen al típico sistema de "desbloqueo por población".
 **Qué cambia con cada época**
 - **Nuevos edificios, servicios y transporte**, y otros se vuelven obsoletos (la muralla deja
   de tener sentido tras la independencia; el tranvía, con el ómnibus).
+- **El mundo exterior**, que se percibe por el puerto, cambia con cada época: qué se exporta,
+  qué se importa, quién llega en los barcos (ver 4.10).
 - **Las expectativas de los vecinos**: en 1750 basta con un aljibe y una pulpería cerca; en
   1900 se exige agua corriente; en 1960, ómnibus, liceo y electricidad.
 - **Cómo se organiza la ciudad**: en la época colonial, vivienda, tienda y taller comparten
@@ -198,7 +205,7 @@ Las épocas sustituyen al típico sistema de "desbloqueo por población".
 
 | Época | Problema central | Ejemplo de mecánica |
 |---|---|---|
-| Colonial | Defensa, agua, abastecimiento, contrabando | La ciudad crece apretada dentro de la muralla; el agua depende de aljibes y aguadores; el puerto da riqueza pero atrae contrabando |
+| Colonial | Agua, abastecimiento, límites de la muralla, contrabando | La ciudad crece apretada dentro de la muralla; el agua depende de aljibes y aguadores; el puerto da riqueza pero atrae contrabando |
 | Ciudad Nueva | Crecer fuera de la muralla | Trazar el ensanche; conectar las quintas de las afueras; alumbrado a gas |
 | Inmigración | Vivienda obrera e higiene | Llegan barcos de inmigrantes; si no hay vivienda, aparecen conventillos; epidemias por agua contaminada; hay que construir saneamiento |
 | Art Déco y Rambla | Costa y movilidad | Construir la rambla gana costa y turismo pero cuesta muchísimo; el ómnibus reemplaza al tranvía |
@@ -214,8 +221,9 @@ elige:
 - **Reurbanizar** → derribar y construir según la época actual: más densidad, pero se pierde
   patrimonio y puede haber protestas vecinales.
 
-**El momento estrella: la muralla.** Durante la época colonial la muralla protege la ciudad y
-limita su crecimiento. Para pasar a la segunda época, el jugador decide **cómo derribarla**:
+**El momento estrella: la muralla.** Durante la época colonial la muralla es el límite de la
+ciudad y el control de lo que entra (aduana, impuestos al comercio), y frena su crecimiento.
+No hay asedios: su papel es urbano y económico. Para pasar a la segunda época, el jugador decide **cómo derribarla**:
 dónde abrir la nueva plaza de acceso, qué tramo conservar como monumento (por ejemplo, una
 puerta de la ciudadela) y cómo trazar el ensanche. Esa decisión marca la forma de la ciudad
 para siempre.
@@ -329,9 +337,43 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
   que viajan entre ellas y **grandes proyectos regionales** (ferrocarril central, puerto de
   aguas profundas, parque eólico).
 
-### 4.10 Eventos y desastres
-Temporales y crecidas, incendios, epidemias, crisis económicas y apagones. Son opcionales y
-configurables. Sirven para poner a prueba la ciudad, no para castigar sin aviso.
+### 4.10 Amenazas: la naturaleza y los flujos del puerto
+**No hay guerras, asedios ni combates en la ciudad.** Las dificultades vienen de dos fuentes, y
+el juego siempre avisa con antelación (el telégrafo, el diario, el parte meteorológico según la
+época) para que el jugador pueda prepararse.
+
+**1. Amenazas naturales**
+| Amenaza | Efecto | Cómo se adapta la ciudad |
+|---|---|---|
+| **Sudestada** | Sube el nivel del río, inunda la costa baja y el puerto | Escolleras, rambla elevada, no construir en zonas bajas |
+| **Temporal de pampero** | Viento fuerte: daños en techos y muelles, barcos que no pueden entrar | Puerto abrigado, refugios, mantenimiento |
+| **Crecida de arroyos** | Inundación de barrios junto al cauce | Canalizar, parques inundables, reubicar viviendas |
+| **Sequía** | El campo produce menos; falta agua en la ciudad | Reservas de agua, diversificar la economía |
+| **Ola de calor** | Más consumo de agua y energía, playas llenas | Arbolado, parques, capacidad de red |
+| **Niebla cerrada** | El puerto se paraliza unos días | Faros, señalización y después radar |
+
+Los incendios y las epidemias **no son eventos al azar**: son consecuencia de cómo está
+construida la ciudad (casas de madera, agua contaminada, falta de saneamiento) y se previenen
+con servicios.
+
+**2. Flujos del puerto: el mundo exterior**
+El puerto es la **válvula** entre la ciudad y el mundo. Un panel del puerto muestra lo que entra
+(mercancías, combustible, inmigrantes, capital) y lo que sale (cueros, carne, lana, granos).
+Los acontecimientos lejanos, que nunca se ven pero se sienten, cambian esos flujos:
+
+| Acontecimiento lejano | Qué cambia en el puerto | Cómo se adapta la ciudad |
+|---|---|---|
+| **Guerra en otro continente** | Sube la demanda de carne y cueros (auge exportador), pero escasean las importaciones | Ampliar frigoríficos y muelles; sustituir importaciones con industria local |
+| **Crisis en Europa** | Llega una **ola de inmigrantes** | Vivienda rápida; si no hay, aparecen conventillos |
+| **Bloqueo o cierre de rutas comerciales** | Cae el comercio y faltan combustible y maquinaria | Reservas, fuentes de energía locales, mercado interno |
+| **Crisis económica mundial** | Cae el precio de lo que se exporta | Diversificar: turismo, servicios, industria |
+| **Barcos más grandes** | Los buques ya no entran en el puerto viejo | Dragar, construir un puerto de aguas profundas, reconvertir los muelles viejos |
+| **Epidemia en otro puerto** | Barcos en cuarentena | Lazareto, control sanitario, retrasos en el comercio |
+
+La idea es que **el jugador no pelea contra el mundo, sino que se adapta a él**: una ciudad
+diversificada aguanta mejor las crisis; una que depende solo de la carne vive auges y caídas.
+
+Todas las amenazas son configurables (desactivables o más suaves en el modo sandbox).
 
 ### 4.11 Modos de juego
 - **Carrera** a lo largo de las épocas, con objetivos y desbloqueos progresivos (tutorial
@@ -346,7 +388,8 @@ configurables. Sirven para poner a prueba la ciudad, no para castigar sin aviso.
 
 1. **Progresión por épocas** de la colonia a la actualidad, con una ciudad que conserva su
    historia.
-2. **Ambientación rioplatense**, rara en el género.
+2. **Ambientación rioplatense**, rara en el género, y amenazas sin combate: naturaleza y
+   cambios del mundo que llegan por el puerto.
 3. **Calles curvas** con herramientas cómodas y parcelas que siguen la curva.
 4. **Mapas grandes** gracias a la simulación con niveles de detalle.
 5. **Rutas inteligentes** y transporte multimodal real.
@@ -407,16 +450,15 @@ Solo como referencia para el futuro. Todavía **no** se ha empezado.
 2. **Escala de los mapas:** ¿cuántos km² por ciudad?
 3. **Detalle de las herramientas de calle:** ¿hacen falta curvas con dos puntos de control
    (forma de "S") además de la curva simple, o basta con encadenar curvas?
-4. **¿Solo Uruguay o rioplatense en general?** ¿Mezclamos guiños de Buenos Aires o de otras
-   ciudades del Río de la Plata, o nos quedamos estrictamente en lo uruguayo?
-5. **Profundidad del vecino:** ¿nombres e historias individuales o anonimato con datos?
-6. **Monetización y plataforma:** ¿PC primero (Steam)? ¿Precio único y expansiones?
-7. **¿Multijugador regional?** ¿Imprescindible o un extra a largo plazo?
-8. **¿Cuántas épocas en el lanzamiento?** ¿Las seis o, por ejemplo, de la colonia a la
+4. **Profundidad del vecino:** ¿nombres e historias individuales o anonimato con datos?
+5. **Monetización y plataforma:** ¿PC primero (Steam)? ¿Precio único y expansiones?
+6. **¿Multijugador regional?** ¿Imprescindible o un extra a largo plazo?
+7. **¿Cuántas épocas en el lanzamiento?** ¿Las seis o, por ejemplo, de la colonia a la
    Belle Époque y el resto como expansión?
-9. **¿Tiempo continuo o capítulos?** ¿Una partida recorre los ~300 años, o cada época se
+8. **¿Tiempo continuo o capítulos?** ¿Una partida recorre los ~300 años, o cada época se
    juega como capítulo con un salto de tiempo y un resumen de "lo que pasó"?
-10. **¿Las ciudades de una región pueden estar en épocas distintas?** (Interesante para el
-    comercio, pero difícil de equilibrar.)
-11. **Conflictos históricos** (sitios, guerras civiles): ¿mecánica real o solo ambientación?
-    Propuesta: amenazas abstractas sin combate, para mantener el foco en la ciudad.
+9. **¿Las ciudades de una región pueden estar en épocas distintas?** (Interesante para el
+   comercio, pero difícil de equilibrar.)
+10. **¿Los acontecimientos lejanos son históricos o inventados?** ¿Siguen una línea
+    histórica aproximada (los auges exportadores, la gran inmigración, la crisis de 1929) o se
+    generan al azar en cada partida?
