@@ -341,7 +341,9 @@ Duración objetivo de la época: **entre 4 y 8 horas** de juego.
 
 ---
 
-## 14. Alcance del primer prototipo (cuando toque desarrollar)
+## 14. Alcance del primer prototipo
+
+> **Estado:** en desarrollo. Hechos los puntos 1, 2, 3 y 7 (sin serenos todavía). Pendientes: 4, 5 y 6.
 
 Un recorte mínimo para validar lo esencial de esta época:
 1. Mapa grande con península, bahía, arroyos y cuchillas; parcela inicial más la compra de
