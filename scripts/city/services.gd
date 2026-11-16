@@ -9,7 +9,7 @@ const RoadNetwork = preload("res://scripts/roads/road_network.gd")
 const Lots = preload("res://scripts/city/lots.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 
-enum Type { WELL, CISTERN, WATER_CARRIERS, WATCH, ESTANCIA, SALADERO }
+enum Type { WELL, CISTERN, WATER_CARRIERS, WATCH, ESTANCIA, SALADERO, LAZARETO, HORNO, ATAHONA }
 const INFO := {
 	Type.WELL: {"name": "Pozo de balde", "cost": 400, "upkeep": 4, "cap": 60, "quality": 0.7, "radius": 110.0, "size": Vector2(5, 5),
 		"desc": "Agua de pozo para unas 60 personas cercanas. Calidad regular."},
@@ -23,8 +23,16 @@ const INFO := {
 		"desc": "Cría ganado en el campo, lejos de la ciudad. Sus carretas llevan el ganado al saladero (o al mercado si no hay)."},
 	Type.SALADERO: {"name": "Saladero", "cost": 5000, "upkeep": 20, "cap": 0, "quality": 0.0, "radius": 350.0, "size": Vector2(36, 44),
 		"desc": "Carnea el ganado y sala los cueros y el tasajo para embarcar. Necesita agua cerca. Huele mal: baja el valor del suelo y contamina los pozos cercanos."},
+	Type.LAZARETO: {"name": "Lazareto", "cost": 3000, "upkeep": 25, "cap": 0, "quality": 0.0, "radius": 0.0, "size": Vector2(30, 24),
+		"desc": "Cuarentena para los barcos con fiebre a bordo: la enfermedad no entra a la ciudad. Lejos de la plaza y junto a la costa."},
+	Type.HORNO: {"name": "Horno de ladrillos", "cost": 2000, "upkeep": 10, "cap": 0, "quality": 0.0, "radius": 0.0, "size": Vector2(24, 24),
+		"desc": "Cuece ladrillos con barro del arroyo o la costa (a menos de 300 m). Las casas de azotea, las de altos y la iglesia los necesitan. Echa humo: lejos de la plaza."},
+	Type.ATAHONA: {"name": "Atahona", "cost": 1500, "upkeep": 10, "cap": 0, "quality": 0.0, "radius": 0.0, "size": Vector2(16, 16),
+		"desc": "Molino movido por mulas: muele el trigo de las chacras y da pan para unas 1.500 personas. Sin pan, los pobladores no se quedan."},
 }
 const CONTAMINATION := 300.0
+const BRICKS_PER_KILN := 40
+const BREAD_PER_MILL := 1500
 
 ## Ampliaciones: los edificios crecen por piezas en lugar de demolerse y reconstruirse.
 ## Cada módulo suma capacidad, alcance o viajes, y se ve en el modelo.
@@ -48,6 +56,12 @@ const MODULES := {
 	Type.ESTANCIA: [
 		{"id": "corral2", "name": "Segundo corral", "cost": 1200, "trips": 2},
 		{"id": "puesto", "name": "Puesto de peones con mangrullo", "cost": 900, "trips": 2},
+	],
+	Type.HORNO: [
+		{"id": "horno2", "name": "Segundo horno", "cost": 1500, "bricks": 40},
+	],
+	Type.ATAHONA: [
+		{"id": "piedra2", "name": "Segunda piedra de moler", "cost": 1200, "bread": 1500},
 	],
 	Type.SALADERO: [
 		{"id": "galpon", "name": "Galpón de salazón nuevo", "cost": 2000, "trips": 2},
@@ -112,6 +126,16 @@ func problem(type: int, c: Vector2, angle: float) -> String:
 		return "Debe estar junto a una calle o camino"
 	if type == Type.ESTANCIA and lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 600.0:
 		return "Las estancias están en el campo, a más de 600 m de la plaza"
+	if type == Type.LAZARETO:
+		if lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 400.0:
+			return "El lazareto va lejos de la ciudad (a más de 400 m de la plaza)"
+		if not _near_coast(c, 150.0):
+			return "El lazareto va junto a la costa (a menos de 150 m)"
+	if type == Type.HORNO:
+		if lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 250.0:
+			return "El horno echa humo: a más de 250 m de la plaza"
+		if gen.arroyo_distance(c.x, c.y) > 300.0 and not _near_coast(c, 300.0):
+			return "El horno necesita barro: un arroyo o la costa a menos de 300 m"
 	if type == Type.SALADERO:
 		if lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 350.0:
 			return "Demasiado cerca de la plaza: el saladero huele mal"
@@ -381,6 +405,22 @@ func _update_nuisances() -> void:
 			lots.nuisances.append(items[id]["c"])
 
 
+## Ladrillos que cuecen por mes todos los hornos.
+func bricks_per_month() -> int:
+	var total := 0
+	for id in of_type(Type.HORNO):
+		total += BRICKS_PER_KILN + int(module_sum(id, "bricks"))
+	return total
+
+
+## Personas a las que alcanza el pan (las chacras privadas ya dan para algunas).
+func bread_capacity() -> int:
+	var total := 600
+	for id in of_type(Type.ATAHONA):
+		total += BREAD_PER_MILL + int(module_sum(id, "bread"))
+	return total
+
+
 ## ¿Hay faroles encendidos de noche en este punto?
 func lit_at(p: Vector2) -> bool:
 	for id in items:
@@ -442,6 +482,13 @@ func describe(id: int) -> String:
 	var info: Dictionary = INFO[it["type"]]
 	if it["type"] == Type.WATCH:
 		return "%s\n%s\nFaroles a su cargo: %d · serenos: %d%s" % [info["name"], info["desc"], lamps.size(), 2 + int(module_sum(id, "serenos")), _modules_text(id)]
+	if it["type"] == Type.LAZARETO or it["type"] == Type.HORNO or it["type"] == Type.ATAHONA:
+		var extra := ""
+		if it["type"] == Type.HORNO:
+			extra = "\nLadrillos por mes: %d" % (BRICKS_PER_KILN + int(module_sum(id, "bricks")))
+		elif it["type"] == Type.ATAHONA:
+			extra = "\nPan para %d personas" % (BREAD_PER_MILL + int(module_sum(id, "bread")))
+		return "%s\n%s%s%s" % [info["name"], info["desc"], extra, _modules_text(id)]
 	if it["type"] == Type.ESTANCIA:
 		return "%s\n%s\nCarretas de ganado por día: %d%s" % [info["name"], info["desc"], 3 + int(module_sum(id, "trips")), _modules_text(id)]
 	if it["type"] == Type.SALADERO:
@@ -522,6 +569,34 @@ func _mesh(type: int, modules: Array) -> ArrayMesh:
 					BuildingGen.box(st, Vector3(x, 0, z), Vector3(0.2, 2.2, 0.2), wood)
 					BuildingGen.box(st, Vector3(x + 3.0, 0.4, z), Vector3(5.2, 1.6, 0.08), Color(0.62, 0.48, 0.32))
 				BuildingGen.box(st, Vector3(0, 2.1, -8.0 - row * 3.5), Vector3(32.0, 0.1, 0.1), wood)
+		Type.LAZARETO:
+			BuildingGen.box(st, Vector3(0, -0.6, -4.0), Vector3(26.0, 4.6, 8.0), cal)
+			BuildingGen.gable(st, Vector3(0, 4.0, -4.0), 13.4, 4.4, 2.0, BuildingGen.TILE_ROOF, cal, 13.0, 4.0)
+			BuildingGen.box(st, Vector3(-9.0, -0.6, 5.0), Vector3(6.0, 6.5, 6.0), cal)
+			BuildingGen.gable(st, Vector3(-9.0, 5.9, 5.0), 3.3, 3.3, 1.8, BuildingGen.TILE_ROOF, cal, 3.0, 3.0)
+			BuildingGen.box(st, Vector3(-9.0, 7.6, 7.9), Vector3(0.3, 1.4, 0.3), Color(0.2, 0.2, 0.2))
+			for k in 6:
+				BuildingGen.box(st, Vector3(-10.0 + k * 4.0, 1.0, 0.03), Vector3(1.0, 1.6, 0.1), BuildingGen.WINDOW)
+			for side in 4:
+				var xf := Transform3D(Basis(Vector3.UP, PI * 0.5 * side), Vector3.ZERO)
+				BuildingGen.box(st, Vector3(0, -0.5, 11.5 if side % 2 == 0 else 14.5), Vector3(29.0 if side % 2 == 0 else 23.0, 2.4, 0.5), stone, xf)
+		Type.HORNO:
+			var brick := Color(0.66, 0.38, 0.28)
+			BuildingGen.box(st, Vector3(-4.0, -0.5, -3.0), Vector3(8.0, 4.5, 8.0), brick.darkened(0.15))
+			BuildingGen.box(st, Vector3(-4.0, 4.0, -3.0), Vector3(6.0, 1.2, 6.0), brick.darkened(0.25))
+			BuildingGen.box(st, Vector3(-4.0, 5.2, -3.0), Vector3(1.4, 4.0, 1.4), brick.darkened(0.3))
+			BuildingGen.box(st, Vector3(-4.0, 0.0, 1.05), Vector3(1.6, 1.4, 0.1), Color(0.9, 0.5, 0.2, 0.0))
+			for k in 4:
+				BuildingGen.box(st, Vector3(4.0 + (k % 2) * 4.0, 0.0, -6.0 + (k / 2) * 5.0), Vector3(3.0, 1.4, 2.0), brick)
+			BuildingGen.box(st, Vector3(5.0, -0.3, 7.0), Vector3(8.0, 0.5, 6.0), Color(0.45, 0.36, 0.28))
+		Type.ATAHONA:
+			var adobe: Color = BuildingGen.ADOBE[1]
+			BuildingGen.box(st, Vector3(0, -0.5, -3.0), Vector3(8.0, 4.0, 6.0), adobe)
+			BuildingGen.gable(st, Vector3(0, 3.5, -3.0), 4.4, 3.4, 1.8, BuildingGen.THATCH[1], adobe, 4.0, 3.0)
+			BuildingGen.box(st, Vector3(0, -0.3, 4.0), Vector3(9.0, 0.4, 9.0), Color(0.52, 0.42, 0.30))
+			BuildingGen.box(st, Vector3(0, 0.1, 4.0), Vector3(1.8, 0.8, 1.8), Color(0.62, 0.60, 0.56))
+			BuildingGen.box(st, Vector3(0, 0.9, 4.0), Vector3(0.25, 0.25, 7.0), Color(0.40, 0.29, 0.19))
+			BuildingGen.box(st, Vector3(0, 0.0, 7.2), Vector3(0.6, 1.3, 1.5), Color(0.40, 0.30, 0.22))
 		Type.WATER_CARRIERS:
 			BuildingGen.box(st, Vector3(0, -0.8, 0), Vector3(14.0, 1.0, 18.0), Color(0.55, 0.48, 0.36))
 			BuildingGen.box(st, Vector3(0, -0.5, -4.0), Vector3(10.0, 3.6, 7.0), Color(0.62, 0.50, 0.36))
@@ -584,6 +659,12 @@ func _module_geometry(st: SurfaceTool, modules: Array, stone: Color, wood: Color
 					for z in [17.5, 19.5]:
 						BuildingGen.box(st, Vector3(x, 0, z), Vector3(0.25, 8.0, 0.25), wood)
 				BuildingGen.box(st, Vector3(25.5, 8.0, 18.5), Vector3(2.6, 0.2, 2.6), wood)
+			"horno2":
+				BuildingGen.box(st, Vector3(-4.0, -0.5, 6.0), Vector3(7.0, 4.0, 7.0), Color(0.56, 0.32, 0.24))
+				BuildingGen.box(st, Vector3(-4.0, 3.5, 6.0), Vector3(1.2, 3.5, 1.2), Color(0.46, 0.27, 0.20))
+			"piedra2":
+				BuildingGen.box(st, Vector3(5.5, 0.1, -3.0), Vector3(1.8, 0.8, 1.8), Color(0.62, 0.60, 0.56))
+				BuildingGen.box(st, Vector3(5.5, 0.9, -3.0), Vector3(0.25, 0.25, 6.0), Color(0.40, 0.29, 0.19))
 			"galpon":
 				BuildingGen.box(st, Vector3(0, -0.6, -20.0), Vector3(30.0, 4.0, 4.0), Color(0.66, 0.40, 0.30))
 				BuildingGen.gable(st, Vector3(0, 3.4, -20.0), 15.3, 2.4, 1.4, tile, Color(0.66, 0.40, 0.30), 15.0, 2.0)

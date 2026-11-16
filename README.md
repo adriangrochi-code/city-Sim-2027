@@ -71,6 +71,10 @@ Qué incluye:
   terminada y 300 cueros exportados, llega la gran decisión: derribar la muralla, conservar los
   portones como monumento o conservar también un tramo. Con eso empieza la época 2.
 - **Guardar y cargar partida** (F5 / F9).
+- **Epidemias y lazareto:** algunos barcos traen fiebre; con lazareto hacen cuarentena, sin él la
+  fiebre se propaga de casa en casa (más rápido donde el agua es mala).
+- **Ladrillos y pan:** el horno de ladrillos abastece las casas de azotea, las de altos y la
+  iglesia; la atahona da pan, y sin pan los pobladores no se quedan.
 - **Ampliar y modernizar edificios** ([detalle](docs/sistemas/edificios-ampliables.md)): al
   inspeccionar un pozo, aljibe, puesto, estancia, saladero, el puerto o la iglesia aparecen
   botones para agregar módulos (segunda cisterna, más serenos, galpón nuevo, muelle más largo,

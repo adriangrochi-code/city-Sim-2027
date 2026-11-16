@@ -16,6 +16,7 @@ const PHASES := [
 	{"name": "Torres y campanario", "cost": 8000, "months": 8},
 ]
 const MIN_POP := 1000
+const BRICKS := [0, 150, 300, 250, 150, 150]
 
 var phase := 0          # última fase terminada
 var building := false   # hay una fase en obra
@@ -39,7 +40,7 @@ func finished() -> bool:
 	return phase >= PHASES.size() - 1
 
 
-func next_problem(pop: int, money: int) -> String:
+func next_problem(pop: int, money: int, bricks: int = 1000000) -> String:
 	if finished():
 		return "La iglesia matriz ya está terminada"
 	if building:
@@ -49,6 +50,8 @@ func next_problem(pop: int, money: int) -> String:
 	var cost: int = PHASES[phase + 1]["cost"]
 	if cost > money:
 		return "La fase «%s» cuesta %d pesos" % [PHASES[phase + 1]["name"], cost]
+	if BRICKS[phase + 1] > bricks:
+		return "Faltan ladrillos: la fase «%s» necesita %d (construye un horno)" % [PHASES[phase + 1]["name"], BRICKS[phase + 1]]
 	return ""
 
 
@@ -85,7 +88,7 @@ func describe() -> String:
 	if building:
 		txt += "En obra: %s (faltan %d meses)\n" % [PHASES[phase + 1]["name"], months_left]
 	elif not finished():
-		txt += "Siguiente fase: %s · %d pesos · %d meses\nPulsa G para financiarla.\n" % [PHASES[phase + 1]["name"], PHASES[phase + 1]["cost"], PHASES[phase + 1]["months"]]
+		txt += "Siguiente fase: %s · %d pesos · %d ladrillos · %d meses\nPulsa G para financiarla.\n" % [PHASES[phase + 1]["name"], PHASES[phase + 1]["cost"], BRICKS[phase + 1], PHASES[phase + 1]["months"]]
 	txt += "Atrae un %d %% más de pobladores" % int((attraction() - 1.0) * 100.0)
 	return txt
 

@@ -11,6 +11,7 @@ const Lots = preload("res://scripts/city/lots.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 
 signal event(text: String)
+signal sick_ship(people: int, landing: Vector2)
 
 const PIER_COST := 4000
 const PIER_UPKEEP := 40
@@ -160,6 +161,14 @@ func build_pier(p: Vector2) -> bool:
 
 # --- Mes a mes ---------------------------------------------------------------------
 
+## ¿Este barco trae fiebre? Más probable durante "Fiebre en los barcos".
+func is_sick() -> bool:
+	var p := 0.06
+	if not active_event.is_empty() and String(active_event["name"]).begins_with("Fiebre en los barcos"):
+		p = 0.5
+	return _rng.randf() < p
+
+
 func mult(key: String) -> float:
 	return float(active_event.get(key, 1.0)) if not active_event.is_empty() else 1.0
 
@@ -192,6 +201,9 @@ func month_tick(pop: int) -> int:
 			# Sin muelle desembarcan como pueden en la playa: llegan menos.
 			beach_people = int(people * 0.6)
 			year_stats["people"] += beach_people
+			if is_sick():
+				sick_ship.emit(beach_people, lots.plaza_center)
+				beach_people = 0
 			event.emit("Un barco desembarca %d pobladores en la playa (no hay muelle)" % beach_people)
 	return beach_people
 
@@ -394,7 +406,10 @@ func _finish_unloading(sh: Dictionary) -> void:
 	year_stats["exported"] += exported
 	total_exported += exported
 	year_stats["duty"] += duty
-	_pending_people += people
+	if is_sick():
+		sick_ship.emit(people, land_point)
+	else:
+		_pending_people += people
 	_pending_duty += duty
 	event.emit("Desembarcan %d pobladores · se embarcan %d cueros · aduana: %d pesos" % [people, exported, duty])
 

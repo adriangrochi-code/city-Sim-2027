@@ -18,6 +18,7 @@ const Fires = preload("res://scripts/city/fires.gd")
 const Port = preload("res://scripts/city/port.gd")
 const Wall = preload("res://scripts/city/wall.gd")
 const Church = preload("res://scripts/city/church.gd")
+const Epidemics = preload("res://scripts/city/epidemics.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
@@ -32,13 +33,13 @@ const TOOL_DEFS := [
 	{"key": "7", "name": "Quitar zona", "hint": "Pinta para quitar la zona (derriba lo construido)."},
 	{"key": "8", "name": "Demoler", "hint": "Haz clic sobre un tramo de calle o un pozo, aljibe o puesto para demolerlo."},
 	{"key": "9", "name": "Parcelas", "hint": "Compra parcelas contiguas a las tuyas (mercedes de tierras). Se desbloquean más con la población."},
-	{"key": "0", "name": "Servicios", "hint": "Pozos, aljibes, puesto de aguadores o de serenos, junto a una calle (R gira). Las casas de azotea necesitan agua y las de altos, buena agua; con agua cerca se apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
+	{"key": "0", "name": "Servicios", "hint": "Pozos, aljibes, puesto de aguadores o de serenos, y lazareto para la cuarentena de los barcos con fiebre (R gira). Las casas de azotea necesitan agua y las de altos, buena agua; con agua cerca se apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
 	{"key": "P", "name": "Puerto", "hint": "Haz clic en la costa, junto a una calle, para construir el muelle con su barraca. Los barcos fondean en el río y las lanchas descargan pobladores y mercancías; las carretas traen cueros para embarcar."},
-	{"key": "C", "name": "Campo", "hint": "Estancias (lejos de la ciudad) y saladeros (junto a un arroyo o la costa). Las carretas llevan el ganado al saladero y los cueros salados al puerto. El saladero huele mal y contamina los pozos cercanos."},
+	{"key": "C", "name": "Campo", "hint": "Estancias, saladeros, horno de ladrillos (las casas y la iglesia los necesitan) y atahona (pan para la ciudad). Las carretas llevan el ganado al saladero y los cueros salados al puerto. El saladero huele mal y contamina los pozos cercanos."},
 	{"key": "M", "name": "Muralla", "hint": "Clic en el inicio y clic en el final de cada tramo; sigue encadenando y Esc para terminar. Donde cruza una calle se abre un portón con aduana: las carretas se detienen a ser revisadas y pagan."},
 ]
-const WATER_TYPES := [Services.Type.WELL, Services.Type.CISTERN, Services.Type.WATER_CARRIERS, Services.Type.WATCH]
-const FIELD_TYPES := [Services.Type.ESTANCIA, Services.Type.SALADERO]
+const WATER_TYPES := [Services.Type.WELL, Services.Type.CISTERN, Services.Type.WATER_CARRIERS, Services.Type.WATCH, Services.Type.LAZARETO]
+const FIELD_TYPES := [Services.Type.ESTANCIA, Services.Type.SALADERO, Services.Type.HORNO, Services.Type.ATAHONA]
 const SAVE_PATH := "user://partida.txt"
 static var pending_load := {}
 const WINDS := [["pampero", Vector2(0.7, -0.7)], ["sudestada", Vector2(-0.7, -0.7)], ["viento norte", Vector2(0.0, 1.0)], ["viento del este", Vector2(-1.0, 0.0)], ["brisa del río", Vector2(0.0, -1.0)]]
@@ -67,6 +68,10 @@ var service_angle := 0.0
 var port: Port
 var wall: Wall
 var church: Church
+var epidemics: Epidemics
+var bricks := 200
+var _bread_warned := 0
+var _demo_no_lazareto := false
 var church_c := Vector2.ZERO
 var field_type := Services.Type.ESTANCIA
 var era := 1
@@ -148,6 +153,12 @@ func _ready() -> void:
 	wall.setup(gen, parcels, net, lots)
 	agents.port = port
 	agents.wall = wall
+	epidemics = Epidemics.new()
+	add_child(epidemics)
+	epidemics.setup(lots, services, gen)
+	epidemics.event.connect(hud_toast)
+	port.sick_ship.connect(_on_sick_ship)
+	lots.sick_check = epidemics.is_sick
 	day.night_materials.append(services.lantern_mat)
 	rig = CameraRig.new()
 	add_child(rig)
@@ -236,7 +247,14 @@ func _month_tick() -> void:
 				for k in 2:
 					agents.spawn(Agents.Kind.CART, net.nodes[entry], church_c, -1, "lleva ladrillos y cal a la obra de la matriz", rng.randi() % 100000, Agents.TEMPERS[1])
 	_check_transition(pop)
-	pool = mini(pool + arrivals, 600)
+	arrivals = int(arrivals * epidemics.attraction())
+	if pop > services.bread_capacity():
+		arrivals = int(arrivals * 0.3)
+		if month - _bread_warned >= 6:
+			_bread_warned = month
+			hud.toast("Falta pan: los pobladores no se quedan. Construye una atahona (herramienta Campo)")
+	pool = mini(pool + arrivals + epidemics.month_tick(), 600)
+	bricks = mini(bricks + services.bricks_per_month(), 3000)
 	money += wall.take_duty() - wall.upkeep() - (Port.PIER_UPKEEP if port.has_pier else 0)
 	money += int(pop * 1.2) - int(net.total_length() * 0.01) - services.upkeep()
 	services.update_water()
@@ -262,9 +280,17 @@ func _month_tick() -> void:
 
 
 func _growth_tick() -> void:
+	lots.bricks_available = bricks
+	lots.bricks_used = 0
 	var used := lots.grow_step(pool, rng)
 	pool -= used
+	bricks -= lots.bricks_used
+	epidemics.step()
 	fires.step()
+
+
+func _on_sick_ship(people: int, landing: Vector2) -> void:
+	pool += epidemics.sick_ship(people, landing)
 
 
 func hud_toast(text: String) -> void:
@@ -284,7 +310,7 @@ func _refresh_hud() -> void:
 		"money": "%s pesos" % Hud.fmt(money),
 		"pop": "Población: %s" % Hud.fmt(pop),
 		"pool": "Esperan casa: %d" % pool,
-		"stage": "Etapa: %s" % _stage_name,
+		"stage": "%s · Ladrillos %d · Pan %s%s" % [_stage_name, bricks, "ok" if lots.population() <= services.bread_capacity() else "falta", " · FIEBRE" if not epidemics.infected.is_empty() else ""],
 		"parcels": "Parcelas %d/%d" % [parcels.owned.size(), parcels.max_owned],
 		"wind": "Viento: %s%s" % [fires.wind_name, (" · %d incendios" % fires.burning.size()) if fires.burning.size() > 0 else ""],
 		"era": "Época %d: %s" % [era, "colonial" if era == 1 else "Ciudad Nueva"],
@@ -747,7 +773,7 @@ func _actions() -> Array:
 			if church.finished() or church.building:
 				return []
 			var ph: Dictionary = Church.PHASES[church.phase + 1]
-			return [["Financiar la fase «%s» (%s pesos)" % [ph["name"], Hud.fmt(ph["cost"])], church.next_problem(lots.population(), money) == "", "church", null]]
+			return [["Financiar la fase «%s» (%s pesos, %d ladrillos)" % [ph["name"], Hud.fmt(ph["cost"]), Church.BRICKS[church.phase + 1]], church.next_problem(lots.population(), money, bricks) == "", "church", null]]
 		"port":
 			return port.actions(money)
 		"service":
@@ -790,10 +816,11 @@ func fund_church() -> void:
 	if church == null:
 		hud.toast("Primero funda la plaza mayor")
 		return
-	var err := church.next_problem(lots.population(), money)
+	var err := church.next_problem(lots.population(), money, bricks)
 	if err != "":
 		hud.toast(err)
 		return
+	bricks -= Church.BRICKS[church.phase + 1]
 	money -= church.start_next()
 
 
@@ -846,6 +873,7 @@ func save_game() -> void:
 		"lots": lots.save_data(), "services": services.save_data(),
 		"port": [port.has_pier, port.land_point, port.hides, port.year_stats, port.total_exported, port.active_event, port.event_months, port.modules],
 		"wall": [wall.segments, wall.monuments, wall.carts_inspected],
+		"bricks": bricks, "infected": epidemics.infected, "quarantine": epidemics.quarantine,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
@@ -920,6 +948,10 @@ func _apply_save(d: Dictionary) -> void:
 	wall.carts_inspected = wl[2]
 	wall.update_gates()
 	lots.restore(d["lots"])
+	bricks = d.get("bricks", 200)
+	epidemics.infected = d.get("infected", {})
+	epidemics.quarantine = d.get("quarantine", [])
+	epidemics._refresh_markers()
 	services.update_water()
 	lots.refresh_overlay()
 	trees.mark_dirty()
@@ -1007,6 +1039,8 @@ func _describe(p: Vector2) -> String:
 		if lvl > 0:
 			var w: float = lot["water"]
 			txt += "Agua: %s\n" % ("buena" if w >= 0.85 else ("regular (pozo)" if w >= 0.5 else "sin agua cerca"))
+		if epidemics.is_sick(id):
+			txt += "Hay fiebre en esta casa\n"
 		if fires.is_burning(id):
 			txt += "¡EN LLAMAS!\n"
 		elif lvl == 0 and int(lot["ruin"]) > 0:
@@ -1029,6 +1063,10 @@ func _why_not(lot: Dictionary) -> String:
 	if pool < need:
 		reasons.append("· Faltan pobladores: esperan barcos con más familias.")
 	var water: float = lot["water"]
+	if epidemics.is_sick(lot["id"]):
+		reasons.append("· Hay fiebre en la casa: no crece hasta que se cure.")
+	if Lots.BRICKS[lvl + 1] > bricks:
+		reasons.append("· Faltan ladrillos: construye un horno de ladrillos (herramienta Campo).")
 	if lvl == 1 and water < 0.5:
 		reasons.append("· Falta agua: construye un pozo o un aljibe cerca.")
 	if lvl == 2 and water < 0.85:
@@ -1247,6 +1285,8 @@ func _handle_args() -> void:
 	for a in OS.get_cmdline_user_args():
 		var parts := a.trim_prefix("--").split("=", true, 1)
 		args[parts[0]] = parts[1] if parts.size() > 1 else ""
+	if args.has("no-lazareto"):
+		_demo_no_lazareto = true
 	if args.has("auto-church"):
 		_auto_church = true
 	if args.has("goals"):
@@ -1296,6 +1336,8 @@ func _handle_args() -> void:
 			if not args.has("cam"):
 				rig.look_at_point(Vector3(fc.x, gen.height(fc.x, fc.y), fc.y), 110.0)
 				rig.pitch = deg_to_rad(-26.0)
+	if args.has("sick-ship"):
+		_on_sick_ship(30, port.land_point if port.has_pier else lots.plaza_center)
 	if args.has("simulate"):
 		simulate(float(args["simulate"]))
 	if args.has("tool"):
@@ -1326,6 +1368,8 @@ func _handle_args() -> void:
 				fp = services.items[ids[ids.size() - 1]]["c"]
 		elif args["focus"] == "church" and church != null:
 			fp = church_c
+		elif args["focus"] == "fiebre" and not epidemics.infected.is_empty():
+			fp = lots.lots[epidemics.infected.keys()[0]]["c"]
 		elif args["focus"] == "estancia" and not services.of_type(Services.Type.ESTANCIA).is_empty():
 			fp = services.items[services.of_type(Services.Type.ESTANCIA)[0]]["c"]
 		elif args["focus"] == "saladero" and not services.of_type(Services.Type.SALADERO).is_empty():
@@ -1355,6 +1399,7 @@ func print_stats() -> void:
 			water[2 if w >= 0.85 else (1 if w >= 0.5 else 0)] += 1
 	print("Elección pendiente: %s" % hud.choice_open())
 	print("Época %d · iglesia fase %d%s · campo: %d estancias, %d saladeros · pozos contaminados: %d" % [era, church.phase if church else -1, " (en obra)" if church and church.building else "", services.of_type(Services.Type.ESTANCIA).size(), services.of_type(Services.Type.SALADERO).size(), services.of_type(Services.Type.WELL).filter(func(w): return services.contaminated(services.items[w]["c"])).size()])
+	print("Ladrillos: %d (+%d/mes) · pan para %d · epidemias: brotes %d, víctimas %d, en cuarentena total %d, casas con fiebre %d" % [bricks, services.bricks_per_month(), services.bread_capacity(), epidemics.outbreaks_total, epidemics.deaths_total, epidemics.quarantined_total, epidemics.infected.size()])
 	print("Puerto: muelle %s · cueros en barraca %d · año: %s · acontecimiento: %s" % [port.has_pier, port.hides, port.year_stats, port.active_event.get("name", "ninguno")])
 	print("Muralla: %d m · portones %d · carretas revisadas %d · faroles %d" % [int(wall.total_length()), wall.gates.size(), wall.carts_inspected, services.lamps.size()])
 	print("Agua: buena %d · regular %d · sin agua %d · fuentes %d · incendios activos %d, apagados %d, casas quemadas %d" % [water[2], water[1], water[0], services.items.size(), fires.burning.size(), fires.put_out_total, fires.destroyed_total])
@@ -1420,6 +1465,7 @@ func build_demo() -> void:
 	# Campo: una estancia al final del camino y un saladero cerca del agua.
 	var placed_e := false
 	var placed_s := false
+	var extra := {Services.Type.HORNO: false, Services.Type.ATAHONA: false, Services.Type.LAZARETO: _demo_no_lazareto}
 	for eid in net.edges.keys():
 		var e: Dictionary = net.edges[eid]
 		var d := 10.0
@@ -1433,8 +1479,12 @@ func build_demo() -> void:
 					placed_e = place_service(Services.Type.ESTANCIA, pe, plaza_angle)
 				elif not placed_s and services.problem(Services.Type.SALADERO, ps, plaza_angle) == "":
 					placed_s = place_service(Services.Type.SALADERO, ps, plaza_angle)
+				for tp in extra:
+					var pt2: Vector2 = (pt[0] as Vector2) + nrm * side * 25.0
+					if not extra[tp] and services.problem(tp, pt2, plaza_angle) == "":
+						extra[tp] = place_service(tp, pt2, plaza_angle)
 			d += 20.0
-	print("demo campo: estancia=", placed_e, " saladero=", placed_s)
+	print("demo campo: estancia=", placed_e, " saladero=", placed_s, " horno/atahona/lazareto=", extra.values())
 	# Ampliaciones de ejemplo: los edificios crecen sin demolerse.
 	var done_types := {}
 	for sid in services.items.keys():
@@ -1467,6 +1517,7 @@ func simulate(seconds: float) -> void:
 		port._tick(dt)
 		if i % 5 == 4:
 			fires.step()
+			epidemics.step()
 	print("Costo medio por paso de 0,1 s: %.2f ms" % ((Time.get_ticks_usec() - t0) / 1000.0 / maxf(n, 1)))
 	day.apply()
 	agents._render()

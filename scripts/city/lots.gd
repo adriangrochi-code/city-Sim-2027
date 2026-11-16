@@ -26,6 +26,10 @@ var plaza_center := Vector2(INF, INF)
 var show_candidates := false
 var overlay_mode := "zone"   # "zone" o "water"
 var nuisances: Array = []    # saladeros: su olor baja el valor del suelo
+const BRICKS := [0, 0, 8, 15]  # ladrillos para llegar a cada nivel
+var bricks_available := 0       # lo fija main antes de cada paso de crecimiento
+var bricks_used := 0
+var sick_check: Callable        # func(id) -> bool: las casas con fiebre no crecen
 const ROOF_H := [0.0, 5.0, 5.6, 12.5]
 var _next := 1
 var _hash := {}
@@ -338,6 +342,10 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 			continue
 		var ok := false
 		var water: float = lot["water"]
+		if BRICKS[lvl + 1] > bricks_available - bricks_used:
+			continue
+		if sick_check.is_valid() and sick_check.call(lot["id"]):
+			continue
 		if lvl == 0:
 			ok = int(lot["ruin"]) <= 0 and rng.randf() < 0.55
 		elif lvl == 1:
@@ -347,6 +355,7 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 		if ok:
 			_set_level(lot, lvl + 1)
 			used += need
+			bricks_used += BRICKS[lvl + 1]
 	if used > 0:
 		_overlay_dirty = true
 		lots_changed.emit()
