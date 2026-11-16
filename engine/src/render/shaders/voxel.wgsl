@@ -16,23 +16,79 @@ struct Globals {
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_sampler: sampler_comparison;
 
-// Vértice compacto (16 bytes): posición en vóxeles relativa al origen de la malla, color con
-// el material en el alfa, y en `info` la dirección de la cara, la oclusión y la normal suave.
-// El origen de cada malla llega como dato por instancia (xyz en metros, w = tamaño del vóxel).
+// Cara voraz compacta (20 bytes, ver mesher::Quad), una instancia por cara. El vertex shader
+// arma sus 2 triángulos con `vertex_index` (*vertex pulling*, idea de Tisma engine:
+// preview.vert arma el prisma de cada extrusión a partir de una instancia mínima).
+// El origen de cada columna (xyz en metros, w = tamaño del vóxel) está en un búfer de
+// almacenamiento indexado por `slot`, y el color del material en una paleta uniforme.
 struct VIn {
-    @location(0) pos: vec4<u32>,
-    @location(1) color: vec4<f32>,
-    @location(2) info: vec4<u32>,
-    @location(3) origin: vec4<f32>,
+    @location(0) qa: u32,
+    @location(1) qb: u32,
+    @location(2) smooth: vec2<u32>,
+    @location(3) slot: u32,
+    @builtin(vertex_index) vi: u32,
 };
+@group(0) @binding(3) var<storage, read> origins: array<vec4<f32>>;
 
 const DIRS = array<vec3<f32>, 6>(
     vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0),
     vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0),
 );
+// Ejes u y v de cada dirección (u = eje + 1, v = eje + 2, módulo 3).
+const UAX = array<vec3<u32>, 6>(
+    vec3(0u, 0u, 1u), vec3(0u, 1u, 0u), vec3(0u, 1u, 0u),
+    vec3(1u, 0u, 0u), vec3(1u, 0u, 0u), vec3(0u, 0u, 1u),
+);
+const VAX = array<vec3<u32>, 6>(
+    vec3(1u, 0u, 0u), vec3(0u, 0u, 1u), vec3(0u, 0u, 1u),
+    vec3(0u, 1u, 0u), vec3(0u, 1u, 0u), vec3(1u, 0u, 0u),
+);
+const POSITIVE = array<bool, 6>(true, true, false, true, false, false);
+const TRIS = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+const TRIS_FLIP = array<u32, 6>(1u, 2u, 3u, 1u, 3u, 0u);
+const NEG = array<u32, 4>(0u, 3u, 2u, 1u);
 
-fn world_pos(v: VIn) -> vec3<f32> {
-    return v.origin.xyz + vec3<f32>(v.pos.xyz) * v.origin.w;
+struct Corner {
+    pos: vec3<f32>,
+    dir: u32,
+    k: u32,
+    ao: u32,
+    mat: u32,
+};
+
+fn corner(v: VIn) -> Corner {
+    var c: Corner;
+    c.dir = (v.qa >> 23u) & 7u;
+    let base = vec3<u32>(v.qa & 63u, (v.qa >> 12u) & 2047u, (v.qa >> 6u) & 63u);
+    let w = (v.qb & 31u) + 1u;
+    let h = ((v.qb >> 5u) & 31u) + 1u;
+    let ao = (v.qb >> 10u) & 255u;
+    c.mat = (v.qb >> 18u) & 255u;
+    let a0 = ao & 3u;
+    let a1 = (ao >> 2u) & 3u;
+    let a2 = (ao >> 4u) & 3u;
+    let a3 = (ao >> 6u) & 3u;
+    var tris = TRIS;
+    var flip = TRIS_FLIP;
+    var t = tris[v.vi];
+    if (a0 + a2 < a1 + a3) {
+        t = flip[v.vi];
+    }
+    var pos_tab = POSITIVE;
+    var neg = NEG;
+    if (!pos_tab[c.dir]) {
+        t = neg[t];
+    }
+    c.k = t;
+    var aos = array<u32, 4>(a0, a1, a2, a3);
+    c.ao = aos[t];
+    let du = select(0u, w, t == 1u || t == 2u);
+    let dv = select(0u, h, t == 2u || t == 3u);
+    var ua = UAX;
+    var va = VAX;
+    let o = origins[v.slot];
+    c.pos = o.xyz + vec3<f32>(base + ua[c.dir] * du + va[c.dir] * dv) * o.w;
+    return c;
 }
 
 struct VOut {
@@ -45,26 +101,29 @@ struct VOut {
     @location(5) smooth_n: vec3<f32>,
 };
 
+@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 64>;
+
 @vertex
 fn vs_main(v: VIn) -> VOut {
     var o: VOut;
-    let p = world_pos(v);
-    o.clip = g.view_proj * vec4(p, 1.0);
-    o.world = p;
-    o.color = v.color;
+    let c = corner(v);
+    o.clip = g.view_proj * vec4(c.pos, 1.0);
+    o.world = c.pos;
+    o.color = vec4(palette[c.mat].rgb, f32(c.mat) / 255.0);
     var dirs = DIRS; // copia local: naga solo permite índices variables sobre variables
-    o.normal = dirs[v.info.x & 7u];
-    o.ao = f32(v.info.x >> 3u);
-    o.voxel = v.origin.w;
-    let sx = (f32(v.info.y) - 128.0) / 127.0;
-    let sz = (f32(v.info.z) - 128.0) / 127.0;
+    o.normal = dirs[c.dir];
+    o.ao = f32(c.ao);
+    o.voxel = origins[v.slot].w;
+    let sw = (v.smooth[c.k / 2u] >> ((c.k % 2u) * 16u)) & 0xffffu;
+    let sx = (f32(sw & 255u) - 128.0) / 127.0;
+    let sz = (f32(sw >> 8u) - 128.0) / 127.0;
     o.smooth_n = vec3(sx, sqrt(max(1.0 - sx * sx - sz * sz, 0.0)), sz);
     return o;
 }
 
 @vertex
 fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
-    return g.light_view_proj * vec4(world_pos(v), 1.0);
+    return g.light_view_proj * vec4(corner(v).pos, 1.0);
 }
 
 fn hash3(p: vec3<f32>) -> f32 {

@@ -276,7 +276,7 @@ impl Streamer {
             if self.versions.get(&r.key) != Some(&r.version) {
                 continue;
             }
-            used += r.mesh.vertices.len().max(1);
+            used += r.mesh.quad_count().max(1) * 4;
             self.ready.insert(r.key, r.version);
             self.stats.uploads += 1;
             ops.push(Op::Set(r.key, r.mesh));

@@ -25,6 +25,82 @@ pub struct Vertex {
     pub info: [u8; 4],
 }
 
+/// Cara voraz compacta (20 bytes): reemplaza 4 vértices de 16 bytes + 6 índices (76 bytes).
+/// El vertex shader la expande en 2 triángulos con `vertex_index` (*vertex pulling*).
+///
+/// Idea tomada de Tisma engine (`apps/tisma/shaders/preview.vert` + `PreviewInstance`): cada
+/// primitiva es una instancia mínima y el shader arma la geometría. Aquí la instancia es la
+/// cara voraz; además lleva las normales suaves de sus 4 esquinas (terreno) y el número de
+/// columna (para encontrar su origen en el dibujo indirecto múltiple).
+///
+/// - `a`: x (6 bits) | z (6) << 6 | y (11) << 12 | dirección (3) << 23. Es la esquina (0, 0)
+///   de la cara, en vóxeles relativos al origen de la malla (incluye el plano de la cara).
+/// - `b`: ancho − 1 (5) | alto − 1 (5) << 5 | oclusión de las 4 esquinas (8) << 10 | material (8) << 18.
+/// - `smooth`: normal suave (x, z) + 128 de las esquinas 0..3, un byte cada una.
+/// - `slot`: columna (lo completa el renderer al subirla).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug, PartialEq, Eq)]
+pub struct Quad {
+    pub a: u32,
+    pub b: u32,
+    pub smooth: [u32; 2],
+    pub slot: u32,
+}
+
+/// Límite de la coordenada y de una malla (11 bits).
+pub const MAX_Y: i32 = 2047;
+
+impl Quad {
+    pub fn dir(&self) -> usize {
+        ((self.a >> 23) & 7) as usize
+    }
+    pub fn base(&self) -> [i32; 3] {
+        [(self.a & 63) as i32, ((self.a >> 12) & 2047) as i32, ((self.a >> 6) & 63) as i32]
+    }
+    pub fn size(&self) -> (i32, i32) {
+        ((self.b & 31) as i32 + 1, ((self.b >> 5) & 31) as i32 + 1)
+    }
+    pub fn ao(&self) -> u32 {
+        (self.b >> 10) & 0xff
+    }
+    pub fn material(&self) -> Mat {
+        ((self.b >> 18) & 0xff) as Mat
+    }
+    fn smooth_at(&self, k: usize) -> (u8, u8) {
+        let w = self.smooth[k / 2] >> ((k % 2) * 16);
+        ((w & 0xff) as u8, ((w >> 8) & 0xff) as u8)
+    }
+    /// Los 4 vértices y los 6 índices (0..4) de la cara, igual que el vertex shader.
+    pub fn expand(&self) -> ([Vertex; 4], [u32; 6]) {
+        let dir = self.dir();
+        let d = DIRS[dir];
+        let axis = if d[0] != 0 { 0 } else if d[1] != 0 { 1 } else { 2 };
+        let sign = d[0] + d[1] + d[2];
+        let (u_ax, v_ax) = ((axis + 1) % 3, (axis + 2) % 3);
+        let (w, h) = self.size();
+        let base = self.base();
+        let ao = self.ao();
+        let aos = [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3];
+        let m = self.material();
+        let rgb = palette::color(m);
+        let mut verts = [Vertex::zeroed(); 4];
+        for (k, (du, dv)) in [(0, 0), (w, 0), (w, h), (0, h)].iter().enumerate() {
+            let mut p = base;
+            p[u_ax] += du;
+            p[v_ax] += dv;
+            let (sx, sz) = self.smooth_at(k);
+            verts[k] = Vertex { pos: [p[0] as u16, p[1] as u16, p[2] as u16, 0], color: [rgb[0], rgb[1], rgb[2], m], info: [dir as u8 | ((aos[k] as u8) << 3), sx, sz, 0] };
+        }
+        let flip = aos[0] + aos[2] < aos[1] + aos[3];
+        let tris: [u32; 6] = if flip { [1, 2, 3, 1, 3, 0] } else { [0, 1, 2, 0, 2, 3] };
+        let mut idx = [0u32; 6];
+        for (k, t) in tris.iter().enumerate() {
+            idx[k] = if sign > 0 { *t } else { [0, 3, 2, 1][*t as usize] };
+        }
+        (verts, idx)
+    }
+}
+
 /// Direcciones de cara en el orden de los grupos de índices: primero las que casi siempre
 /// se ven desde una cámara de constructor de ciudades (arriba), al final la de abajo.
 /// El shader (`voxel.wgsl`) tiene la misma tabla.
@@ -112,12 +188,10 @@ fn smooth_normal(tops: &[i32], cx: i32, cz: i32) -> [i8; 4] {
     [(n.x * 127.0) as i8, (n.y * 127.0) as i8, (n.z * 127.0) as i8, 0]
 }
 
-/// Malla de una columna (o de un chunk): vértices compactos con posición relativa a
-/// `origin`, índices agrupados por dirección de cara y caja envolvente en metros.
+/// Malla de una columna (o de un chunk): caras compactas agrupadas por dirección
+/// ([`DIRS`]), con posición relativa a `origin`, y caja envolvente.
 pub struct Mesh {
-    pub vertices: Vec<Vertex>,
-    /// Índices por dirección de cara ([`DIRS`]).
-    pub groups: [Vec<u32>; 6],
+    pub quads: [Vec<Quad>; 6],
     /// Origen de la malla en metros y tamaño del vóxel.
     pub origin: Vec3,
     pub voxel: f32,
@@ -128,7 +202,7 @@ pub struct Mesh {
 
 impl Default for Mesh {
     fn default() -> Self {
-        Mesh { vertices: Vec::new(), groups: Default::default(), origin: Vec3::ZERO, voxel: 1.0, lo: [u16::MAX; 3], hi: [0; 3] }
+        Mesh { quads: Default::default(), origin: Vec3::ZERO, voxel: 1.0, lo: [u16::MAX; 3], hi: [0; 3] }
     }
 }
 
@@ -136,32 +210,30 @@ impl Mesh {
     pub fn new(origin: Vec3, voxel: f32) -> Mesh {
         Mesh { origin, voxel, ..Default::default() }
     }
-    pub fn index_count(&self) -> usize {
-        self.groups.iter().map(|g| g.len()).sum()
+    pub fn quad_count(&self) -> usize {
+        self.quads.iter().map(|g| g.len()).sum()
     }
     pub fn triangles(&self) -> usize {
-        self.index_count() / 3
+        self.quad_count() * 2
     }
     pub fn is_empty(&self) -> bool {
-        self.index_count() == 0
+        self.quad_count() == 0
     }
     /// Une otra malla con el mismo origen.
     pub fn append(&mut self, other: &Mesh) {
-        let base = self.vertices.len() as u32;
-        self.vertices.extend_from_slice(&other.vertices);
-        for (g, og) in self.groups.iter_mut().zip(other.groups.iter()) {
-            g.extend(og.iter().map(|i| i + base));
+        for (g, og) in self.quads.iter_mut().zip(other.quads.iter()) {
+            g.extend_from_slice(og);
         }
         for k in 0..3 {
             self.lo[k] = self.lo[k].min(other.lo[k]);
             self.hi[k] = self.hi[k].max(other.hi[k]);
         }
     }
-    /// Índices de todos los grupos seguidos y dónde empieza cada grupo (7 valores).
-    pub fn indices_grouped(&self) -> (Vec<u32>, [u32; 7]) {
-        let mut out = Vec::with_capacity(self.index_count());
+    /// Todas las caras seguidas y dónde empieza cada grupo (7 valores).
+    pub fn quads_grouped(&self) -> (Vec<Quad>, [u32; 7]) {
+        let mut out = Vec::with_capacity(self.quad_count());
         let mut starts = [0u32; 7];
-        for (k, g) in self.groups.iter().enumerate() {
+        for (k, g) in self.quads.iter().enumerate() {
             starts[k] = out.len() as u32;
             out.extend_from_slice(g);
         }
@@ -172,6 +244,22 @@ impl Mesh {
     pub fn bounds(&self) -> (Vec3, Vec3) {
         let f = |v: [u16; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) * self.voxel + self.origin;
         (f(self.lo), f(self.hi))
+    }
+    /// Expande las caras a vértices e índices agrupados por dirección (para pruebas: es lo
+    /// mismo que hace el vertex shader).
+    #[cfg(test)]
+    pub fn expanded(&self) -> (Vec<Vertex>, [Vec<u32>; 6]) {
+        let mut verts = Vec::new();
+        let mut groups: [Vec<u32>; 6] = Default::default();
+        for (d, g) in self.quads.iter().enumerate() {
+            for q in g {
+                let (v, idx) = q.expand();
+                let base = verts.len() as u32;
+                verts.extend_from_slice(&v);
+                groups[d].extend(idx.iter().map(|i| i + base));
+            }
+        }
+        (verts, groups)
     }
     /// Posición de un vértice en metros (para pruebas).
     #[cfg(test)]
@@ -344,40 +432,106 @@ fn emit_quad(mesh: &mut Mesh, tops: &[i32], offset: IVec3, axis: usize, u_ax: us
         c
     };
     let terrain = is_terrain(m);
-    let rgb = palette::color(m);
-    let color = [rgb[0], rgb[1], rgb[2], m];
     let dir = dir_index(axis, sign);
-    // Esquinas en orden antihorario visto desde la normal +eje (u × v = eje).
-    let corners = [(0, 0), (w, 0), (w, h), (0, h)];
-    let aos = [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3];
-    let base = mesh.vertices.len() as u32;
-    for (k, (du, dv)) in corners.iter().enumerate() {
+    let mut smooth = [0u32; 2];
+    for (k, (du, dv)) in [(0, 0), (w, 0), (w, h), (0, h)].iter().enumerate() {
         let g = grid(*du, *dv);
         let (sx, sz) = if terrain {
             let sn = smooth_normal(tops, g[0] + 1, g[2] + 1);
-            ((sn[0] as i32 + 128) as u8, (sn[2] as i32 + 128) as u8)
+            ((sn[0] as i32 + 128) as u32, (sn[2] as i32 + 128) as u32)
         } else {
             (128, 128)
         };
-        let p = [(g[0] + offset.x) as u16, (g[1] + offset.y) as u16, (g[2] + offset.z) as u16];
+        smooth[k / 2] |= (sx | (sz << 8)) << ((k % 2) * 16);
         for a in 0..3 {
-            mesh.lo[a] = mesh.lo[a].min(p[a]);
-            mesh.hi[a] = mesh.hi[a].max(p[a]);
+            let p = (g[a] + offset[a]) as u16;
+            mesh.lo[a] = mesh.lo[a].min(p);
+            mesh.hi[a] = mesh.hi[a].max(p);
         }
-        mesh.vertices.push(Vertex { pos: [p[0], p[1], p[2], 0], color, info: [dir as u8 | ((aos[k] as u8) << 3), sx, sz, 0] });
     }
-    // Se elige la diagonal según la oclusión para evitar el defecto de interpolación.
-    let flip = aos[0] + aos[2] < aos[1] + aos[3];
-    let tris: [u32; 6] = if flip { [1, 2, 3, 1, 3, 0] } else { [0, 1, 2, 0, 2, 3] };
-    for t in tris {
-        let idx = if sign > 0 { t } else { [0, 3, 2, 1][t as usize] };
-        mesh.groups[dir].push(base + idx);
-    }
+    let b0 = grid(0, 0);
+    let (x, y, z) = (b0[0] + offset.x, b0[1] + offset.y, b0[2] + offset.z);
+    debug_assert!((0..64).contains(&x) && (0..64).contains(&z) && (0..=MAX_Y).contains(&y), "cara fuera de rango: {x} {y} {z}");
+    let qa = (x as u32 & 63) | ((z as u32 & 63) << 6) | ((y.min(MAX_Y) as u32) << 12) | ((dir as u32) << 23);
+    let qb = (w as u32 - 1) | ((h as u32 - 1) << 5) | (ao << 10) | ((m as u32) << 18);
+    mesh.quads[dir].push(Quad { a: qa, b: qb, smooth, slot: 0 });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Malla con vértices e índices, como antes del formato de caras compactas.
+    #[derive(Default)]
+    struct LegacyMesh {
+        vertices: Vec<Vertex>,
+        groups: [Vec<u32>; 6],
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn legacy_emit(mesh: &mut LegacyMesh, tops: &[i32], offset: IVec3, axis: usize, u_ax: usize, v_ax: usize, sign: i32, slice: i32, i: i32, j: i32, w: i32, h: i32, key: u32) {
+        let m = (key & 0xff) as Mat;
+        let ao = (key >> 8) & 0xff;
+        let plane = if sign > 0 { slice + 1 } else { slice };
+        let grid = |du: i32, dv: i32| -> [i32; 3] {
+            let mut c = [0i32; 3];
+            c[axis] = plane;
+            c[u_ax] = i + du;
+            c[v_ax] = j + dv;
+            c
+        };
+        let terrain = is_terrain(m);
+        let rgb = palette::color(m);
+        let color = [rgb[0], rgb[1], rgb[2], m];
+        let dir = dir_index(axis, sign);
+        // Esquinas en orden antihorario visto desde la normal +eje (u × v = eje).
+        let corners = [(0, 0), (w, 0), (w, h), (0, h)];
+        let aos = [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3];
+        let base = mesh.vertices.len() as u32;
+        for (k, (du, dv)) in corners.iter().enumerate() {
+            let g = grid(*du, *dv);
+            let (sx, sz) = if terrain {
+                let sn = smooth_normal(tops, g[0] + 1, g[2] + 1);
+                ((sn[0] as i32 + 128) as u8, (sn[2] as i32 + 128) as u8)
+            } else {
+                (128, 128)
+            };
+            let p = [(g[0] + offset.x) as u16, (g[1] + offset.y) as u16, (g[2] + offset.z) as u16];
+            for a in 0..3 {
+                let _ = a;
+            }
+            mesh.vertices.push(Vertex { pos: [p[0], p[1], p[2], 0], color, info: [dir as u8 | ((aos[k] as u8) << 3), sx, sz, 0] });
+        }
+        // Se elige la diagonal según la oclusión para evitar el defecto de interpolación.
+        let flip = aos[0] + aos[2] < aos[1] + aos[3];
+        let tris: [u32; 6] = if flip { [1, 2, 3, 1, 3, 0] } else { [0, 1, 2, 0, 2, 3] };
+        for t in tris {
+            let idx = if sign > 0 { t } else { [0, 3, 2, 1][t as usize] };
+            mesh.groups[dir].push(base + idx);
+        }
+    }
+
+
+    /// Malla "como antes": las mismas caras voraces emitidas con el emisor anterior.
+    fn legacy_from(v: &[Mat], m: &Mesh) -> LegacyMesh {
+        let tops = terrain_tops(v);
+        let mut out = LegacyMesh::default();
+        for g in &m.quads {
+            for q in g {
+                let d = DIRS[q.dir()];
+                let axis = if d[0] != 0 { 0 } else if d[1] != 0 { 1 } else { 2 };
+                let sign = d[0] + d[1] + d[2];
+                let (u_ax, v_ax) = ((axis + 1) % 3, (axis + 2) % 3);
+                let base = q.base();
+                let plane = base[axis];
+                let slice = if sign > 0 { plane - 1 } else { plane };
+                let (w, h) = q.size();
+                let key = q.material() as u32 | (q.ao() << 8);
+                legacy_emit(&mut out, &tops, IVec3::ZERO, axis, u_ax, v_ax, sign, slice, base[u_ax], base[v_ax], w, h, key);
+            }
+        }
+        out
+    }
 
     fn empty() -> Vec<Mat> {
         vec![AIR; (P * P * P) as usize]
@@ -416,7 +570,8 @@ mod tests {
             }
         }
         let m = mesh_chunk(&v, IVec3::ZERO);
-        let ups: Vec<&Vertex> = m.vertices.iter().filter(|q| q.dir() == 0).collect();
+        let (verts, _) = m.expanded();
+        let ups: Vec<&Vertex> = verts.iter().filter(|q| q.dir() == 0).collect();
         assert!(!ups.is_empty());
         let avg_x: f32 = ups.iter().map(|q| q.smooth().x).sum::<f32>() / ups.len() as f32;
         assert!(avg_x < -0.08, "la normal suave no se inclina con la pendiente ({avg_x})");
@@ -427,32 +582,70 @@ mod tests {
         let mut v = empty();
         v[(5 + 5 * P + 5 * P * P) as usize] = palette::CAL;
         let m = mesh_chunk(&v, IVec3::ZERO);
-        let (indices, _) = m.indices_grouped();
-        for t in indices.chunks(3) {
-            let a = m.world_pos(&m.vertices[t[0] as usize]);
-            let b = m.world_pos(&m.vertices[t[1] as usize]);
-            let c = m.world_pos(&m.vertices[t[2] as usize]);
-            let face = (b - a).cross(c - a);
-            assert!(face.dot(m.vertices[t[0] as usize].normal()) > 0.0, "triángulo con orden invertido");
+        let (verts, groups) = m.expanded();
+        for g in &groups {
+            for t in g.chunks(3) {
+                let a = m.world_pos(&verts[t[0] as usize]);
+                let b = m.world_pos(&verts[t[1] as usize]);
+                let c = m.world_pos(&verts[t[2] as usize]);
+                let face = (b - a).cross(c - a);
+                assert!(face.dot(verts[t[0] as usize].normal()) > 0.0, "triángulo con orden invertido");
+            }
         }
     }
 
     #[test]
-    fn el_vertice_compacto_ocupa_16_bytes_y_se_desempaqueta_bien() {
+    fn la_cara_compacta_ocupa_20_bytes_y_se_desempaqueta_bien() {
         assert_eq!(std::mem::size_of::<Vertex>(), 16);
+        assert_eq!(std::mem::size_of::<Quad>(), 20);
         let mut v = empty();
         v[(5 + 5 * P + 5 * P * P) as usize] = palette::CAL;
         let m = mesh_chunk(&v, IVec3::new(0, 64, 0));
         // Cada grupo tiene solo caras de su dirección, y la posición respeta el desplazamiento.
-        for (d, g) in m.groups.iter().enumerate() {
+        let (verts, groups) = m.expanded();
+        for (d, g) in groups.iter().enumerate() {
             assert_eq!(g.len(), 6, "una cara por dirección");
             for &i in g {
-                let q = &m.vertices[i as usize];
+                let q = &verts[i as usize];
                 assert_eq!(q.dir(), d);
                 assert!(q.pos[1] >= 64 + 4 && q.pos[1] <= 64 + 5);
                 assert!(q.ao() <= 3);
+                assert_eq!(q.color[3], palette::CAL);
             }
         }
         assert_eq!((m.lo, m.hi), ([4, 68, 4], [5, 69, 5]));
+    }
+
+    /// Un terreno irregular con casas: la expansión de las caras compactas (lo que hace el
+    /// vertex shader) debe dar exactamente los mismos vértices e índices que el emisor anterior.
+    #[test]
+    fn la_expansion_de_las_caras_es_igual_a_la_malla_anterior() {
+        let mut v = empty();
+        for z in 0..P {
+            for x in 0..P {
+                let h = 3 + ((x * 7 + z * 13) % 5) + x / 6;
+                for y in 0..=h.min(P - 1) {
+                    v[(x + z * P + y * P * P) as usize] = if y == h { palette::GRASS } else { palette::DIRT };
+                }
+            }
+        }
+        for y in 10..18 {
+            for z in 8..14 {
+                for x in 8..20 {
+                    v[(x + z * P + y * P * P) as usize] = if y == 17 { palette::TILE } else { palette::CAL };
+                }
+            }
+        }
+        let m = mesh_chunk(&v, IVec3::ZERO);
+        let legacy = legacy_from(&v, &m);
+        let (verts, groups) = m.expanded();
+        assert!(m.quad_count() > 100);
+        assert_eq!(verts.len(), legacy.vertices.len());
+        for (a, b) in verts.iter().zip(legacy.vertices.iter()) {
+            assert_eq!((a.pos, a.color, a.info), (b.pos, b.color, b.info));
+        }
+        assert_eq!(groups, legacy.groups);
+        // Bytes: 20 por cara contra 4 vértices de 16 + 6 índices de 2.
+        assert!(m.quad_count() * 20 * 3 < legacy.vertices.len() * 16 + groups.iter().map(|g| g.len()).sum::<usize>() * 2);
     }
 }
