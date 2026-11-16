@@ -42,6 +42,22 @@ static func rider() -> ArrayMesh:
 		BuildingGen.box(st, Vector3(0, 2.34, -0.05), Vector3(0.5, 0.07, 0.5), Color(0.15, 0.12, 0.10)))
 
 
+## Carro de aguatero: un barril grande sobre dos ruedas tirado por un caballo.
+static func water_cart() -> ArrayMesh:
+	return _mesh(func(st: SurfaceTool):
+		var wood := Color(0.40, 0.29, 0.19)
+		BuildingGen.box(st, Vector3(0, 0.8, -1.2), Vector3(1.3, 0.2, 2.0), wood)
+		BuildingGen.box(st, Vector3(0, 1.0, -1.2), Vector3(1.1, 1.0, 1.8), Color(0.52, 0.38, 0.24))
+		for z in [-1.9, -0.5]:
+			BuildingGen.box(st, Vector3(0, 0.98, z), Vector3(1.16, 1.04, 0.1), Color(0.15, 0.15, 0.15))
+		for x in [-0.8, 0.8]:
+			BuildingGen.box(st, Vector3(x, 0, -1.2), Vector3(0.12, 1.5, 1.5), wood.darkened(0.3))
+		BuildingGen.box(st, Vector3(0, 0.75, 1.3), Vector3(0.5, 0.6, 1.6), Color(0.45, 0.32, 0.22))
+		for z in [0.75, 1.85]:
+			BuildingGen.box(st, Vector3(0, 0, z), Vector3(0.4, 0.75, 0.14), Color(0.35, 0.25, 0.18))
+		BuildingGen.box(st, Vector3(0, 1.1, 2.15), Vector3(0.24, 0.5, 0.4), Color(0.45, 0.32, 0.22)))
+
+
 static func cart() -> ArrayMesh:
 	return _mesh(func(st: SurfaceTool):
 		var wood := Color(0.42, 0.30, 0.19)

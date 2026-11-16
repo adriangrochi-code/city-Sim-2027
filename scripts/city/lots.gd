@@ -24,6 +24,8 @@ var lots := {}             # id -> {"c", "f", "zone", "level", "age", "seed", "n
 var obstacles: Array = []  # rectángulos orientados {"c", "f", "w", "d"} (plaza, iglesia)
 var plaza_center := Vector2(INF, INF)
 var show_candidates := false
+var overlay_mode := "zone"   # "zone" o "water"
+const ROOF_H := [0.0, 5.0, 5.6, 12.5]
 var _next := 1
 var _hash := {}
 var _mm: MultiMesh
@@ -243,7 +245,8 @@ func _valid(c: Vector2, f: Vector2) -> bool:
 func _add_lot(c: Vector2, f: Vector2) -> int:
 	var id := _next
 	_next += 1
-	lots[id] = {"id": id, "c": c, "f": f, "zone": 0, "level": 0, "age": 0, "seed": randi() % VARIANTS, "node": null}
+	lots[id] = {"id": id, "c": c, "f": f, "zone": 0, "level": 0, "age": 0, "seed": randi() % VARIANTS, "node": null,
+		"water": 0.0, "water_src": -1, "ruin": 0}
 	var k := _cell(c)
 	if not _hash.has(k):
 		_hash[k] = []
@@ -326,12 +329,13 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 		if pool - used < need:
 			continue
 		var ok := false
+		var water: float = lot["water"]
 		if lvl == 0:
-			ok = rng.randf() < 0.55
+			ok = int(lot["ruin"]) <= 0 and rng.randf() < 0.55
 		elif lvl == 1:
-			ok = lot["age"] >= 4 and land_value(lot) > 0.2 and rng.randf() < 0.15
+			ok = lot["age"] >= 4 and land_value(lot) > 0.2 and water >= 0.5 and rng.randf() < 0.15
 		else:
-			ok = lot["age"] >= 8 and land_value(lot) > 0.45 and frontage_type(lot) == RoadNetwork.Type.STONE and rng.randf() < 0.1
+			ok = lot["age"] >= 8 and land_value(lot) > 0.45 and water >= 0.85 and frontage_type(lot) == RoadNetwork.Type.STONE and rng.randf() < 0.1
 		if ok:
 			_set_level(lot, lvl + 1)
 			used += need
@@ -343,8 +347,45 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 
 func age_lots() -> void:
 	for id in lots:
-		if lots[id]["level"] > 0:
-			lots[id]["age"] += 1
+		var lot: Dictionary = lots[id]
+		if lot["level"] > 0:
+			lot["age"] += 1
+		elif int(lot["ruin"]) > 0:
+			lot["ruin"] = int(lot["ruin"]) - 1
+			if int(lot["ruin"]) == 0 and lot["node"] != null:
+				(lot["node"] as Node).queue_free()
+				lot["node"] = null
+
+
+## El fuego destruye la casa: quedan ruinas unos meses y después se puede reconstruir.
+func burn_down(id: int) -> void:
+	var lot: Dictionary = lots[id]
+	_set_level(lot, 0)
+	lot["ruin"] = 3
+	var mi := MeshInstance3D.new()
+	mi.mesh = BuildingGen.ruin_mesh(lot["seed"])
+	mi.material_override = _building_mat
+	var c: Vector2 = lot["c"]
+	var f: Vector2 = lot["f"]
+	var s := side_of(f)
+	var base := INF
+	for p in lot_corners(lot):
+		base = minf(base, gen.height(p.x, p.y))
+	mi.transform = Transform3D(Basis(Vector3(s.x, 0, s.y), Vector3.UP, Vector3(f.x, 0, f.y)), Vector3(c.x, base, c.y))
+	add_child(mi)
+	lot["node"] = mi
+	_overlay_dirty = true
+	lots_changed.emit()
+
+
+func refresh_overlay() -> void:
+	_overlay_dirty = true
+
+
+func set_overlay_mode(mode: String) -> void:
+	if mode != overlay_mode:
+		overlay_mode = mode
+		_overlay_dirty = true
 
 
 func _set_level(lot: Dictionary, lvl: int) -> void:
@@ -376,6 +417,15 @@ func _rebuild_overlay() -> void:
 	var items := []
 	for id in lots:
 		var lot: Dictionary = lots[id]
+		if overlay_mode == "water" and lot["level"] > 0:
+			var w: float = lot["water"]
+			var col := Color(1.0, 0.3, 0.25, 0.6)
+			if w >= 0.85:
+				col = Color(0.25, 0.55, 1.0, 0.6)
+			elif w >= 0.5:
+				col = Color(0.45, 0.8, 0.9, 0.6)
+			items.append([lot, col])
+			continue
 		if lot["level"] > 0:
 			continue
 		if lot["zone"] > 0:
@@ -389,7 +439,10 @@ func _rebuild_overlay() -> void:
 		var f: Vector2 = lot["f"]
 		var s := side_of(f)
 		var b := Basis(Vector3(s.x, 0, s.y) * (W - 1.2), Vector3.UP, Vector3(f.x, 0, f.y) * (D - 1.2))
-		_mm.set_instance_transform(i, Transform3D(b, Vector3(c.x, gen.height(c.x, c.y) + 0.6, c.y)))
+		var y := gen.height(c.x, c.y) + 0.6
+		if overlay_mode == "water" and lot["level"] > 0:
+			y += ROOF_H[lot["level"]]
+		_mm.set_instance_transform(i, Transform3D(b, Vector3(c.x, y, c.y)))
 		_mm.set_instance_color(i, items[i][1])
 
 

@@ -197,6 +197,29 @@ static func _parapet(st: SurfaceTool, bw: float, fd: float, front: float, h: flo
 	box(st, Vector3(-bw * 0.5 + t * 0.5, h, front - fd * 0.5), Vector3(t, 0.55, fd), wall)
 
 
+## Ruinas de una casa quemada: muros bajos ennegrecidos y vigas caídas.
+static func ruin_mesh(variant: int) -> ArrayMesh:
+	var key := "ruin_%d" % (variant % 4)
+	if _cache.has(key):
+		return _cache[key]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = variant * 31 + 7
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var soot := Color(0.16, 0.14, 0.13)
+	var ash := Color(0.30, 0.28, 0.26)
+	var z0 := 12.0 - rng.randf_range(2.0, 4.0)
+	box(st, Vector3(0, -0.3, z0 - 3.0), Vector3(7.0, 0.5, 6.0), ash)
+	box(st, Vector3(-3.3, 0, z0 - 3.0), Vector3(0.4, rng.randf_range(0.8, 1.8), 6.0), soot)
+	box(st, Vector3(3.3, 0, z0 - 3.0), Vector3(0.4, rng.randf_range(0.5, 1.4), 6.0), soot)
+	box(st, Vector3(-1.5, 0, z0), Vector3(3.5, rng.randf_range(0.6, 1.6), 0.4), soot)
+	var beam := Transform3D(Basis(Vector3.FORWARD, 0.4), Vector3(0.5, 0.3, z0 - 2.0))
+	box(st, Vector3.ZERO, Vector3(5.5, 0.25, 0.25), Color(0.10, 0.08, 0.07), beam)
+	var mesh := st.commit()
+	_cache[key] = mesh
+	return mesh
+
+
 ## Iglesia matriz (versión inicial del gran proyecto): nave, techo de teja y campanario.
 ## La fachada mira hacia +Z.
 static func church_mesh() -> ArrayMesh:

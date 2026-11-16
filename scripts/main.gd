@@ -13,10 +13,12 @@ const Lots = preload("res://scripts/city/lots.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
 const Agents = preload("res://scripts/agents/agents.gd")
+const Services = preload("res://scripts/city/services.gd")
+const Fires = preload("res://scripts/city/fires.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
-enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS }
+enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER }
 const TOOL_DEFS := [
 	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o el terreno para ver su información. F sigue al vecino elegido."},
 	{"key": "2", "name": "Plaza mayor", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
@@ -25,9 +27,11 @@ const TOOL_DEFS := [
 	{"key": "5", "name": "Damero", "hint": "Clic en una esquina, clic en la otra punta del primer lado y mueve el ratón para extender las manzanas (cuadras de 84 m). Tercer clic para trazar."},
 	{"key": "6", "name": "Zona mixta", "hint": "Pinta con el ratón los solares junto a las calles. Ahí se instalan los pobladores. [ y ] cambian el tamaño del pincel."},
 	{"key": "7", "name": "Quitar zona", "hint": "Pinta para quitar la zona (derriba lo construido)."},
-	{"key": "8", "name": "Demoler calle", "hint": "Haz clic sobre un tramo de calle para demolerlo."},
+	{"key": "8", "name": "Demoler", "hint": "Haz clic sobre un tramo de calle o un pozo, aljibe o puesto para demolerlo."},
 	{"key": "9", "name": "Parcelas", "hint": "Compra parcelas contiguas a las tuyas (mercedes de tierras). Se desbloquean más con la población."},
+	{"key": "0", "name": "Agua", "hint": "Construye pozos, aljibes o un puesto de aguadores junto a una calle (R gira). Las casas de azotea necesitan agua y las de altos, buena agua. Con agua cerca, los vecinos apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
 ]
+const WINDS := [["pampero", Vector2(0.7, -0.7)], ["sudestada", Vector2(-0.7, -0.7)], ["viento norte", Vector2(0.0, 1.0)], ["viento del este", Vector2(-1.0, 0.0)], ["brisa del río", Vector2(0.0, -1.0)]]
 const SPEEDS := [0.0, 1.0, 2.0, 4.0]
 const MONTH_SECONDS := 10.0
 const MONTHS := ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
@@ -46,6 +50,10 @@ var roads: RoadRenderer
 var lots: Lots
 var trees: Trees
 var agents: Agents
+var services: Services
+var fires: Fires
+var service_type := Services.Type.WELL
+var service_angle := 0.0
 var rig: CameraRig
 var hud: Hud
 
@@ -103,6 +111,14 @@ func _ready() -> void:
 	agents = Agents.new()
 	add_child(agents)
 	agents.setup(net, gen, lots, day)
+	services = Services.new()
+	add_child(services)
+	services.setup(gen, parcels, net, lots)
+	agents.services = services
+	fires = Fires.new()
+	add_child(fires)
+	fires.setup(lots, services, gen, _send_bucket_brigade)
+	fires.event.connect(hud_toast)
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.gen = gen
@@ -122,7 +138,7 @@ func _ready() -> void:
 	add_child(hud)
 	hud.setup(TOOL_DEFS)
 	hud.tool_selected.connect(_select_tool)
-	hud.road_type_selected.connect(_select_road_type)
+	hud.option_selected.connect(_on_option)
 	hud.speed_selected.connect(_select_speed)
 	parcels.changed.connect(terrain.refresh)
 	_select_road_type(RoadNetwork.Type.DIRT)
@@ -176,7 +192,12 @@ func _month_tick() -> void:
 		arrivals += ship
 		hud.toast("Llega un barco con %d pobladores" % ship)
 	pool = mini(pool + arrivals, 600)
-	money += int(pop * 1.2) - int(net.total_length() * 0.01)
+	money += int(pop * 1.2) - int(net.total_length() * 0.01) - services.upkeep()
+	services.update_water()
+	lots.refresh_overlay()
+	if rng.randf() < 0.35:
+		var w: Array = WINDS[rng.randi() % WINDS.size()]
+		fires.set_wind(w[1], w[0])
 	lots.age_lots()
 	var unlocked := 1
 	for s in PARCEL_STEPS:
@@ -197,6 +218,17 @@ func _month_tick() -> void:
 func _growth_tick() -> void:
 	var used := lots.grow_step(pool, rng)
 	pool -= used
+	fires.step()
+
+
+func hud_toast(text: String) -> void:
+	hud.toast(text)
+
+
+## Los vecinos salen de la fuente de agua con baldes hacia el incendio.
+func _send_bucket_brigade(from: Vector2, to: Vector2, n: int) -> void:
+	for k in n:
+		agents.spawn(Agents.Kind.WALK, from, to, -1, "lleva baldes de agua al incendio", rng.randi() % 100000, Agents.TEMPERS[2])
 
 
 func _refresh_hud() -> void:
@@ -208,6 +240,7 @@ func _refresh_hud() -> void:
 		"pool": "Pobladores esperando: %d" % pool,
 		"stage": "Etapa: %s" % _stage_name,
 		"parcels": "Parcelas: %d/%d" % [parcels.owned.size(), parcels.max_owned],
+		"wind": "Viento: %s%s" % [fires.wind_name, (" · %d incendios" % fires.burning.size()) if fires.burning.size() > 0 else ""],
 		"clock": "%s %s · %d en las calles" % [DayNight.WEEKDAYS[day.weekday()].capitalize(), day.clock_text(), agents.active_count()],
 	})
 	if agents.selected_id != -1:
@@ -227,12 +260,30 @@ func _select_tool(t: int) -> void:
 	_painting = false
 	hud.select_tool(t)
 	lots.set_show_candidates(t == Tool.ZONE or t == Tool.DEZONE)
+	lots.set_overlay_mode("water" if t == Tool.WATER else "zone")
 	terrain.set_overlay(t == Tool.PARCELS)
+	if t == Tool.STRAIGHT or t == Tool.CURVE or t == Tool.GRID:
+		hud.set_options("Tipo de calle (Tab):", ["Camino de tierra", "Calle empedrada"], road_type)
+	elif t == Tool.WATER:
+		var names := []
+		for k in Services.INFO:
+			names.append("%s (%s)" % [Services.INFO[k]["name"], Hud.fmt(Services.INFO[k]["cost"])])
+		hud.set_options("Construir (Tab):", names, service_type)
+	else:
+		hud.set_options("", [], -1)
 
 
 func _select_road_type(t: int) -> void:
 	road_type = t
-	hud.select_road_type(t)
+	hud.select_option(t)
+
+
+func _on_option(i: int) -> void:
+	if tool == Tool.WATER:
+		service_type = i
+		hud.select_option(i)
+	else:
+		_select_road_type(i)
 
 
 func _select_speed(s: int) -> void:
@@ -259,6 +310,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var k := (event as InputEventKey).keycode
 		if k >= KEY_1 and k <= KEY_9:
 			_select_tool(k - KEY_1)
+		elif k == KEY_0:
+			_select_tool(Tool.WATER)
 		elif k == KEY_ESCAPE:
 			if _stage > 0:
 				_stage = 0
@@ -267,11 +320,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif k == KEY_F and agents.selected_id != -1:
 			_follow = not _follow
 		elif k == KEY_TAB:
-			_select_road_type(1 - road_type)
+			if tool == Tool.WATER:
+				_on_option((service_type + 1) % Services.INFO.size())
+			else:
+				_select_road_type(1 - road_type)
 		elif k == KEY_SPACE:
 			_select_speed(0 if speed > 0 else 1)
 		elif k == KEY_R:
 			plaza_angle += deg_to_rad(15.0)
+			service_angle += deg_to_rad(15.0)
 		elif k == KEY_BRACKETLEFT:
 			brush = maxf(10.0, brush - 10.0)
 		elif k == KEY_BRACKETRIGHT:
@@ -325,7 +382,15 @@ func _on_click() -> void:
 					_stage = 0
 		Tool.ZONE, Tool.DEZONE:
 			_painting = true
+		Tool.WATER:
+			place_service(service_type, _hover, service_angle)
 		Tool.BULLDOZE:
+			var sid := services.at(_hover)
+			if sid != -1:
+				services.remove(sid)
+				services.update_water()
+				lots.refresh_overlay()
+				return
 			var e := net.nearest_edge(_hover, 10.0)
 			if e["edge"] != -1:
 				net.remove_edge(e["edge"])
@@ -534,6 +599,23 @@ func found_plaza(c: Vector2, angle: float) -> bool:
 	return true
 
 
+func place_service(type: int, c: Vector2, angle: float) -> bool:
+	var err := services.problem(type, c, angle)
+	if err != "":
+		hud.toast(err)
+		return false
+	var cost: int = Services.INFO[type]["cost"]
+	if cost > money:
+		hud.toast("Fondos insuficientes: hacen falta %s pesos" % Hud.fmt(cost))
+		return false
+	money -= cost
+	services.place(type, c, angle)
+	services.update_water()
+	lots.refresh_overlay()
+	trees.mark_dirty()
+	return true
+
+
 func _buy_parcel(t: Vector2i) -> void:
 	var err := parcels.buy_problem(t)
 	if err != "":
@@ -555,6 +637,9 @@ func _tree_blocked(p: Vector2) -> bool:
 # --- Información ---------------------------------------------------------------------
 
 func _describe(p: Vector2) -> String:
+	var sid := services.at(p)
+	if sid != -1:
+		return services.describe(sid)
 	var id := lots.lot_at(p)
 	if id != -1:
 		var lot: Dictionary = lots.lots[id]
@@ -565,6 +650,13 @@ func _describe(p: Vector2) -> String:
 		txt += "Habitantes: %d\n" % Lots.CAP[lvl]
 		txt += "Valor del suelo: %d%%\n" % int(lots.land_value(lot) * 100.0)
 		txt += "Calle: %s\n" % (RoadNetwork.NAMES[ft] if ft >= 0 else "—")
+		if lvl > 0:
+			var w: float = lot["water"]
+			txt += "Agua: %s\n" % ("buena" if w >= 0.85 else ("regular (pozo)" if w >= 0.5 else "sin agua cerca"))
+		if fires.is_burning(id):
+			txt += "¡EN LLAMAS!\n"
+		elif lvl == 0 and int(lot["ruin"]) > 0:
+			txt += "Ruinas de un incendio: se podrá reconstruir en %d meses\n" % lot["ruin"]
 		if lot["zone"] > 0 and lvl < 3:
 			txt += "\n¿Por qué no crece?\n" + _why_not(lot)
 		return txt
@@ -582,6 +674,11 @@ func _why_not(lot: Dictionary) -> String:
 	var reasons := []
 	if pool < need:
 		reasons.append("· Faltan pobladores: esperan barcos con más familias.")
+	var water: float = lot["water"]
+	if lvl == 1 and water < 0.5:
+		reasons.append("· Falta agua: construye un pozo o un aljibe cerca.")
+	if lvl == 2 and water < 0.85:
+		reasons.append("· Necesita buena agua: un aljibe o los aguadores.")
 	if lvl == 1:
 		if lot["age"] < 4:
 			reasons.append("· El rancho es muy reciente.")
@@ -668,7 +765,19 @@ func _update_preview() -> void:
 					_dyn_hint = "Costo: %s pesos %s" % [Hud.fmt(cost), ("· " + err) if err != "" else ""]
 			Tool.ZONE, Tool.DEZONE:
 				_circle(_hover, brush, Color(0.5, 0.9, 0.4, 0.8) if tool == Tool.ZONE else Color(1.0, 0.45, 0.35, 0.8))
+			Tool.WATER:
+				var ok := services.problem(service_type, _hover, service_angle) == ""
+				_outline(services.corners(service_type, _hover, services.frame(service_angle)), 1.5, _ok_col(ok))
+				_circle(_hover, Services.INFO[service_type]["radius"], Color(0.4, 0.7, 1.0, 0.7))
+				for sid in services.items:
+					var it: Dictionary = services.items[sid]
+					_circle(it["c"], Services.INFO[it["type"]]["radius"], Color(0.4, 0.7, 1.0, 0.35))
+				_dyn_hint = "%s · %s" % [Services.INFO[service_type]["desc"], services.problem(service_type, _hover, service_angle)]
 			Tool.BULLDOZE:
+				var bs := services.at(_hover)
+				if bs != -1:
+					var it: Dictionary = services.items[bs]
+					_outline(services.corners(it["type"], it["c"], it["f"]), 1.5, Color(1.0, 0.3, 0.25, 0.7))
 				var e := net.nearest_edge(_hover, 10.0)
 				if e["edge"] != -1:
 					var ed: Dictionary = net.edges[e["edge"]]
@@ -769,6 +878,22 @@ func _handle_args() -> void:
 	if args.has("time"):
 		day.time = float(args["time"])
 		day.apply()
+	if args.has("fire"):
+		# Prende fuego a ranchos sin agua cerca (para probar la propagación).
+		var cands := []
+		for lid in lots.lots:
+			if lots.lots[lid]["level"] == 1 and services.fire_source(lots.lots[lid]["c"]) == -1:
+				cands.append(lid)
+		if not cands.is_empty():
+			var first: int = cands[rng.randi() % cands.size()]
+			fires.ignite(first)
+			var fc: Vector2 = lots.lots[first]["c"]
+			for k in int(args["fire"]) - 1:
+				var near := lots._nearby(fc)
+				fires.ignite(near[rng.randi() % near.size()])
+			if not args.has("cam"):
+				rig.look_at_point(Vector3(fc.x, gen.height(fc.x, fc.y), fc.y), 110.0)
+				rig.pitch = deg_to_rad(-26.0)
 	if args.has("simulate"):
 		simulate(float(args["simulate"]))
 	if args.has("tool"):
@@ -795,6 +920,13 @@ func _handle_args() -> void:
 
 
 func print_stats() -> void:
+	var water := [0, 0, 0]
+	for id in lots.lots:
+		var lot: Dictionary = lots.lots[id]
+		if lot["level"] > 0:
+			var w: float = lot["water"]
+			water[2 if w >= 0.85 else (1 if w >= 0.5 else 0)] += 1
+	print("Agua: buena %d · regular %d · sin agua %d · fuentes %d · incendios activos %d, apagados %d, casas quemadas %d" % [water[2], water[1], water[0], services.items.size(), fires.burning.size(), fires.put_out_total, fires.destroyed_total])
 	print("Calles: %d tramos, %d nodos, %.0f m · Solares: %d (zonificados %d, edificados %d) · Población: %d · Pesos: %d · Esperando: %d" % [
 		net.edges.size(), net.nodes.size(), net.total_length(), lots.lots.size(), lots.count_zoned(),
 		lots.count_built(), lots.population(), money, pool])
@@ -815,6 +947,12 @@ func build_demo() -> void:
 	road_type = RoadNetwork.Type.DIRT
 	var exit := c - f * (BLOCK * (0.5 + k))
 	build_road(RoadNetwork.bezier(exit, exit - f * 350.0 + s * 250.0, exit - f * 700.0 - s * 50.0))
+	# Agua: aljibes cerca de la plaza y pozos en los barrios.
+	for i in range(-3, 4, 2):
+		for j in range(-3, 4, 2):
+			var corner := c + s * (BLOCK * (i * 0.5)) + f * (BLOCK * (j * 0.5)) + (s * signf(i) + f * signf(j)) * 13.0
+			place_service(Services.Type.CISTERN, corner, plaza_angle)
+			place_service(Services.Type.WELL, corner + s * (BLOCK * signf(i)) - (s * signf(i)) * 18.0, plaza_angle)
 	lots.paint(c, 420.0, 1)
 	lots.paint(exit - f * 400.0, 200.0, 1)
 	_select_tool(Tool.INSPECT)
@@ -828,6 +966,8 @@ func simulate(seconds: float) -> void:
 	for i in n:
 		day.advance(dt / day.day_length)
 		agents.tick(dt)
+		if i % 5 == 4:
+			fires.step()
 	print("Costo medio por paso de 0,1 s: %.2f ms" % ((Time.get_ticks_usec() - t0) / 1000.0 / maxf(n, 1)))
 	day.apply()
 	agents._render()
@@ -842,6 +982,7 @@ func simulate(seconds: float) -> void:
 
 
 func fast_forward(months: int) -> void:
+	services.update_water()
 	for m in months:
 		_month_tick()
 		for g in int(MONTH_SECONDS / 0.5):

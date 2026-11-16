@@ -343,7 +343,7 @@ Duración objetivo de la época: **entre 4 y 8 horas** de juego.
 
 ## 14. Alcance del primer prototipo
 
-> **Estado:** en desarrollo. Hechos los puntos 1, 2, 3, 6 (vecinos y carretas; falta el portón) y 7 (sin serenos todavía). Pendientes: 4 y 5.
+> **Estado:** en desarrollo. Hechos los puntos 1, 2, 3, 4 (agua e incendios), 6 (vecinos y carretas; falta el portón) y 7 (sin serenos todavía). Pendiente: 5 (puerto).
 
 Un recorte mínimo para validar lo esencial de esta época:
 1. Mapa grande con península, bahía, arroyos y cuchillas; parcela inicial más la compra de

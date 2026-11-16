@@ -13,10 +13,11 @@ const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
 const Lots = preload("res://scripts/city/lots.gd")
 const DayNight = preload("res://scripts/world/day_night.gd")
 const Router = preload("res://scripts/agents/router.gd")
+const Services = preload("res://scripts/city/services.gd")
 const AgentMeshes = preload("res://scripts/agents/agent_meshes.gd")
 
-enum Kind { WALK, RIDER, CART }
-const KIND_NAMES := ["a pie", "a caballo", "en carreta de bueyes"]
+enum Kind { WALK, RIDER, CART, WATER }
+const KIND_NAMES := ["a pie", "a caballo", "en carreta de bueyes", "en carro de aguatero"]
 const TIME_SCALE := 10.0      # los agentes se mueven 10 veces más rápido que el tiempo real
 const MAX_AGENTS := 1200
 const STEP := 0.1             # paso fijo de la simulación de movimiento (segundos simulados)
@@ -25,6 +26,7 @@ const PARAMS := {
 	Kind.WALK: {"v0": 1.35, "a": 1.0, "b": 1.5, "T": 0.8, "s0": 0.8, "len": 0.6},
 	Kind.RIDER: {"v0": 3.8, "a": 1.3, "b": 2.2, "T": 1.3, "s0": 2.0, "len": 2.6},
 	Kind.CART: {"v0": 1.15, "a": 0.25, "b": 0.6, "T": 2.4, "s0": 3.0, "len": 7.5},
+	Kind.WATER: {"v0": 1.9, "a": 0.6, "b": 1.2, "T": 1.8, "s0": 2.5, "len": 5.0},
 }
 const TEMPERS := [
 	{"name": "prudente", "v0": 0.9, "T": 1.35, "overtake": 0.0},
@@ -44,6 +46,7 @@ var gen: TerrainGen
 var lots: Lots
 var day: DayNight
 var router := Router.new()
+var services: Services
 var speed_mult := 1.0
 var residents := {}
 var agents: Array = []
@@ -81,6 +84,7 @@ func setup(n: RoadNetwork, g: TerrainGen, l: Lots, d: DayNight) -> void:
 	_mm["horse"] = _make_mm(AgentMeshes.horse())
 	_mm["rider"] = _make_mm(AgentMeshes.rider())
 	_mm["cart"] = _make_mm(AgentMeshes.cart())
+	_mm["aguador"] = _make_mm(AgentMeshes.water_cart())
 
 
 func _make_mm(mesh: Mesh) -> MultiMesh:
@@ -193,6 +197,25 @@ func _build_schedule() -> void:
 				var m := 10.5 + _rng.randf() * 1.5
 				_schedule.append([m / 24.0, id, "al mercado de la plaza"])
 				_schedule.append([(m + 0.8 + _rng.randf() * 0.7) / 24.0, id, "de vuelta del mercado"])
+	# Quien se abastece de un pozo o aljibe manda a alguien de la casa a buscar agua.
+	if services != null:
+		for lot_id in _by_lot:
+			if not lots.lots.has(lot_id) or (_by_lot[lot_id] as Array).is_empty():
+				continue
+			var src: int = lots.lots[lot_id]["water_src"]
+			if src == -1 or not services.items.has(src) or services.items[src]["type"] == Services.Type.WATER_CARRIERS:
+				continue
+			var rid: int = _by_lot[lot_id][_rng.randi() % (_by_lot[lot_id] as Array).size()]
+			var t := (7.0 if _rng.randf() < 0.6 else 16.5) + _rng.randf() * 1.5
+			_schedule.append([t / 24.0, rid, "a buscar agua"])
+			_schedule.append([(t + 0.6 + _rng.randf() * 0.4) / 24.0, rid, "de vuelta con el agua"])
+		# Los aguadores reparten en carro a las casas que abastecen.
+		for sid in services.items:
+			var it: Dictionary = services.items[sid]
+			if it["type"] != Services.Type.WATER_CARRIERS:
+				continue
+			for k in mini(12, 2 + int(it["served"]) / 40):
+				_schedule.append([(7.0 + _rng.randf() * 9.0) / 24.0, -2 - int(sid), "reparte agua"])
 	# Carretas que traen cueros y alimentos del campo durante el día.
 	var carts := 4 + int(lots.population() / 70.0)
 	for k in carts:
@@ -214,6 +237,8 @@ func _spawn_scheduled() -> void:
 		_sched_i += 1
 		if item[1] == -1:
 			_spawn_cart()
+		elif item[1] <= -2:
+			_spawn_water_cart(-2 - int(item[1]))
 		elif residents.has(item[1]):
 			_spawn_resident_trip(residents[item[1]], item[2])
 	for i in range(_pending.size() - 1, -1, -1):
@@ -251,6 +276,19 @@ func _spawn_resident_trip(r: Dictionary, purpose: String) -> void:
 	elif purpose == "de vuelta del mercado":
 		a = _plaza_point()
 		b = home
+	elif purpose == "a buscar agua" or purpose == "de vuelta con el agua":
+		var src: int = lots.lots[r["home"]]["water_src"]
+		if services == null or not services.items.has(src):
+			return
+		var well: Vector2 = services.items[src]["c"]
+		if purpose == "a buscar agua":
+			a = home
+			b = well
+		else:
+			a = well
+			b = home
+		spawn(Kind.WALK, a, b, r["id"], purpose, r["route_seed"], TEMPERS[r["temper"]])
+		return
 	else:
 		a = home
 		b = _plaza_point()
@@ -271,6 +309,23 @@ func _spawn_cart() -> void:
 	var id := spawn(Kind.CART, from, _plaza_point(), -1, "trae cueros y trigo del campo", _rng.randi() % 100000, temper)
 	if id != -1:
 		by_id[id]["carter"] = "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
+
+
+func _spawn_water_cart(sid: int) -> void:
+	if services == null or not services.items.has(sid):
+		return
+	var depot: Vector2 = services.items[sid]["c"]
+	var served := []
+	for lot_id in lots.lots:
+		if lots.lots[lot_id]["water_src"] == sid:
+			served.append(lot_id)
+	if served.is_empty():
+		return
+	var dest: Vector2 = lots.front_point(lots.lots[served[_rng.randi() % served.size()]])
+	var id := spawn(Kind.WATER, depot, dest, -1, "reparte agua del arroyo casa por casa", _rng.randi() % 100000, TEMPERS[1])
+	if id != -1:
+		by_id[id]["carter"] = "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
+		by_id[id]["depot"] = depot
 
 
 ## Entrada desde el campo: el extremo de calle más alejado de la plaza.
@@ -652,6 +707,18 @@ func _arrive(ag: Dictionary) -> void:
 		if took > float(ag["expect"]) * 1.5 and ag["kind"] != Kind.WALK:
 			r["route_seed"] = _rng.randi() % 100000
 			r["replans"] = int(r["replans"]) + 1
+	elif ag["kind"] == Kind.WATER and ag.has("depot"):
+		# El aguatero vuelve al puesto a llenar los barriles.
+		var leg: Array = ag["legs"][ag["li"]]
+		var L: float = net.edges[leg[0]]["len"]
+		var here: Vector2 = net.edge_point(leg[0], float(ag["s"]) if int(leg[1]) == 0 else L - float(ag["s"]))[0]
+		var depot2: Vector2 = ag["depot"]
+		var carter2: String = ag.get("carter", "un aguatero")
+		var back2 := func():
+			var nid := spawn(Kind.WATER, here, depot2, -1, "vuelve al puesto a llenar los barriles", _rng.randi() % 100000, TEMPERS[1])
+			if nid != -1:
+				by_id[nid]["carter"] = carter2
+		_pending.append([sim_time + 30.0 + _rng.randf() * 60.0, back2])
 	elif ag["kind"] == Kind.CART and String(ag["purpose"]).begins_with("trae"):
 		# La carreta descarga en el mercado y vuelve al campo más tarde.
 		var entry := _entry_node()
@@ -698,7 +765,7 @@ func _target_pos(ag: Dictionary) -> Array:
 
 
 func _render() -> void:
-	var counts := {"walk": 0, "horse": 0, "rider": 0, "cart": 0}
+	var counts := {"walk": 0, "horse": 0, "rider": 0, "cart": 0, "aguador": 0}
 	for ag in agents:
 		var tp := _target_pos(ag)
 		var target: Vector3 = tp[0]
@@ -722,6 +789,8 @@ func _render() -> void:
 				_put("rider", counts, xf, ag["col"])
 			Kind.CART:
 				_put("cart", counts, xf, Color(1, 1, 1))
+			Kind.WATER:
+				_put("aguador", counts, xf, Color(1, 1, 1))
 	for k in counts:
 		(_mm[k] as MultiMesh).visible_instance_count = counts[k]
 
@@ -772,6 +841,10 @@ func describe(id: int) -> String:
 		txt += "Temperamento: %s\n" % TEMPERS[r["temper"]]["name"]
 	elif ag["kind"] == Kind.CART:
 		txt += "Carreta de bueyes\nCarretero: %s\nTemperamento: %s\n" % [ag.get("carter", "—"), ag["temper"]["name"]]
+	elif ag["kind"] == Kind.WATER:
+		txt += "Carro de aguatero\nAguatero: %s\n" % ag.get("carter", "—")
+	elif String(ag["purpose"]).contains("baldes"):
+		txt += "Vecino voluntario\n"
 	txt += "Va %s, %s\n" % [ag["purpose"], KIND_NAMES[ag["kind"]]]
 	txt += "Estado: %s\n" % ag["state"]
 	txt += "Velocidad: %.1f km/h\n" % (float(ag["v"]) * 3.6)

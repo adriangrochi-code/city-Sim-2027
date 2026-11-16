@@ -34,15 +34,21 @@ Qué incluye:
   de seguridad (IDM), cesión de paso en los cruces, adelantamiento prudente y temperamentos.
   Se puede inspeccionar a cualquier vecino y seguirlo con la cámara (F).
 
-Pendiente para los siguientes pasos: agua (aljibes y aguadores), incendios, puerto y flujos,
-muralla con portones y serenos con faroles.
+- **Agua:** pozos de balde, aljibes públicos y puestos de aguadores (junto a un arroyo). Los
+  vecinos van a buscar agua y los aguateros reparten en carro. Las casas de azotea necesitan
+  agua y las de altos, buena agua. Capa de datos de agua con la herramienta Agua (tecla 0).
+- **Incendios:** los ranchos de paja se prenden con facilidad y el fuego salta a los vecinos a
+  favor del viento (pampero, sudestada…). Con agua cerca, los vecinos forman una cadena de
+  baldes; si no, la casa se quema y quedan ruinas unos meses.
+
+Pendiente para los siguientes pasos: puerto y flujos, muralla con portones y serenos con faroles.
 
 ### Cómo ejecutarlo
 1. Instala [Godot 4.3](https://godotengine.org/download) o superior.
 2. Abre `project.godot` desde Godot y pulsa F5.
 
 Controles: WASD mover · Q/E girar · rueda zoom · botón central orbitar · botón derecho arrastrar ·
-1–9 herramientas · Tab tipo de calle · R girar la plaza · [ ] tamaño del pincel · Espacio pausa ·
+1–9 y 0 herramientas · Tab tipo de calle o de servicio · R girar la plaza · [ ] tamaño del pincel · Espacio pausa ·
 Esc cancelar.
 
 Modo demostración (ciudad ya trazada y 5 años simulados):

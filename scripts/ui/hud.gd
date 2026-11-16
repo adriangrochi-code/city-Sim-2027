@@ -2,7 +2,7 @@ extends CanvasLayer
 ## Interfaz con estética de plano colonial: papel envejecido y tinta sepia.
 
 signal tool_selected(tool: int)
-signal road_type_selected(type: int)
+signal option_selected(index: int)
 signal speed_selected(speed: int)
 
 const PAPER := Color(0.91, 0.87, 0.77, 0.95)
@@ -12,7 +12,9 @@ const BORDER := Color(0.54, 0.43, 0.30)
 
 var _labels := {}
 var _tool_buttons: Array[Button] = []
-var _road_buttons: Array[Button] = []
+var _opt_buttons: Array[Button] = []
+var _opt_row: HBoxContainer
+var _opt_label: Label
 var _speed_buttons: Array[Button] = []
 var _hint: Label
 var _info: Label
@@ -35,7 +37,7 @@ func setup(tool_defs: Array) -> void:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 22)
 	top.add_child(hb)
-	for key in ["date", "money", "pop", "pool", "stage", "parcels"]:
+	for key in ["date", "money", "pop", "pool", "stage", "parcels", "wind"]:
 		var l := Label.new()
 		hb.add_child(l)
 		_labels[key] = l
@@ -77,20 +79,11 @@ func setup(tool_defs: Array) -> void:
 		b.pressed.connect(func(): tool_selected.emit(i))
 		tools_row.add_child(b)
 		_tool_buttons.append(b)
-	var road_row := HBoxContainer.new()
-	road_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	vb.add_child(road_row)
-	var lbl := Label.new()
-	lbl.text = "Tipo de calle (Tab):"
-	road_row.add_child(lbl)
-	for i in 2:
-		var b := Button.new()
-		b.text = ["Camino de tierra", "Calle empedrada"][i]
-		b.toggle_mode = true
-		b.focus_mode = Control.FOCUS_NONE
-		b.pressed.connect(func(): road_type_selected.emit(i))
-		road_row.add_child(b)
-		_road_buttons.append(b)
+	_opt_row = HBoxContainer.new()
+	_opt_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_child(_opt_row)
+	_opt_label = Label.new()
+	_opt_row.add_child(_opt_label)
 
 	# Instrucciones de la herramienta (abajo a la izquierda).
 	var hint_panel := PanelContainer.new()
@@ -185,9 +178,27 @@ func select_tool(i: int) -> void:
 		_tool_buttons[k].set_pressed_no_signal(k == i)
 
 
-func select_road_type(i: int) -> void:
-	for k in _road_buttons.size():
-		_road_buttons[k].set_pressed_no_signal(k == i)
+## Segunda fila de la barra: opciones de la herramienta actual (tipo de calle, de pozo…).
+func set_options(title: String, names: Array, selected: int) -> void:
+	for b in _opt_buttons:
+		b.queue_free()
+	_opt_buttons.clear()
+	_opt_label.text = title
+	_opt_row.visible = not names.is_empty()
+	for i in names.size():
+		var b := Button.new()
+		b.text = names[i]
+		b.toggle_mode = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func(): option_selected.emit(i))
+		_opt_row.add_child(b)
+		_opt_buttons.append(b)
+	select_option(selected)
+
+
+func select_option(i: int) -> void:
+	for k in _opt_buttons.size():
+		_opt_buttons[k].set_pressed_no_signal(k == i)
 
 
 func select_speed(i: int) -> void:
