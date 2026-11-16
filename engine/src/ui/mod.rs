@@ -16,6 +16,7 @@ use crate::city::game::fmt_thousands;
 use crate::city::game::{stage_name, Game, Inspect, InspectKind, Tool, TOOLS};
 use crate::city::economy::{Economy, Res, Sector, Tax, ORDINANCES, TAX_MAX, TOGGLE_COST};
 use crate::city::roads::RoadKind;
+use crate::city::lots::{Demand, Density, ZoneKind};
 use crate::terrain::TerrainGen;
 use egui::{vec2, Align2, Color32, RichText, Sense};
 use icons::Icon;
@@ -34,7 +35,7 @@ pub const SOON: &str = "Próximamente";
 
 /// Nombre corto y atajo de cada herramienta (en el orden de `TOOLS`).
 pub fn tool_short(i: usize) -> &'static str {
-    ["Plaza mayor", "Calle recta", "Calle curva", "Damero", "Zona mixta", "Quitar zona", "Demoler calle", "Inspeccionar"][i.min(7)]
+    ["Plaza mayor", "Calle recta", "Calle curva", "Damero", "Zonificar", "Quitar zona", "Demoler calle", "Inspeccionar"][i.min(7)]
 }
 
 pub fn tool_shortcut(i: usize) -> String {
@@ -134,6 +135,15 @@ impl Card {
         };
         Card { icon, name: tool_short(i), cost, tip: format!("{tip} · {}", tool_shortcut(i)), action: Some(UiAction::Tool(i)), disabled, selected: game.tool == tool }
     }
+    fn zone(game: &Game, k: ZoneKind, icon: Icon, name: &'static str, tip: &str) -> Card {
+        let mut c = Card::tool(game, 4, icon, String::new(), tip);
+        let d = game.city.demand().of(k);
+        c.name = name;
+        c.cost = format!("demanda {}{} %", if d >= 0.0 { "+" } else { "" }, (d * 100.0).round() as i32);
+        c.action = Some(UiAction::Zone(k));
+        c.selected = game.tool == Tool::Zone && game.zone_kind == k;
+        c
+    }
     fn soon(icon: Icon, name: &'static str, tip: &str) -> Card {
         Card { icon, name, cost: String::new(), tip: format!("{tip} (todavía no está en el motor)"), action: None, disabled: Some(SOON.to_string()), selected: false }
     }
@@ -152,7 +162,9 @@ pub fn cards(cat: Category, game: &Game, list_open: bool, budget_open: bool) -> 
             Card::tool(game, 6, Icon::Demoler, "20 pesos".into(), "Demoler un tramo de calle"),
         ],
         Category::Zonas => vec![
-            Card::tool(game, 4, Icon::Zonas, "gratis".into(), "Pintar zona mixta: vivienda, tienda y taller"),
+            Card::zone(game, ZoneKind::Residencial, Icon::Vecinos, "Residencial", "Casas: rancho, casa de azotea y casa de altos. Traen pobladores"),
+            Card::zone(game, ZoneKind::Comercial, Icon::Comercio, "Comercial", "Pulperías, tiendas y almacenes: empleo y alcabala"),
+            Card::zone(game, ZoneKind::Industrial, Icon::Produccion, "Industrial", "Talleres, curtiembres y barracas: empleo, ladrillos, sebo y cueros. Molestan a los vecinos"),
             Card::tool(game, 5, Icon::QuitarZona, "gratis".into(), "Quitar la zona de los solares"),
             Card::soon(Icon::Quintas, "Quintas", "Chacras y quintas en el ejido"),
         ],
@@ -365,6 +377,9 @@ impl ListPanel {
 pub enum UiAction {
     Tool(usize),
     Kind(RoadKind),
+    /// Pincel de zonas: tipo (elige también la herramienta) y densidad.
+    Zone(ZoneKind),
+    Density(Density),
     Brush(f32),
     Speed(f32),
     Hour(f32),
@@ -567,6 +582,20 @@ impl GameUi {
                         }
                         Options::Brush => {
                             ui.add_space(16.0);
+                            ui.label(RichText::new("Densidad:").small());
+                            for d in Density::ALL {
+                                let tip = match d {
+                                    Density::Baja => "Una planta: ranchos, pulperías y talleres",
+                                    Density::Media => "Hasta dos plantas (casas de altos, almacenes, barracas)",
+                                    Density::Alta => "Empieza en edificios de material y crece hasta dos plantas con más gente. Necesita calle empedrada",
+                                };
+                                if ui.selectable_label(game.density == d, RichText::new(capitalize(d.name())).small()).on_hover_text(tip).clicked() {
+                                    acts.push(UiAction::Density(d));
+                                }
+                            }
+                            ui.add_space(12.0);
+                            demand_meter(ui, game.city.demand());
+                            ui.add_space(12.0);
                             ui.label(RichText::new("Pincel:").small()).on_hover_text("Atajos: [ y ]");
                             let mut b = game.brush;
                             if ui.add(egui::Slider::new(&mut b, 10.0..=150.0).suffix(" m").integer()).on_hover_text("Atajos: [ y ]").changed() {
@@ -747,7 +776,7 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, acts: &mut Vec<UiAction>) 
                     }
                 }
                 let actions: &[(&str, &str, usize)] = match info.kind {
-                    InspectKind::Lot => &[("Zonificar", "Pintar zona mixta alrededor · atajo: 5", 4), ("Quitar zona", "Quitar la zona · atajo: 6", 5)],
+                    InspectKind::Lot => &[("Zonificar", "Pintar la zona elegida alrededor · atajo: 5", 4), ("Quitar zona", "Quitar la zona · atajo: 6", 5)],
                     InspectKind::Road => &[("Demoler tramo", "Elegir la herramienta de demoler · atajo: 7", 6), ("Calle nueva", "Trazar una calle recta desde aquí · atajo: 2", 1)],
                     InspectKind::Terrain => &[("Calle recta", "Trazar una calle · atajo: 2", 1)],
                 };
@@ -887,6 +916,25 @@ pub fn list_panel(ctx: &egui::Context, panel: &ListPanel, reserved_bottom: f32, 
         });
     });
 }
+/// Medidor de demanda residencial, comercial e industrial: tres barras que suben (verde) o
+/// bajan (rojo) desde el centro.
+pub fn demand_meter(ui: &mut egui::Ui, d: Demand) {
+    let (rect, resp) = ui.allocate_exact_size(vec2(84.0, 36.0), egui::Sense::hover());
+    let p = ui.painter();
+    let mid = rect.top() + 13.0;
+    for (k, (v, label)) in [(d.r, "R"), (d.c, "C"), (d.i, "I")].into_iter().enumerate() {
+        let x = rect.left() + 6.0 + k as f32 * 27.0;
+        let h = v.clamp(-1.0, 1.0) * 11.0;
+        p.rect_filled(egui::Rect::from_min_max(egui::pos2(x, mid - 11.0), egui::pos2(x + 16.0, mid + 11.0)), 2.0, theme::INK_SOFT.gamma_multiply(0.15));
+        let bar = egui::Rect::from_two_pos(egui::pos2(x, mid), egui::pos2(x + 16.0, mid - h));
+        p.rect_filled(bar, 1.0, if v >= 0.0 { theme::GOOD } else { theme::BAD });
+        p.line_segment([egui::pos2(x - 1.0, mid), egui::pos2(x + 17.0, mid)], egui::Stroke::new(1.0_f32, theme::INK_SOFT));
+        p.text(egui::pos2(x + 8.0, rect.bottom()), Align2::CENTER_BOTTOM, label, egui::FontId::proportional(11.0), theme::INK);
+    }
+    let pct = |v: f32| format!("{}{} %", if v >= 0.0 { "+" } else { "" }, (v * 100.0).round() as i32);
+    resp.on_hover_text(format!("Demanda · residencial {} · comercial {} · industrial {}", pct(d.r), pct(d.c), pct(d.i)));
+}
+
 /// Aplica las acciones de la interfaz al juego (la hora vive en la sesión: se devuelve el
 /// cambio para que el llamador la ajuste).
 pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
@@ -895,6 +943,11 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
         match a {
             UiAction::Tool(i) => game.set_tool(*i),
             UiAction::Kind(k) => game.kind = *k,
+            UiAction::Zone(k) => {
+                game.set_tool(4);
+                game.zone_kind = *k;
+            }
+            UiAction::Density(d) => game.density = *d,
             UiAction::Brush(b) => game.brush = b.clamp(10.0, 150.0),
             UiAction::Speed(v) => game.speed = *v,
             UiAction::Hour(d) => hour_delta += d,
@@ -964,7 +1017,7 @@ mod tests {
         assert_eq!(CATEGORIES.len(), 8);
         // Cada herramienta del juego aparece en alguna tarjeta, con su atajo en el globo.
         for (i, _) in TOOLS.iter().enumerate() {
-            let found = CATEGORIES.iter().flat_map(|c| cards(*c, &g, false, false)).find(|c| c.action == Some(UiAction::Tool(i))).expect("la herramienta tiene tarjeta");
+            let found = CATEGORIES.iter().flat_map(|c| cards(*c, &g, false, false)).find(|c| c.action == Some(UiAction::Tool(i)) || (i == 4 && c.action == Some(UiAction::Zone(ZoneKind::Residencial)))).expect("la herramienta tiene tarjeta");
             assert!(found.tip.contains(&format!("atajo: {}", i + 1)), "{}", found.tip);
             assert!(!found.name.starts_with(char::is_numeric), "el atajo no va en el botón");
         }

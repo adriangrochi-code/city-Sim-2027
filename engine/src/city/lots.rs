@@ -1,6 +1,6 @@
 //! Solares: se generan a ambos lados de cada calle siguiendo la curva, se zonifican con
-//! pincel y crecen en tres niveles (rancho → casa de azotea → casa de altos). Porte de
-//! `scripts/city/lots.gd` del prototipo de Godot.
+//! pincel (residencial, comercial o industrial, en densidad baja, media o alta) y crecen en
+//! tres niveles. Porte ampliado de `scripts/city/lots.gd` del prototipo de Godot.
 
 use super::roads::{RoadKind, RoadNetwork};
 use crate::buildings::Rng;
@@ -11,9 +11,111 @@ use std::collections::{BTreeMap, HashMap};
 /// Frente y fondo del solar, en metros (24 × 48 vóxeles de 0,5 m).
 pub const W: f32 = 12.0;
 pub const D: f32 = 38.0; // hasta el medio de la manzana: (86,6 − 10,4) / 2
-/// Habitantes por nivel.
+/// Habitantes por nivel de una casa (densidad baja y media).
 pub const CAP: [i32; 4] = [0, 4, 8, 14];
-pub const LEVEL_NAMES: [&str; 4] = ["solar vacío", "rancho", "casa de azotea", "casa de altos"];
+/// Habitantes por nivel en densidad alta (casas de renta con piezas para inquilinos).
+pub const CAP_ALTA: [i32; 4] = [0, 4, 10, 20];
+/// Empleos por nivel de comercios y de talleres.
+pub const JOBS_C: [i32; 4] = [0, 3, 6, 12];
+pub const JOBS_I: [i32; 4] = [0, 6, 12, 24];
+
+// --- Zonas ----------------------------------------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum ZoneKind {
+    Residencial,
+    Comercial,
+    Industrial,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Density {
+    Baja,
+    Media,
+    Alta,
+}
+
+impl ZoneKind {
+    pub const ALL: [ZoneKind; 3] = [ZoneKind::Residencial, ZoneKind::Comercial, ZoneKind::Industrial];
+    pub fn name(self) -> &'static str {
+        match self {
+            ZoneKind::Residencial => "residencial",
+            ZoneKind::Comercial => "comercial",
+            ZoneKind::Industrial => "industrial",
+        }
+    }
+    /// Nombre del edificio de cada nivel en la época colonial.
+    pub fn level_name(self, level: u8, d: Density) -> &'static str {
+        match (self, level) {
+            (_, 0) => "solar vacío",
+            (ZoneKind::Residencial, 1) => "rancho",
+            (ZoneKind::Residencial, 2) => "casa de azotea",
+            (ZoneKind::Residencial, _) if d == Density::Alta => "casa de altos de renta",
+            (ZoneKind::Residencial, _) => "casa de altos",
+            (ZoneKind::Comercial, 1) => "pulpería",
+            (ZoneKind::Comercial, 2) => "tienda",
+            (ZoneKind::Comercial, _) => "almacén de altos",
+            (ZoneKind::Industrial, 1) => "taller",
+            (ZoneKind::Industrial, 2) => "curtiembre y jabonería",
+            (ZoneKind::Industrial, _) => "barraca",
+        }
+    }
+}
+
+impl Density {
+    pub const ALL: [Density; 3] = [Density::Baja, Density::Media, Density::Alta];
+    pub fn name(self) -> &'static str {
+        match self {
+            Density::Baja => "baja",
+            Density::Media => "media",
+            Density::Alta => "alta",
+        }
+    }
+    /// Primer y último nivel que se construye: la baja no pasa de una planta, la alta no
+    /// empieza con ranchos ni galpones de paja.
+    pub fn levels(self) -> (u8, u8) {
+        match self {
+            Density::Baja => (1, 2),
+            Density::Media => (1, 3),
+            Density::Alta => (2, 3),
+        }
+    }
+}
+
+/// Código de zona guardado en el solar: 0 = sin zona; 1..=9 = tipo × densidad.
+pub fn zone_code(k: ZoneKind, d: Density) -> u8 {
+    1 + k as u8 * 3 + d as u8
+}
+
+pub fn zone_of(z: u8) -> Option<(ZoneKind, Density)> {
+    (1..=9).contains(&z).then(|| (ZoneKind::ALL[((z - 1) / 3) as usize], Density::ALL[((z - 1) % 3) as usize]))
+}
+
+/// Nombre completo de una zona ("comercial de densidad media").
+pub fn zone_name(z: u8) -> String {
+    match zone_of(z) {
+        Some((k, d)) => format!("{} de densidad {}", k.name(), d.name()),
+        None => "sin zonificar".into(),
+    }
+}
+
+/// Demanda de cada tipo de zona (−1 a 1), como el medidor del género.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Demand {
+    pub r: f32,
+    pub c: f32,
+    pub i: f32,
+}
+
+impl Demand {
+    pub fn of(&self, k: ZoneKind) -> f32 {
+        match k {
+            ZoneKind::Residencial => self.r,
+            ZoneKind::Comercial => self.c,
+            ZoneKind::Industrial => self.i,
+        }
+    }
+}
 const CELL: f32 = 30.0;
 
 #[derive(Clone, Debug)]
@@ -29,6 +131,70 @@ pub struct Lot {
     /// Vóxeles del edificio actual (para reemplazarlo o demolerlo).
     pub voxels: Vec<IVec3>,
 }
+
+impl Lot {
+    pub fn kind(&self) -> Option<ZoneKind> {
+        zone_of(self.zone).map(|z| z.0)
+    }
+    pub fn density(&self) -> Option<Density> {
+        zone_of(self.zone).map(|z| z.1)
+    }
+    pub fn residents(&self) -> i32 {
+        match zone_of(self.zone) {
+            Some((ZoneKind::Residencial, Density::Alta)) => CAP_ALTA[self.level as usize],
+            Some((ZoneKind::Residencial, _)) => CAP[self.level as usize],
+            _ => 0,
+        }
+    }
+    pub fn name(&self) -> &'static str {
+        match zone_of(self.zone) {
+            Some((k, d)) => k.level_name(self.level, d),
+            None if self.level == 0 => "solar vacío",
+            None => "edificio sin zona",
+        }
+    }
+}
+
+/// Lo que impide crecer a un solar (vacío si nada): para la ficha de información.
+pub fn growth_blockers(lots: &Lots, lot: &Lot, net: &RoadNetwork, pool: i32, demand: Demand) -> Vec<String> {
+    let mut why = Vec::new();
+    let Some((k, d)) = zone_of(lot.zone) else {
+        why.push("Sin zonificar: pinta una zona residencial, comercial o industrial.".into());
+        return why;
+    };
+    let (first, last) = d.levels();
+    if lot.level >= last {
+        why.push(if d == Density::Baja { "Densidad baja: no pasa de una planta. Rezonifica a media para crecer más.".into() } else { "Ya llegó al máximo de esta época.".into() });
+        return why;
+    }
+    let next = if lot.level == 0 { first } else { lot.level + 1 };
+    let value = lots.land_value(lot);
+    let stone = lots.frontage(lot, net) == Some(RoadKind::Stone);
+    match k {
+        ZoneKind::Residencial => {
+            let cap = if d == Density::Alta { CAP_ALTA } else { CAP };
+            if pool < cap[next as usize] - cap[lot.level as usize] {
+                why.push("Faltan pobladores: esperan barcos con más familias.".into());
+            }
+        }
+        _ if demand.of(k) <= 0.0 => why.push(format!("No hay demanda {}: la ciudad no necesita más {}.", if k == ZoneKind::Comercial { "de comercio" } else { "de industria" }, if k == ZoneKind::Comercial { "tiendas" } else { "talleres" })),
+        _ => {}
+    }
+    let min_age = [0, 4, 8, 8][lot.level as usize];
+    if lot.level > 0 && lot.age < min_age {
+        why.push("El edificio es muy reciente.".into());
+    }
+    if next >= 2 && k != ZoneKind::Industrial && value <= LEVEL_VALUE[k as usize][next as usize] {
+        why.push(if lots.industry_near(lot.c, lot.id) > 0 { "Los talleres cercanos bajan el valor del suelo.".into() } else { "Está lejos de la plaza mayor: el suelo vale poco.".into() });
+    }
+    if (next == 3 || d == Density::Alta) && !stone {
+        why.push("Necesita una calle empedrada.".into());
+    }
+    why
+}
+
+/// Valor del suelo mínimo para llegar a cada nivel: [tipo][nivel].
+const LEVEL_VALUE: [[f32; 4]; 3] = [[0.0, 0.0, 0.2, 0.45], [0.0, 0.1, 0.3, 0.4], [0.0, 0.0, 0.0, 0.0]];
 
 /// Rectángulo orientado que no se puede ocupar (plaza, iglesia).
 #[derive(Clone, Copy, Debug)]
@@ -123,14 +289,49 @@ impl Lots {
     }
 
     pub fn population(&self) -> i32 {
-        self.lots.values().map(|l| CAP[l.level as usize]).sum()
+        self.lots.values().map(Lot::residents).sum()
     }
 
+    /// Empleos de comercios y de talleres.
+    pub fn jobs(&self) -> (i32, i32) {
+        self.lots.values().fold((0, 0), |(c, i), l| match l.kind() {
+            Some(ZoneKind::Comercial) => (c + JOBS_C[l.level as usize], i),
+            Some(ZoneKind::Industrial) => (c, i + JOBS_I[l.level as usize]),
+            _ => (c, i),
+        })
+    }
+
+    /// Edificios construidos por tipo de zona y nivel: [tipo][nivel − 1].
+    pub fn built(&self) -> [[i32; 3]; 3] {
+        let mut out = [[0; 3]; 3];
+        for l in self.lots.values() {
+            if let (Some(k), 1..=3) = (l.kind(), l.level) {
+                out[k as usize][l.level as usize - 1] += 1;
+            }
+        }
+        out
+    }
+
+    /// Talleres con edificio a menos de 70 m (humo, olor y carretas: bajan el valor).
+    pub fn industry_near(&self, p: Vec2, except: u32) -> i32 {
+        self.nearby(p).iter().filter(|&&id| id != except).filter(|id| {
+            let l = &self.lots[id];
+            l.level > 0 && l.kind() == Some(ZoneKind::Industrial) && l.c.distance(p) < 70.0
+        }).count() as i32
+    }
+
+    /// Valor del suelo: cerca de la plaza vale más; la industria cercana lo baja (salvo
+    /// para otros talleres).
     pub fn land_value(&self, lot: &Lot) -> f32 {
-        match self.plaza_center {
+        let base = match self.plaza_center {
             Some(p) => (-(lot.c.distance(p)) / 650.0).exp().clamp(0.0, 1.0),
             None => 0.2,
+        };
+        if lot.kind() == Some(ZoneKind::Industrial) {
+            return base;
         }
+        let n = self.industry_near(lot.c, lot.id);
+        (base - 0.08 * n.min(4) as f32).max(0.0)
     }
 
     pub fn frontage(&self, lot: &Lot, net: &RoadNetwork) -> Option<RoadKind> {
@@ -243,10 +444,15 @@ impl Lots {
                     if lot.c.distance(center) > radius || lot.zone == zone {
                         continue;
                     }
+                    let same_kind = zone_of(zone).map(|z| z.0) == lot.kind() && zone != 0;
                     lot.zone = zone;
                     changed += 1;
-                    if zone == 0 && lot.level > 0 {
+                    // Cambiar de tipo (o quitar la zona) derriba lo construido; cambiar solo la
+                    // densidad lo deja, salvo que el edificio quede por encima del nuevo tope.
+                    let over = zone_of(zone).is_some_and(|(_, d)| lot.level > d.levels().1);
+                    if lot.level > 0 && (!same_kind || over) {
                         lot.level = 0;
+                        lot.age = 0;
                         demolish.push(id);
                     }
                 }
@@ -255,10 +461,11 @@ impl Lots {
         (changed, demolish)
     }
 
-    /// Un paso de crecimiento: con `pool` pobladores esperando casa. Devuelve los que se
-    /// instalaron y los solares que cambiaron de nivel.
-    pub fn grow_step(&mut self, pool: i32, net: &RoadNetwork, rng: &mut Rng) -> (i32, Vec<LevelChange>) {
-        let zoned: Vec<u32> = self.lots.values().filter(|l| l.zone > 0 && l.level < 3).map(|l| l.id).collect();
+    /// Un paso de crecimiento. Las casas se llenan con los `pool` pobladores que esperan; los
+    /// comercios y talleres crecen según la demanda. Devuelve los pobladores instalados y los
+    /// solares que cambiaron de nivel.
+    pub fn grow_step(&mut self, pool: i32, demand: Demand, net: &RoadNetwork, rng: &mut Rng) -> (i32, Vec<LevelChange>) {
+        let zoned: Vec<u32> = self.lots.values().filter(|l| l.density().is_some_and(|d| l.level < d.levels().1)).map(|l| l.id).collect();
         if zoned.is_empty() {
             return (0, Vec::new());
         }
@@ -267,28 +474,47 @@ impl Lots {
         let tries = 2 + zoned.len() / 25;
         for _ in 0..tries {
             let id = zoned[(rng.next() % zoned.len() as u64) as usize];
-            let (lvl, age, value, front) = {
-                let l = &self.lots[&id];
-                (l.level, l.age, self.land_value(l), self.frontage(l, net))
-            };
-            if lvl >= 3 {
+            let l = &self.lots[&id];
+            let Some((k, d)) = zone_of(l.zone) else { continue };
+            let (first, last) = d.levels();
+            if l.level >= last {
                 continue;
             }
-            let need = CAP[lvl as usize + 1] - CAP[lvl as usize];
-            if pool - used < need {
+            let next = if l.level == 0 { first } else { l.level + 1 };
+            let value = self.land_value(l);
+            let stone = self.frontage(l, net) == Some(RoadKind::Stone);
+            let age_ok = l.age >= [0, 4, 8, 8][l.level as usize];
+            let value_ok = k == ZoneKind::Industrial || next < 2 || value > LEVEL_VALUE[k as usize][next as usize];
+            let street_ok = (next < 3 && d != Density::Alta) || stone;
+            if !(age_ok && value_ok && street_ok) {
                 continue;
             }
-            let ok = match lvl {
-                0 => rng.f() < 0.55,
-                1 => age >= 4 && value > 0.2 && rng.f() < 0.15,
-                _ => age >= 8 && value > 0.45 && front == Some(RoadKind::Stone) && rng.f() < 0.1,
+            let mut need = 0;
+            let chance = match k {
+                ZoneKind::Residencial => {
+                    let cap = if d == Density::Alta { CAP_ALTA } else { CAP };
+                    need = cap[next as usize] - cap[l.level as usize];
+                    if pool - used < need {
+                        continue;
+                    }
+                    // Junto a los talleres nadie quiere vivir si puede elegir.
+                    let smoke = if self.industry_near(l.c, id) > 0 { 0.5 } else { 1.0 };
+                    smoke * if l.level == 0 { 0.55 } else if next == 2 { 0.15 } else { 0.1 }
+                }
+                _ => {
+                    let dm = demand.of(k);
+                    if dm <= 0.0 {
+                        continue;
+                    }
+                    dm * if l.level == 0 { 0.5 } else { 0.12 }
+                }
             };
-            if ok {
+            if rng.f() < chance {
                 let l = self.lots.get_mut(&id).unwrap();
-                l.level = lvl + 1;
+                l.level = next;
                 l.age = 0;
                 used += need;
-                out.push(LevelChange { lot: id, level: lvl + 1 });
+                out.push(LevelChange { lot: id, level: next });
             }
         }
         (used, out)

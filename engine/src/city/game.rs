@@ -1,7 +1,7 @@
 //! Herramientas del modo juego (como en el prototipo): plaza mayor, calle recta, curva,
 //! damero, zona, quitar zona, demoler e inspeccionar; vistas previas y línea de estado.
 
-use super::lots::{corners_of, CAP, D, LEVEL_NAMES, W};
+use super::lots::{corners_of, growth_blockers, zone_code, zone_name, zone_of, Density, ZoneKind, D, W};
 use super::roads::{bezier, line, RoadKind};
 use super::{grid_lines, plaza_frame, City, BLOCK};
 use crate::buildings::Edits;
@@ -27,7 +27,7 @@ pub const TOOLS: [(Tool, &str); 8] = [
     (Tool::Straight, "calle recta"),
     (Tool::Curve, "calle curva"),
     (Tool::Grid, "damero"),
-    (Tool::Zone, "zona mixta"),
+    (Tool::Zone, "zonificar"),
     (Tool::Dezone, "quitar zona"),
     (Tool::Demolish, "demoler calle"),
     (Tool::Inspect, "inspeccionar"),
@@ -52,6 +52,9 @@ pub struct Game {
     pub message_seq: u64,
     /// Punto inspeccionado con la herramienta Inspeccionar (la interfaz muestra su ficha).
     pub inspected: Option<Vec2>,
+    /// Zona que pinta el pincel: tipo y densidad.
+    pub zone_kind: ZoneKind,
+    pub density: Density,
 }
 
 /// Ficha de lo inspeccionado para el panel de información.
@@ -93,6 +96,8 @@ impl Default for Game {
             p0: Vec2::ZERO,
             p1: Vec2::ZERO,
             brush: 30.0,
+            zone_kind: ZoneKind::Residencial,
+            density: Density::Baja,
             plaza_angle: 0.0,
             painting: false,
             hover: None,
@@ -244,7 +249,7 @@ impl Game {
         if !self.painting {
             return None;
         }
-        let zone = if self.tool == Tool::Zone { 1 } else { 0 };
+        let zone = if self.tool == Tool::Zone { zone_code(self.zone_kind, self.density) } else { 0 };
         let (n, e) = self.city.paint(p, self.brush, zone);
         (n > 0 && !e.voxels.is_empty()).then_some(e)
     }
@@ -257,48 +262,25 @@ impl Game {
             let l = &self.city.lots.lots[&id];
             let front = self.city.lots.frontage(l, &self.city.net);
             let value = self.city.lots.land_value(l);
-            let mut i = Inspect { title: capitalize(LEVEL_NAMES[l.level as usize]), kind: InspectKind::Lot, ..Default::default() };
-            i.lines.push(format!("Zona: {}", if l.zone > 0 { "mixta (vivienda, tienda y taller)" } else { "sin zonificar" }));
-            i.lines.push(format!("Habitantes: {}", CAP[l.level as usize]));
+            let mut i = Inspect { title: capitalize(l.name()), kind: InspectKind::Lot, ..Default::default() };
+            i.lines.push(format!("Zona: {}", zone_name(l.zone)));
+            match l.kind() {
+                Some(ZoneKind::Residencial) | None => i.lines.push(format!("Habitantes: {}", l.residents())),
+                Some(ZoneKind::Comercial) => i.lines.push(format!("Empleos: {} (comercio)", super::lots::JOBS_C[l.level as usize])),
+                Some(ZoneKind::Industrial) => i.lines.push(format!("Empleos: {} (talleres)", super::lots::JOBS_I[l.level as usize])),
+            }
             i.lines.push(format!("Valor del suelo: {} %", (value * 100.0) as i32));
             i.lines.push(format!("Calle: {}", front.map_or("—", |k| k.name())));
             if l.level > 0 {
                 i.lines.push(format!("Antigüedad: {} {}", l.age, if l.age == 1 { "mes" } else { "meses" }));
             }
-            if l.zone == 0 {
-                i.why.push("Sin zonificar: pinta la zona mixta (5).".into());
-            } else if l.level >= 3 {
-                i.why.push("Ya es casa de altos: el máximo de esta época.".into());
-            } else {
-                let need = CAP[l.level as usize + 1] - CAP[l.level as usize];
-                if self.city.pool < need {
-                    i.why.push("Faltan pobladores: esperan barcos con más familias.".into());
-                }
-                match l.level {
-                    1 => {
-                        if l.age < 4 {
-                            i.why.push("El rancho es muy reciente.".into());
-                        }
-                        if value <= 0.2 {
-                            i.why.push("Está lejos de la plaza mayor.".into());
-                        }
-                    }
-                    2 => {
-                        if l.age < 8 {
-                            i.why.push("La casa es muy reciente.".into());
-                        }
-                        if value <= 0.45 {
-                            i.why.push("Para una casa de altos debe estar cerca de la plaza.".into());
-                        }
-                        if front != Some(RoadKind::Stone) {
-                            i.why.push("Necesita una calle empedrada.".into());
-                        }
-                    }
-                    _ => {}
-                }
-                if i.why.is_empty() {
-                    i.why.push("Nada le falta: crecerá con el tiempo.".into());
-                }
+            if let Some((k, _)) = zone_of(l.zone) {
+                let d = self.city.demand().of(k);
+                i.lines.push(format!("Demanda {}: {}{} %", k.name(), if d >= 0.0 { "+" } else { "" }, (d * 100.0).round() as i32));
+            }
+            i.why = growth_blockers(&self.city.lots, l, &self.city.net, self.city.pool, self.city.demand());
+            if i.why.is_empty() {
+                i.why.push("Nada le falta: crecerá con el tiempo.".into());
             }
             return Some(i);
         }
@@ -316,7 +298,7 @@ impl Game {
             Tool::Straight => "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar.",
             Tool::Curve => "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija.",
             Tool::Grid => "Clic en una esquina, clic en la punta del primer lado y extiende las manzanas (cuadras de 84 m).",
-            Tool::Zone => "Pinta los solares junto a las calles; ahí se instalan los pobladores.",
+            Tool::Zone => "Pinta los solares junto a las calles: residencial (casas), comercial (tiendas) o industrial (talleres), en densidad baja, media o alta.",
             Tool::Dezone => "Pinta para quitar la zona (derriba lo construido).",
             Tool::Demolish => "Clic sobre un tramo de calle para demolerlo.",
             Tool::Inspect => "Clic en un solar, una calle o el terreno para ver su información.",
@@ -395,7 +377,11 @@ impl Game {
             if l.level > 0 {
                 continue;
             }
-            let col = if l.zone > 0 { [0.42, 0.85, 0.36, 0.45] } else if show_free { [1.0, 0.97, 0.85, 0.18] } else { continue };
+            let col = match zone_of(l.zone) {
+                Some((k, d)) => zone_color(k, d),
+                None if show_free => [1.0, 0.97, 0.85, 0.18],
+                None => continue,
+            };
             quad(&mut out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
         // Lo inspeccionado queda marcado mientras la ficha está abierta.
@@ -459,6 +445,17 @@ fn y_at(t: &TerrainGen, p: Vec2, lift: f32) -> f32 {
 }
 
 /// Cinta translúcida que sigue una polilínea sobre el terreno.
+/// Color de cada zona en el plano: verde las casas, azul el comercio, ocre la industria; la
+/// densidad, más intensa cuanto más alta.
+pub fn zone_color(k: ZoneKind, d: Density) -> [f32; 4] {
+    let a = [0.35, 0.5, 0.65][d as usize];
+    match k {
+        ZoneKind::Residencial => [0.42, 0.85, 0.36, a],
+        ZoneKind::Comercial => [0.35, 0.6, 0.95, a],
+        ZoneKind::Industrial => [0.95, 0.72, 0.25, a],
+    }
+}
+
 pub fn ribbon(out: &mut Vec<OverlayVertex>, t: &TerrainGen, pts: &[Vec2], w: f32, color: [f32; 4]) {
     for s in pts.windows(2) {
         let (a, b) = (s[0], s[1]);

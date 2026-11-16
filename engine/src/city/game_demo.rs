@@ -61,11 +61,30 @@ pub fn curve(s: &mut Session) -> String {
     format!("{out} · radio mínimo {:.0} m · {} solares", roads::min_radius(&pts), g.city.lots.lots.len())
 }
 
+/// Zonas de la demostración: casas de densidad media en todo el damero, comercio de densidad
+/// alta alrededor de la plaza y media hacia el este, e industria sobre el camino del norte
+/// (lejos de la plaza: el humo y el olor bajan el valor del suelo).
 pub fn zone(s: &mut Session) -> String {
+    use super::lots::{zone_code, Density, ZoneKind};
     let g = s.game.as_mut().unwrap();
-    let (n, e) = g.city.paint(PLAZA - Vec2::new(0.0, 140.0), 480.0, 1);
+    let (f, side) = plaza_frame(0.0);
+    let mut n = 0;
+    let mut e = crate::buildings::Edits::default();
+    for (c, r, k, d) in [
+        (PLAZA - Vec2::new(0.0, 140.0), 480.0, ZoneKind::Residencial, Density::Media),
+        (PLAZA, 100.0, ZoneKind::Comercial, Density::Alta),
+        (PLAZA + side * (BLOCK * 2.0), 60.0, ZoneKind::Comercial, Density::Media),
+        (PLAZA + side * (BLOCK * 1.2) - f * (BLOCK * 5.2), 140.0, ZoneKind::Industrial, Density::Media),
+    ] {
+        let (k_n, k_e) = g.city.paint(c, r, zone_code(k, d));
+        n += k_n;
+        e.voxels.extend(k_e.voxels);
+        e.surface.extend(k_e.surface);
+    }
     s.apply_edits(&e);
-    format!("{n} solares zonificados")
+    let g = s.game.as_ref().unwrap();
+    let count = |k: ZoneKind| g.city.lots.lots.values().filter(|l| l.kind() == Some(k)).count();
+    format!("{n} solares zonificados: {} residenciales, {} comerciales, {} industriales", count(ZoneKind::Residencial), count(ZoneKind::Comercial), count(ZoneKind::Industrial))
 }
 
 pub fn grow(s: &mut Session) -> String {
@@ -76,19 +95,21 @@ pub fn grow(s: &mut Session) -> String {
     let e = g.city.fast_forward(&t, months);
     let sim = t0.elapsed();
     let built = g.city.lots.lots.values().filter(|l| l.level > 0).count();
-    let mut lv = [0; 4];
-    for l in g.city.lots.lots.values() {
-        lv[l.level as usize] += 1;
-    }
+    let b = g.city.lots.built();
+    let (jc, ji) = g.city.lots.jobs();
+    let d = g.city.demand();
     let pop = g.city.population();
     let date = g.city.date();
     let out = apply(s, Ok(e));
     format!(
-        "{months} meses en {sim:.2?} ({:.1} ms/mes) · {date} · {pop} vecinos · {built} edificios (ranchos {}, azoteas {}, altos {}) · {out}",
+        "{months} meses en {sim:.2?} ({:.1} ms/mes) · {date} · {pop} vecinos · {built} edificios · casas {:?} · comercios {:?} ({jc} empleos) · talleres {:?} ({ji} empleos) · demanda R {:.2} C {:.2} I {:.2} · {out}",
         sim.as_secs_f64() * 1000.0 / months as f64,
-        lv[1],
-        lv[2],
-        lv[3]
+        b[0],
+        b[1],
+        b[2],
+        d.r,
+        d.c,
+        d.i
     )
 }
 

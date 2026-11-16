@@ -76,6 +76,7 @@ pub fn city_steps() -> Vec<Act> {
         WaitIdle("vista para la interfaz"),
         UiShot("motor-ui-barra", ui_toolbar),
         UiShot("motor-ui-cajon-servicios", ui_services),
+        UiShot("motor-ui-zonas", ui_zones),
         UiShot("motor-ui-ficha", ui_inspect),
         UiShot("motor-ui-gaceta", ui_gazette),
         UiShot("motor-ui-panel", ui_panel),
@@ -98,6 +99,16 @@ fn ui_services(s: &mut Session, u: &mut GameUi) {
     g.set_tool(4);
     g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
     u.open = Some(ui::Category::Servicios);
+}
+
+/// Cajón de zonas: residencial, comercial e industrial, densidad y medidor de demanda.
+fn ui_zones(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(4);
+    g.zone_kind = crate::city::lots::ZoneKind::Comercial;
+    g.density = crate::city::lots::Density::Media;
+    g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
+    u.open = Some(ui::Category::Zonas);
 }
 
 /// Ficha de un solar que todavía puede crecer (el de nivel más bajo cerca de la plaza).

@@ -17,7 +17,7 @@ use crate::palette::AIR;
 use crate::structures::colonial::{self, LOT_D, LOT_W};
 use crate::terrain::TerrainGen;
 use glam::Vec2;
-use lots::{corners_of, LevelChange, Lot, Lots, Obstacle};
+use lots::{corners_of, Demand, LevelChange, Lot, Lots, Obstacle, ZoneKind};
 use roads::{polyline_length, RoadKind, RoadNetwork};
 use voxelize::{build_rotated, plaza_edits, road_edits, road_restore, PLAZA_SIZE};
 
@@ -55,12 +55,29 @@ pub fn plaza_frame(angle: f32) -> (Vec2, Vec2) {
     (f, lots::side_of(f))
 }
 
-/// Constructor del catálogo de vóxeles para cada nivel de casa.
-fn builder_for(level: u8) -> &'static dyn Fn(&TerrainGen, &mut Edits, &crate::structures::Frame) {
-    match level {
-        1 => &colonial::rancho,
-        2 => &colonial::casa_azotea,
-        _ => &colonial::casa_altos,
+type Builder = &'static dyn Fn(&TerrainGen, &mut Edits, &crate::structures::Frame);
+
+fn pulperia_l(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
+    colonial::pulperia(t, e, f, true)
+}
+
+fn pulperia_r(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
+    colonial::pulperia(t, e, f, false)
+}
+
+/// Constructor del catálogo de vóxeles para cada tipo de zona y nivel.
+fn builder_for(kind: ZoneKind, level: u8, seed: u64) -> Builder {
+    match (kind, level) {
+        (ZoneKind::Residencial, 1) => &colonial::rancho,
+        (ZoneKind::Residencial, 2) => &colonial::casa_azotea,
+        (ZoneKind::Residencial, _) => &colonial::casa_altos,
+        (ZoneKind::Comercial, 1) if seed % 2 == 0 => &pulperia_l,
+        (ZoneKind::Comercial, 1) => &pulperia_r,
+        (ZoneKind::Comercial, 2) => &colonial::tienda,
+        (ZoneKind::Comercial, _) => &colonial::almacen,
+        (ZoneKind::Industrial, 1) => &colonial::taller,
+        (ZoneKind::Industrial, 2) => &colonial::curtiembre,
+        (ZoneKind::Industrial, _) => &colonial::barraca_solar,
     }
 }
 
@@ -77,6 +94,32 @@ fn clear_voxels(e: &mut Edits, lot: &Lot) {
 impl City {
     pub fn population(&self) -> i32 {
         self.lots.population()
+    }
+
+    /// Trabajadores: algo menos de la mitad de los habitantes (el resto, niños y ancianos).
+    pub fn workers(&self) -> i32 {
+        (self.population() as f32 * 0.45) as i32
+    }
+
+    /// Demanda residencial, comercial e industrial (−1 a 1), como el medidor del género:
+    /// - residencial: familias esperando casa y empleos sin cubrir;
+    /// - comercial: una tienda cada tantos vecinos, más el comercio del puerto;
+    /// - industrial: brazos sin trabajo y la venta de cueros y sebo al exterior.
+    /// Los impuestos altos la frenan (alcabala al comercio, aduana a la industria).
+    pub fn demand(&self) -> Demand {
+        use economy::Tax;
+        let pop = self.population() as f32;
+        let workers = self.workers() as f32;
+        let (jc, ji) = self.lots.jobs();
+        let jobs = (jc + ji) as f32;
+        let eco = &self.economy;
+        let over = |t: Tax| (eco.tax(t) - t.normal()) as f32;
+        let r = (self.pool as f32 + (jobs - workers).max(0.0) * 0.8 - (workers - jobs).max(0.0) * 0.3) / 60.0;
+        let c_need = 6.0 + pop * 0.08;
+        let c = (c_need - jc as f32) / c_need.max(20.0) - over(Tax::Alcabala) * 0.05;
+        let i_need = 8.0 + (workers - jc as f32) * 0.8 + eco.stock(economy::Res::Cueros).price.max(1.0) * 5.0;
+        let i = (i_need - ji as f32) / i_need.max(25.0) - over(Tax::Aduana) * 0.04;
+        Demand { r: r.clamp(-1.0, 1.0), c: c.clamp(-1.0, 1.0), i: i.clamp(-1.0, 1.0) }
     }
 
     pub fn date(&self) -> String {
@@ -259,7 +302,8 @@ impl City {
     pub fn apply_levels(&mut self, t: &TerrainGen, changes: &[LevelChange], e: &mut Edits) {
         for ch in changes {
             let Some(lot) = self.lots.lots.get(&ch.lot) else { continue };
-            let b = build_rotated(t, lot.c, lot.f, LOT_W, LOT_D, lot.seed, builder_for(ch.level));
+            let Some(kind) = lot.kind() else { continue };
+            let b = build_rotated(t, lot.c, lot.f, LOT_W, LOT_D, lot.seed, builder_for(kind, ch.level, lot.seed));
             let new: std::collections::HashSet<glam::IVec3> = b.voxels.iter().copied().collect();
             for &v in &lot.voxels {
                 if !new.contains(&v) {
@@ -286,7 +330,8 @@ impl City {
         self.growth_acc += dt;
         while self.growth_acc >= 0.5 {
             self.growth_acc -= 0.5;
-            let (used, changes) = self.lots.grow_step(self.pool, &self.net, &mut self.rng);
+            let demand = self.demand();
+            let (used, changes) = self.lots.grow_step(self.pool, demand, &self.net, &mut self.rng);
             self.pool -= used;
             self.apply_levels(t, &changes, e);
         }
@@ -298,23 +343,28 @@ impl City {
     pub fn month_input(&self) -> economy::MonthInput {
         use economy::Res;
         let pop = self.population();
-        let mut houses = [0; 3];
-        for l in self.lots.lots.values() {
-            if (1..=3).contains(&l.level) {
-                houses[l.level as usize - 1] += 1;
-            }
-        }
+        let built = self.lots.built();
+        let houses = built[ZoneKind::Residencial as usize];
+        let (jobs_c, jobs_i) = self.lots.jobs();
         let mut production = [0.0f32; 6];
         production[Res::Pan as usize] = 300.0 + pop as f32 * 1.05; // chacras privadas del ejido
         production[Res::Carne as usize] = 400.0 + pop as f32 * 0.9;
         production[Res::Ladrillos as usize] = 60.0;
         production[Res::Cueros as usize] = 80.0 + pop as f32 * 0.05;
         production[Res::Sebo as usize] = 40.0;
+        // Los talleres de las zonas industriales: ladrillos, sebo y cueros curtidos.
+        production[Res::Ladrillos as usize] += jobs_i as f32 * 1.5;
+        production[Res::Sebo as usize] += jobs_i as f32 * 1.0;
+        production[Res::Cueros as usize] += jobs_i as f32 * 0.8;
         let mut construction = [0.0f32; 6];
         construction[Res::Ladrillos as usize] = houses[1] as f32 * 0.4 + houses[2] as f32 * 0.8;
         economy::MonthInput {
             pop,
             houses,
+            shops: built[ZoneKind::Comercial as usize],
+            workshops: built[ZoneKind::Industrial as usize],
+            jobs_c,
+            jobs_i,
             production,
             construction,
             ships: if self.month % 4 == 0 { 1 } else { 0 },
@@ -329,7 +379,11 @@ impl City {
         let mut news = Vec::new();
         self.month += 1;
         let pop = self.population();
-        let factor = self.economy.arrivals_factor();
+        // Con trabajo de sobra llegan más familias; con desocupación, menos.
+        let (jc, ji) = self.lots.jobs();
+        let (jobs, workers) = ((jc + ji) as f32, self.workers() as f32);
+        let work = if workers > 20.0 && jobs < workers * 0.6 { 0.75 } else if jobs > workers { 1.2 } else { 1.0 };
+        let factor = self.economy.arrivals_factor() * work;
         let mut arrivals = ((4.0 + pop as f32 * 0.03) * factor) as i32;
         if self.month % 4 == 0 {
             let ship = ((20 + self.rng.range(0, 25)) as f32 * self.economy.ship_factor()) as i32 + (pop as f32 * 0.02) as i32;
@@ -411,5 +465,45 @@ mod tests {
                 assert!(city.net.clearance(p, 20.0) > -0.3, "un edificio pisa la calle en {p}");
             }
         }
+    }
+
+    #[test]
+    fn zonas_residencial_comercial_e_industrial_con_densidad() {
+        use lots::{zone_code, Density};
+        let t = TerrainGen::new(1726);
+        let mut city = City::default();
+        city.money = 1_000_000;
+        let c = Vec2::new(13500.0, 16300.0);
+        city.found_plaza(&t, c, 0.0).unwrap();
+        let (f, s) = plaza_frame(0.0);
+        let a = c - s * (BLOCK * 2.5) - f * (BLOCK * 2.5);
+        city.build_grid(&t, &grid_lines(a, a + s * BLOCK * 5.0, a + f * BLOCK * 5.0), RoadKind::Stone).unwrap();
+        city.paint(c, 400.0, zone_code(ZoneKind::Residencial, Density::Baja));
+        city.paint(c, 90.0, zone_code(ZoneKind::Comercial, Density::Media));
+        let far = c - f * (BLOCK * 2.0) + s * (BLOCK * 2.0);
+        city.paint(far, 50.0, zone_code(ZoneKind::Industrial, Density::Alta));
+        assert!(city.demand().c > 0.0 && city.demand().i > 0.0, "{:?}", city.demand());
+        city.fast_forward(&t, 48);
+        let (jc, ji) = city.lots.jobs();
+        assert!(city.population() > 100 && jc > 0 && ji > 0, "pob {} · empleos {jc}/{ji}", city.population());
+        for l in city.lots.lots.values() {
+            let (_, d) = lots::zone_of(l.zone).unwrap_or((ZoneKind::Residencial, Density::Media));
+            let (first, last) = d.levels();
+            assert!(l.level == 0 || (first..=last).contains(&l.level), "nivel {} fuera de la densidad {d:?}", l.level);
+        }
+        // Densidad baja: ninguna casa de altos; densidad alta: ningún galpón de paja.
+        assert!(city.lots.lots.values().filter(|l| l.zone == zone_code(ZoneKind::Residencial, Density::Baja)).all(|l| l.level <= 2));
+        // Los talleres bajan el valor del suelo de las casas vecinas.
+        let near = city.lots.lots.values().filter(|l| l.kind() == Some(ZoneKind::Residencial)).min_by(|x, y| x.c.distance(far).total_cmp(&y.c.distance(far))).unwrap();
+        if city.lots.industry_near(near.c, near.id) > 0 {
+            let mut clean = near.clone();
+            clean.c = c + s * 1.0;
+            assert!(city.lots.land_value(near) < city.lots.land_value(&clean));
+        }
+        // Rezonificar de residencial a comercial derriba lo construido.
+        let built = city.lots.lots.values().find(|l| l.level > 0 && l.kind() == Some(ZoneKind::Residencial)).unwrap().clone();
+        let (_, e) = city.paint(built.c, 1.0, zone_code(ZoneKind::Comercial, Density::Baja));
+        assert!(!e.voxels.is_empty());
+        assert_eq!(city.lots.lots[&built.id].level, 0);
     }
 }

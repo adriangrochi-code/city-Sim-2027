@@ -470,6 +470,11 @@ pub fn muelle(t: &TerrainGen, e: &mut Edits, f: &Frame) {
 
 /// Barraca de cueros junto al muelle: galpón de ladrillo con techo de teja, portón y fardos.
 pub fn barraca(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    barraca_galpon(t, e, f);
+    f.surface(e, -2, f.width + 2, -8, 0, DIRT_ROAD);
+}
+
+fn barraca_galpon(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     let (wd, dp, h) = (f.width, 20, 10);
     f.foundation(t, e, 0, wd, 0, dp, STONE);
     f.fill(e, 0, wd, 0, h, 0, dp, BRICK);
@@ -483,7 +488,134 @@ pub fn barraca(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     for (u, m) in [(2, HIDE), (6, HIDE), (wd - 10, SACK), (wd - 6, HIDE)] {
         f.raw_fill(e, u, u + 3, 0, 2, -4, -1, m);
     }
-    f.surface(e, -2, wd + 2, -8, 0, DIRT_ROAD);
+}
+
+// --- Comercio e industria en solares (zonas comerciales e industriales) ----------------------
+
+/// Frente de tienda sobre una fachada ya construida: puertas anchas de madera en lugar de
+/// ventanas, letrero corrido y toldo de lona; mercadería en la vereda.
+fn shopfront(f: &Frame, e: &mut Edits, r: &mut Rng, h_sign: i32) {
+    let doors = [2, 9, 16];
+    for &u in &doors {
+        // Borra rejas y alféizares de la fachada anterior y abre la puerta de la tienda.
+        f.clear(e, u - 1, u + 5, 1, h_sign, -1, 0);
+        opening(f, e, u, u + 4, 0, 6, 1, if r.f() < 0.5 { WOOD } else { SHUTTER });
+    }
+    f.fill(e, 1, f.width - 1, h_sign, h_sign + 1, -1, 0, WOOD_DARK);
+    if r.f() < 0.6 {
+        f.raw_fill(e, 1, f.width - 1, 6, 7, -3, 0, SACK);
+    }
+    for (u, m) in [(1, SACK), (7, WOOD), (f.width - 3, SACK)] {
+        if r.f() < 0.7 {
+            f.raw_fill(e, u, u + 2, 0, 2, -3, -1, m);
+        }
+    }
+}
+
+/// Tienda: casa de azotea con la planta baja abierta a la calle.
+pub fn tienda(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    casa_azotea(t, e, f);
+    let mut r = f.rng(21);
+    shopfront(f, e, &mut r, 7);
+}
+
+/// Almacén de altos: casa de altos con almacén y depósito en la planta baja.
+pub fn almacen(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    casa_altos(t, e, f);
+    let mut r = f.rng(22);
+    shopfront(f, e, &mut r, 7);
+    // Depósito al fondo del patio con portón para las carretas.
+    let (w0, w1) = (f.depth - 22, f.depth - 6);
+    f.foundation(t, e, 1, f.width - 1, w0, w1, STONE);
+    f.fill(e, 1, f.width - 1, 0, 8, w0, w1, BRICK);
+    gable(f, e, 1, f.width - 1, w0, w1, 8, 2, 1, TILE, BRICK, true);
+}
+
+/// Taller de herrero o carpintero: galpón con alero sobre horcones, fragua con chimenea,
+/// pila de leña, una rueda de carreta y el patio de trabajo cercado.
+pub fn taller(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(23);
+    let (w0, w1, h) = (4, 20, 7);
+    let wall = if r.f() < 0.5 { ADOBE } else { BRICK };
+    f.foundation(t, e, 1, f.width - 1, w0, w1, ADOBE);
+    f.fill(e, 1, f.width - 1, 0, h, w0, w1, wall);
+    // Frente abierto: el taller trabaja a la vista.
+    f.clear(e, 3, f.width - 3, 0, h - 1, w0, w0 + 4);
+    let roof = if r.f() < 0.5 { TILE } else { THATCH };
+    gable(f, e, 1, f.width - 1, w0, w1, h, 2, 1, roof, wall, true);
+    // Alero sobre horcones hacia la calle.
+    for u in [1, f.width / 2, f.width - 2] {
+        f.raw_fill(e, u, u + 1, 0, h - 1, 1, 2, WOOD_DARK);
+    }
+    f.raw_fill(e, 0, f.width, h - 1, h, 0, w0, roof);
+    // Fragua y chimenea.
+    f.fill(e, 4, 7, 0, 2, w0 + 6, w0 + 9, BRICK_DARK);
+    chimney(f, e, 4, w1 - 4, 0, h + 4);
+    // Leña, tablones y una rueda.
+    f.surface(e, 1, f.width - 1, w1, f.depth - 2, DIRT);
+    for k in 0..3 {
+        f.raw_fill(e, 2, 9, 0, 2 + k % 2, w1 + 3 + k * 3, w1 + 5 + k * 3, WOOD);
+    }
+    f.raw_fill(e, f.width - 8, f.width - 2, 0, 1, w1 + 4, w1 + 12, WOOD_DARK);
+    cylinder(f, e, (f.width - 5) as f32, (w1 + 20) as f32, 1.6, 0, 1, WOOD_DARK);
+    fence(f, e, 0, f.width, w1, f.depth - 1, f.width - 5);
+}
+
+/// Curtiembre y jabonería: edificio de ladrillo sobre la calle, pozas de curtir en el fondo,
+/// tendederos con cueros y la caldera del jabón con su chimenea.
+pub fn curtiembre(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(24);
+    let (fd, h) = (16, 9);
+    f.foundation(t, e, 0, f.width, 0, fd, STONE);
+    f.fill(e, 0, f.width, 0, h, 0, fd, BRICK);
+    zocalo(f, e, 0, f.width, 0, fd, 2, STONE);
+    gable(f, e, 0, f.width, 0, fd, h, 2, 1, TILE, BRICK, true);
+    opening(f, e, f.width / 2 - 3, f.width / 2 + 3, 0, 7, 1, WOOD_DARK);
+    for u in [3, f.width - 5] {
+        opening(f, e, u, u + 2, 4, 6, 1, WINDOW);
+    }
+    chimney(f, e, f.width - 5, fd - 4, 0, h + 6);
+    // Pozas de curtir: rectángulos de piedra con agua turbia.
+    let back = f.depth - 2;
+    f.surface(e, 0, f.width, fd, back, DIRT);
+    for k in 0..3 {
+        let w = fd + 3 + k * 6;
+        ring(f, e, 2, 10, 0, 1, w, w + 5, STONE);
+        f.raw_fill(e, 3, 9, 0, 1, w + 1, w + 4, MUD);
+    }
+    // Tendederos con cueros.
+    let racks = 3 + (r.next() % 2) as i32;
+    for k in 0..racks {
+        let w = fd + 4 + k * 8;
+        if w + 2 >= back {
+            break;
+        }
+        for u in [12, f.width - 2] {
+            f.raw_fill(e, u, u + 1, 0, 5, w, w + 1, WOOD_DARK);
+        }
+        f.raw_fill(e, 12, f.width - 1, 4, 5, w, w + 1, WOOD);
+        f.raw_fill(e, 13, f.width - 2, 1, 4, w, w + 1, HIDE);
+    }
+    fence(f, e, 0, f.width, fd, f.depth - 1, 4);
+}
+
+/// Barraca de solar: el galpón sobre la calle y un segundo depósito al fondo, con el patio
+/// de carga lleno de fardos.
+pub fn barraca_solar(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    barraca_galpon(t, e, f);
+    let (w0, w1) = (f.depth - 26, f.depth - 4);
+    f.foundation(t, e, 0, f.width, w0, w1, STONE);
+    f.fill(e, 0, f.width, 0, 9, w0, w1, BRICK);
+    gable(f, e, 0, f.width, w0, w1, 9, 2, 1, TILE_DARK, BRICK, false);
+    f.surface(e, 1, f.width - 1, 20, w0, DIRT);
+    let mut r = f.rng(25);
+    for k in 0..6 {
+        let u = 2 + (r.next() % (f.width as u64 - 6)) as i32;
+        let w = 22 + k * 4;
+        if w + 3 < w0 {
+            f.raw_fill(e, u, u + 3, 0, 1 + (k % 2), w, w + 3, if k % 3 == 0 { SACK } else { HIDE });
+        }
+    }
 }
 
 /// Saladero: galpones, grasería con chimenea, tendederos de cueros, corrales y ganado.
@@ -687,6 +819,13 @@ mod tests {
                 let mut e = Edits::default();
                 pulperia(&t, &mut e, &frame(&t, seed, LOT_W, LOT_D), corner);
                 builds.push(("pulpería", e));
+            }
+            const TRADES: [(&str, Builder); 5] = [("tienda", tienda), ("almacén", almacen), ("taller", taller), ("curtiembre", curtiembre), ("barraca", barraca_solar)];
+            for (name, b) in TRADES {
+                let mut e = Edits::default();
+                b(&t, &mut e, &frame(&t, seed, LOT_W, LOT_D));
+                assert!(e.voxels.len() > 500, "{name}: muy pocos vóxeles");
+                builds.push((name, e));
             }
             for (name, e) in builds {
                 let f = frame(&t, seed, LOT_W, LOT_D);

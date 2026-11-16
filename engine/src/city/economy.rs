@@ -203,6 +203,12 @@ pub struct MonthInput {
     pub pop: i32,
     /// Casas por nivel (rancho, azotea, altos).
     pub houses: [i32; 3],
+    /// Comercios y talleres por nivel (de las zonas comerciales e industriales).
+    pub shops: [i32; 3],
+    pub workshops: [i32; 3],
+    /// Empleos de comercio y de industria.
+    pub jobs_c: i32,
+    pub jobs_i: i32,
     /// Producción mensual por recurso (de chacras, estancias, hornos, canteras…).
     pub production: [f32; 6],
     /// Ladrillos y piedra que pidieron las obras este mes (se descuentan si hay).
@@ -561,9 +567,13 @@ impl Economy {
 
         // Ingresos.
         let houses = inp.houses;
-        let contrib_base = houses[0] as f32 * 1.0 + houses[1] as f32 * 3.0 + houses[2] as f32 * 7.0;
+        let weight = |b: [i32; 3], w: [f32; 3]| b.iter().zip(w).map(|(n, w)| *n as f32 * w).sum::<f32>();
+        let contrib_base = weight(houses, [1.0, 3.0, 7.0]) + weight(inp.shops, [2.0, 4.0, 9.0]) + weight(inp.workshops, [2.0, 5.0, 10.0]);
         rep.add("Contribución de los vecinos", (contrib_base * self.tax(Tax::Contribucion) as f32 / 6.0 * 2.0) as i64);
-        let sales = pop * 0.9 * (self.price(Res::Pan) * 0.5 + 0.5);
+        // Las ventas crecen con los comercios: sin tiendas, los vecinos se arreglan con los
+        // pulperos ambulantes y la alcabala casi no cobra.
+        let coverage = (inp.jobs_c as f32 / (pop * 0.08).max(1.0)).min(1.2);
+        let sales = pop * 0.9 * (self.price(Res::Pan) * 0.5 + 0.5) * (0.4 + 0.6 * coverage) + inp.jobs_i as f32 * 4.0;
         rep.add("Alcabala", (sales * self.tax(Tax::Alcabala) as f32 / 100.0 * 3.0) as i64);
         rep.add("Aduana", duty as i64);
 
