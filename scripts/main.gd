@@ -186,8 +186,9 @@ func _ready() -> void:
 	add_child(pmi)
 	hud = Hud.new()
 	add_child(hud)
-	hud.setup(TOOL_DEFS)
+	hud.setup(_categories())
 	hud.tool_selected.connect(_select_tool)
+	hud.card_selected.connect(_on_card)
 	hud.option_selected.connect(_on_option)
 	hud.choice_made.connect(_on_open_city)
 	hud.action_pressed.connect(_on_action)
@@ -323,14 +324,16 @@ func _send_bucket_brigade(from: Vector2, to: Vector2, n: int) -> void:
 func _refresh_hud() -> void:
 	var pop := lots.population()
 	hud.set_stats({
-		"date": "%s de %d" % [MONTHS[month % 12].capitalize(), START_YEAR + month / 12],
-		"money": "%s pesos" % Hud.fmt(money),
-		"pop": "Población: %s" % Hud.fmt(pop),
-		"pool": "Esperan casa: %d" % pool,
-		"stage": "%s · Ladrillos %d · Piedra %d · Pan %.1f%s%s" % [_stage_name, bricks, stone, policies.bread_price, " · SEQUÍA" if policies.in_drought() else "", " · FIEBRE" if not epidemics.infected.is_empty() else ""],
-		"parcels": "Parcelas %d/%d" % [parcels.owned.size(), parcels.max_owned],
-		"wind": "Viento: %s%s" % [fires.wind_name, (" · %d incendios" % fires.burning.size()) if fires.burning.size() > 0 else ""],
-		"era": "Época %d: %s" % [era, "colonial" if era == 1 else "Ciudad Nueva"],
+		"date": "%s %d" % [MONTHS[month % 12].substr(0, 3).capitalize(), START_YEAR + month / 12],
+		"money": "%s" % Hud.fmt(money),
+		"pop": Hud.fmt(pop),
+		"pool": "%d sin casa" % pool,
+		"stage": "%s · época %d%s%s" % [_stage_name, era, " · SEQUÍA" if policies.in_drought() else "", " · FIEBRE" if not epidemics.infected.is_empty() else ""],
+		"bricks": str(bricks),
+		"stone": str(stone),
+		"bread": "%.1f" % policies.bread_price,
+		"parcels": "%d/%d" % [parcels.owned.size(), parcels.max_owned],
+		"wind": "%s%s" % [fires.wind_name.capitalize(), (" · %d fuegos" % fires.burning.size()) if fires.burning.size() > 0 else ""],
 		"clock": "%s %s · %d en la calle" % [DayNight.WEEKDAYS[day.weekday()].substr(0, 3).capitalize(), day.clock_text(), agents.active_count()],
 	})
 	if agents.selected_id != -1:
@@ -381,6 +384,47 @@ func _select_tool(t: int) -> void:
 		hud.set_options("Construir (Tab):", names, types.find(service_type if t == Tool.WATER else field_type))
 	else:
 		hud.set_options("", [], -1)
+
+
+## Categorías de la barra inferior: cada una abre un cajón con tarjetas de construcción.
+func _categories() -> Array:
+	var water := []
+	for i in WATER_TYPES.size():
+		var k: int = WATER_TYPES[i]
+		water.append({"name": Services.INFO[k]["name"], "icon": ["well", "cistern", "cart", "lantern", "cross"][i],
+			"tool": Tool.WATER, "option": i, "cost": "%s pesos" % Hud.fmt(Services.INFO[k]["cost"]), "key": "0"})
+	var field := []
+	for i in FIELD_TYPES.size():
+		var k: int = FIELD_TYPES[i]
+		field.append({"name": Services.INFO[k]["name"], "icon": ["cow", "barrel", "kiln", "mill", "rocks"][i],
+			"tool": Tool.FIELD, "option": i, "cost": "%s pesos" % Hud.fmt(Services.INFO[k]["cost"]), "key": "C"})
+	return [
+		{"name": "Ver", "icon": "eye", "tool": Tool.INSPECT, "tooltip": "Inspeccionar (tecla 1)"},
+		{"name": "Calles", "icon": "road", "items": [
+			{"name": "Recta", "icon": "road", "tool": Tool.STRAIGHT, "cost": "por metro", "key": "3"},
+			{"name": "Curva", "icon": "curve", "tool": Tool.CURVE, "cost": "por metro", "key": "4"},
+			{"name": "Damero", "icon": "grid", "tool": Tool.GRID, "cost": "manzanas de 84 m", "key": "5"},
+			{"name": "Mejorar calle", "icon": "upgrade", "tool": Tool.UPGRADE, "cost": "empedrar, faroles", "key": "U"},
+			{"name": "Demoler", "icon": "demolish", "tool": Tool.BULLDOZE, "cost": "", "key": "8"}]},
+		{"name": "Zonas", "icon": "zone", "items": [
+			{"name": "Zonificar", "icon": "zone", "tool": Tool.ZONE, "cost": "solares", "key": "6"},
+			{"name": "Quitar zona", "icon": "dezone", "tool": Tool.DEZONE, "cost": "", "key": "7"}]},
+		{"name": "Servicios", "icon": "drop", "items": water},
+		{"name": "Campo", "icon": "cow", "items": field},
+		{"name": "Puerto", "icon": "anchor", "items": [
+			{"name": "Muelle", "icon": "anchor", "tool": Tool.PORT, "cost": "%s pesos" % Hud.fmt(Port.PIER_COST), "key": "P"},
+			{"name": "Muralla", "icon": "wall", "tool": Tool.WALL, "cost": "por metro", "key": "M"}]},
+		{"name": "Ciudad", "icon": "plaza", "items": [
+			{"name": "Plaza mayor", "icon": "plaza", "tool": Tool.PLAZA, "cost": "fundación", "key": "2"},
+			{"name": "Parcelas", "icon": "parcels", "tool": Tool.PARCELS, "cost": "mercedes de tierras", "key": "9"}]},
+		{"name": "Ordenanzas", "icon": "scroll", "tool": Tool.POLICY, "tooltip": "Ordenanzas del cabildo (tecla K)"},
+	]
+
+
+func _on_card(t: int, option: int) -> void:
+	_select_tool(t)
+	if option >= 0 and tool == t:
+		_on_option(option)
 
 
 func _select_road_type(t: int) -> void:
@@ -1453,6 +1497,8 @@ func _handle_args() -> void:
 		simulate(float(args["simulate"]))
 	if args.has("tool"):
 		_select_tool(int(args["tool"]))
+	if args.has("menu"):
+		hud._on_category(int(args["menu"]))
 	if args.has("speed"):
 		_select_speed(int(args["speed"]))
 	if args.has("cam"):
