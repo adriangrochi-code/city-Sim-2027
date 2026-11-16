@@ -533,5 +533,8 @@ License: GPL-2+
 Nota de modificación (city-Sim-2027): en esta copia la tabla de caracteres
 (cmap) apunta las cifras 0-9 a sus variantes de altura de mayúscula
 (glifos *.lnum, ya incluidos en la fuente) para que el 0 no se confunda
-con la o en la interfaz. No se cambió ningún dibujo. La fuente sigue bajo
+con la o en la interfaz, y los contornos se pasaron de CFF a TrueType
+(curvas cuadráticas, sin solapamientos) porque el rasterizador de la
+interfaz dibujaba mal la V, la W y la Y del original. El diseño de las
+letras no se cambió. La fuente sigue bajo
 la SIL Open Font License 1.1.

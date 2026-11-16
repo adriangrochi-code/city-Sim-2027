@@ -330,10 +330,17 @@ impl ApplicationHandler for App {
             (Some(gpu), true) => {
                 let _ = gpu.egui.on_window_event(&gpu.window, &event);
                 let ctx = gpu.egui.egui_ctx();
-                (ctx.is_pointer_over_area() || ctx.wants_pointer_input(), ctx.wants_keyboard_input())
+                // Se mira la posición actual del cursor contra las áreas del último cuadro: egui
+                // todavía no procesó este evento, y un clic puede llegar sin cuadros entre medio.
+                let ppp = ctx.pixels_per_point();
+                let at = egui::pos2(self.mouse.x as f32 / ppp, self.mouse.y as f32 / ppp);
+                (ctx.layer_id_at(at).is_some() || ctx.wants_pointer_input(), ctx.wants_keyboard_input())
             }
             _ => (false, false),
         };
+        if let WindowEvent::MouseInput { state: ElementState::Pressed, .. } = &event {
+            eprintln!("DBG clic en {:?} ui={ui_pointer} capa={:?}", self.mouse, self.gpu.as_ref().map(|g| { let c = g.egui.egui_ctx(); let p = c.pixels_per_point(); c.layer_id_at(egui::pos2(self.mouse.x as f32 / p, self.mouse.y as f32 / p)) }));
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
@@ -379,6 +386,15 @@ impl ApplicationHandler for App {
                 (MouseButton::Left, ElementState::Pressed) if ui_pointer => {}
                 (MouseButton::Left, ElementState::Pressed) => {
                     if self.session.game.is_some() {
+                        // El punto del mundo bajo el cursor de este instante (no el del último cuadro).
+                        if let Some(gpu) = self.gpu.as_ref() {
+                            let (w, h) = (gpu.config.width as f32, gpu.config.height as f32);
+                            let (o, d) = self.session.cam.ray(self.mouse.x as f32, self.mouse.y as f32, w, h);
+                            let hit = self.session.pick(o, d);
+                            if let Some(g) = self.session.game.as_mut() {
+                                g.hover = hit.map(|h| glam::Vec2::new(h.point.x, h.point.z));
+                            }
+                        }
                         self.session.game_press();
                     } else if let Some(n) = self.session.place() {
                         println!("Colocada: {} ({n} columnas re-malladas)", self.session.tool_name());

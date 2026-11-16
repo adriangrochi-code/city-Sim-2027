@@ -11,7 +11,7 @@ signal lots_changed
 signal lot_level_changed(id: int, old_level: int, new_level: int)
 
 const W := 12.0          # frente del solar
-const D := 24.0          # fondo del solar
+const D := 38.0          # fondo del solar: hasta el medio de la manzana de 100 varas
 const CAP := [0, 4, 8, 14]
 const LEVEL_NAMES := ["Solar vacío", "Rancho", "Casa de azotea", "Casa de altos con mirador"]
 const CELL := 30.0

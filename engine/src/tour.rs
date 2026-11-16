@@ -105,10 +105,16 @@ fn ui_inspect(s: &mut Session, u: &mut GameUi) {
     u.open = None;
     let g = s.game.as_mut().unwrap();
     g.set_tool(7);
-    let c = crate::city::game_demo::PLAZA;
-    let lot = g.city.lots.lots.values().filter(|l| l.level == 1).min_by_key(|l| l.c.distance(c + Vec2::new(-40.0, -120.0)) as i32).map(|l| l.c);
-    g.inspected = lot;
-    g.hover = lot;
+    // El más cercano al centro de la vista que tenga un motivo concreto para no crecer.
+    let view = crate::city::game_demo::PLAZA + Vec2::new(40.0, 30.0);
+    let mut cands: Vec<Vec2> = g.city.lots.lots.values().filter(|l| l.level < 2).map(|l| l.c).collect();
+    cands.sort_by_key(|p| p.distance(view) as i32);
+    let pick = cands.iter().copied().find(|&p| {
+        g.inspected = Some(p);
+        g.inspect_info().is_some_and(|i| !i.why.is_empty() && !i.why[0].starts_with("Nada"))
+    });
+    g.inspected = pick.or(cands.first().copied());
+    g.hover = g.inspected;
 }
 
 /// Un aviso de la gaceta y una calle recta empezada que no se puede trazar (cruza el río).

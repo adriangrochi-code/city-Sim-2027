@@ -19,8 +19,8 @@ pub enum RoadKind {
 impl RoadKind {
     pub fn width(self) -> f32 {
         match self {
-            RoadKind::Dirt => 6.0,
-            RoadKind::Stone => 8.0,
+            RoadKind::Dirt => 8.7,   // 10 varas
+            RoadKind::Stone => 10.4,  // 12 varas: calzada empedrada y veredas
         }
     }
     pub fn min_radius(self) -> f32 {
@@ -481,7 +481,7 @@ mod tests {
     fn la_distancia_al_borde_de_la_calzada() {
         let mut net = RoadNetwork::default();
         net.add_road(&line(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)), RoadKind::Stone);
-        assert!((net.clearance(Vec2::new(50.0, 10.0), 30.0) - 6.0).abs() < 1e-3);
+        assert!((net.clearance(Vec2::new(50.0, 10.0), 30.0) - (10.0 - RoadKind::Stone.width() * 0.5)).abs() < 1e-3);
         assert!(net.clearance(Vec2::new(50.0, 1.0), 30.0) < 0.0);
         let (p, tan) = net.edges.values().next().unwrap().point(25.0);
         assert!((p - Vec2::new(25.0, 0.0)).length() < 1e-3 && (tan - Vec2::X).length() < 1e-3);

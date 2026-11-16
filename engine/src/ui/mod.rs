@@ -584,7 +584,7 @@ fn category_button(ui: &mut egui::Ui, cat: Category, open: bool, current: bool) 
 /// Tarjeta del cajón: ícono, nombre y costo (o el motivo si está desactivada).
 fn card_button(ui: &mut egui::Ui, c: &Card) -> egui::Response {
     let sense = if c.disabled.is_none() { Sense::click() } else { Sense::hover() };
-    let (rect, resp) = ui.allocate_exact_size(vec2(112.0, 92.0), sense);
+    let (rect, resp) = ui.allocate_exact_size(vec2(120.0, 92.0), sense);
     let p = ui.painter();
     let off = c.disabled.is_some();
     let fill = if c.selected { theme::PRESSED } else if resp.hovered() && !off { theme::PAPER_LIGHT } else { theme::PAPER_DARK.gamma_multiply(if off { 0.55 } else { 0.85 }) };

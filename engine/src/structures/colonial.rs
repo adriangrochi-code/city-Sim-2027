@@ -1,6 +1,7 @@
 //! Catálogo de estructuras de la época colonial, armadas con el kit de `structures`.
 //! Proporciones (vóxel = 0,5 m): planta baja 4,5–5 m, planta alta 4 m, puerta 1,5 × 3 m,
-//! ventana 1 × 2 m con antepecho de 1 m, zócalo 1 m, pretil 0,5–1 m, solar de 12 × 24 m.
+//! ventana 1 × 2 m con antepecho de 1 m, zócalo 1 m, pretil 0,5–1 m, solar de 12 × 38 m
+//! (frente de 14 varas y fondo hasta el medio de la manzana de 100 varas).
 
 use super::*;
 
@@ -9,7 +10,7 @@ const CALES: [Mat; 6] = [CAL, CAL, CAL, CAL_OCRE, CAL_ROSA, CAL_AZUL];
 const SHUTTERS: [Mat; 2] = [SHUTTER, WOOD];
 
 pub const LOT_W: i32 = 24;
-pub const LOT_D: i32 = 48;
+pub const LOT_D: i32 = 76;
 
 /// Rancho de barro y paja, retirado de la calle, con huerta, horno de barro y corral de
 /// palo a pique.

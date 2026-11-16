@@ -113,8 +113,8 @@ pub fn road_edits(t: &TerrainGen, net: &RoadNetwork, eid: u32, e: &mut Edits) {
         if d <= hw {
             let mat = match edge.kind {
                 RoadKind::Dirt => DIRT_ROAD,
-                // Vereda de piedra en el metro de afuera, salvo dentro de otra calzada.
-                RoadKind::Stone if d > hw - 1.0 && inside_any >= -1.0 => PLAZA,
+                // Vereda de piedra en el metro y medio de afuera, salvo dentro de otra calzada.
+                RoadKind::Stone if d > hw - 1.5 && inside_any >= -1.5 => PLAZA,
                 RoadKind::Stone => COBBLE,
             };
             set_column(e, c.x, c.y, g, top, mat);
@@ -284,17 +284,17 @@ mod tests {
             let f = Vec2::new(a.cos(), a.sin());
             let b = build_rotated(&t, c, f, LOT_W, LOT_D, 7, &casa_azotea);
             assert!(b.voxels.len() > 1000, "{deg}°: {} vóxeles", b.voxels.len());
-            // Todo cae dentro del rectángulo del solar girado (12 × 24 m, con 1 m de margen
+            // Todo cae dentro del rectángulo del solar girado (12 × 38 m, con 1 m de margen
             // para rejas voladas y el redondeo del re-muestreo).
             let s = Vec2::new(-f.y, f.x);
             for v in &b.voxels {
                 let q = Vec2::new((v.x as f32 + 0.5) * BASE_VOXEL, (v.z as f32 + 0.5) * BASE_VOXEL) - c;
                 assert!(q.dot(s).abs() <= 6.0 + 1.0, "{deg}°: fuera a lo ancho {}", q.dot(s));
-                assert!(q.dot(f).abs() <= 12.0 + 1.0, "{deg}°: fuera a lo hondo {}", q.dot(f));
+                assert!(q.dot(f).abs() <= super::super::lots::D * 0.5 + 1.0, "{deg}°: fuera a lo hondo {}", q.dot(f));
             }
             // La fachada (los vóxeles más cercanos a la calle) está del lado del frente.
             let front = b.voxels.iter().map(|v| (Vec2::new(v.x as f32 + 0.5, v.z as f32 + 0.5) * BASE_VOXEL - c).dot(f)).fold(f32::NEG_INFINITY, f32::max);
-            assert!(front > 10.0, "{deg}°: la fachada no mira a la calle ({front})");
+            assert!(front > super::super::lots::D * 0.5 - 2.0, "{deg}°: la fachada no mira a la calle ({front})");
         }
     }
 

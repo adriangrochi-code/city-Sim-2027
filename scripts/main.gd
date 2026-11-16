@@ -29,7 +29,7 @@ const TOOL_DEFS := [
 	{"key": "2", "name": "Plaza", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
 	{"key": "3", "name": "Recta", "hint": "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar."},
 	{"key": "4", "name": "Curva", "hint": "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija."},
-	{"key": "5", "name": "Damero", "hint": "Clic en una esquina, clic en la otra punta del primer lado y mueve el ratón para extender las manzanas (cuadras de 84 m). Tercer clic para trazar."},
+	{"key": "5", "name": "Damero", "hint": "Clic en una esquina, clic en la otra punta del primer lado y mueve el ratón para extender las manzanas (cuadras de 100 varas, 86,6 m). Tercer clic para trazar."},
 	{"key": "6", "name": "Zona", "hint": "Pinta con el ratón los solares junto a las calles. Ahí se instalan los pobladores. [ y ] cambian el tamaño del pincel."},
 	{"key": "7", "name": "Sin zona", "hint": "Pinta para quitar la zona (derriba lo construido)."},
 	{"key": "8", "name": "Demoler", "hint": "Haz clic sobre un tramo de calle o un pozo, aljibe o puesto para demolerlo."},
@@ -53,7 +53,7 @@ const SPEEDS := [0.0, 1.0, 2.0, 4.0]
 const MONTH_SECONDS := 10.0
 const MONTHS := ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 const START_YEAR := 1726
-const BLOCK := 84.0
+const BLOCK := 86.6  # 100 varas castellanas
 const PLAZA_SIZE := 76.0
 const STAGES := [[0, "Fundación"], [200, "Villa"], [1000, "Ciudad"], [4000, "Plaza fuerte"]]
 const PARCEL_STEPS := [150, 500, 1000, 2000, 3000, 4000]
@@ -403,7 +403,7 @@ func _categories() -> Array:
 		{"name": "Calles", "icon": "road", "items": [
 			{"name": "Recta", "icon": "road", "tool": Tool.STRAIGHT, "cost": "por metro", "key": "3"},
 			{"name": "Curva", "icon": "curve", "tool": Tool.CURVE, "cost": "por metro", "key": "4"},
-			{"name": "Damero", "icon": "grid", "tool": Tool.GRID, "cost": "manzanas de 84 m", "key": "5"},
+			{"name": "Damero", "icon": "grid", "tool": Tool.GRID, "cost": "manzanas de 100 varas", "key": "5"},
 			{"name": "Mejorar calle", "icon": "upgrade", "tool": Tool.UPGRADE, "cost": "empedrar, faroles", "key": "U"},
 			{"name": "Demoler", "icon": "demolish", "tool": Tool.BULLDOZE, "cost": "", "key": "8"}]},
 		{"name": "Zonas", "icon": "zone", "items": [
@@ -743,7 +743,7 @@ func found_plaza(c: Vector2, angle: float, loading := false) -> bool:
 	plaza_founded = true
 	lots.plaza_center = c
 	lots.obstacles.append({"c": c, "f": f, "w": PLAZA_SIZE, "d": PLAZA_SIZE})
-	church_c = c - f * (BLOCK * 0.5 + 4.6 + 17.0)
+	church_c = c - f * (BLOCK * 0.5 + RoadNetwork.WIDTH[RoadNetwork.Type.STONE] * 0.5 + 0.6 + 17.0)
 	lots.obstacles.append({"c": church_c, "f": f, "w": 18.0, "d": 34.0})
 	# Suelo empedrado de la plaza y un rollo (columna) en el centro.
 	var top := -INF

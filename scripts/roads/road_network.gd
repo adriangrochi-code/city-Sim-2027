@@ -7,7 +7,7 @@ signal changed
 
 enum Type { DIRT, STONE }
 const NAMES := {Type.DIRT: "Camino de tierra", Type.STONE: "Calle empedrada"}
-const WIDTH := {Type.DIRT: 6.0, Type.STONE: 8.0}
+const WIDTH := {Type.DIRT: 8.7, Type.STONE: 10.4}  # 10 y 12 varas, como en la traza de Montevideo
 const MIN_RADIUS := {Type.DIRT: 14.0, Type.STONE: 22.0}
 const COST_PER_M := {Type.DIRT: 2.0, Type.STONE: 7.0}
 const SNAP := 9.0

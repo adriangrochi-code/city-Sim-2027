@@ -19,7 +19,7 @@ pub const BODY: f32 = 18.0;
 
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    fonts.font_data.insert("garamond".into(), FontData::from_static(include_bytes!("../../assets/fonts/EBGaramond12-Regular.otf")));
+    fonts.font_data.insert("garamond".into(), FontData::from_static(include_bytes!("../../assets/fonts/EBGaramond12-Regular.ttf")));
     // Garamond primero; las fuentes por omisión de egui quedan de respaldo (símbolos).
     fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "garamond".into());
     ctx.set_fonts(fonts);

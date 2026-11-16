@@ -185,3 +185,21 @@ Capturas: `voxel-catalogo.jpg`, `voxel-casas-cerca.jpg`, `voxel-iglesia-fases.jp
 - Interiores: no hay (los edificios son macizos). La recova y la galería de la estancia
   son los únicos espacios abiertos.
 - Faltan los kits de las épocas 2 a 6 y las piezas para solares escalonados en calles curvas.
+
+## Medidas reales de la traza
+
+La ciudad se construye a tamaño real, con las medidas de la traza colonial de Montevideo
+(vara castellana = 0,866 m). Valen igual en el prototipo y en el motor.
+
+| Elemento | Medida | Equivale a |
+|---|---|---|
+| Cuadra (entre ejes de calle) | 86,6 m | 100 varas |
+| Calle empedrada (calzada + veredas de 1,5 m) | 10,4 m | 12 varas |
+| Camino o calle de tierra | 8,7 m | 10 varas |
+| Plaza mayor | 76 m de lado | una manzana |
+| Solar | 12 m de frente × 38 m de fondo | 14 varas; el fondo llega al medio de la manzana |
+| Planta baja / planta alta | 4,5–5 m / 4 m | — |
+| Rancho | 6–7,5 × 4,5–5,5 m, 2,5 m de pared | — |
+
+Las casas ocupan el frente del solar sobre la línea de la calle; el fondo queda para el patio,
+la huerta y el corral, como en las casas de patio de la Ciudad Vieja.

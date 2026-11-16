@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 
 /// Frente y fondo del solar, en metros (24 × 48 vóxeles de 0,5 m).
 pub const W: f32 = 12.0;
-pub const D: f32 = 24.0;
+pub const D: f32 = 38.0; // hasta el medio de la manzana: (86,6 − 10,4) / 2
 /// Habitantes por nivel.
 pub const CAP: [i32; 4] = [0, 4, 8, 14];
 pub const LEVEL_NAMES: [&str; 4] = ["solar vacío", "rancho", "casa de azotea", "casa de altos"];

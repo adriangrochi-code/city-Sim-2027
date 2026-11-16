@@ -1,8 +1,24 @@
 # Recursos, mercado y políticas
 
 > Documento de sistema. Complementa al [GDD](../GDD.md) (secciones 4.5 y 4.7).
-> Estado: **primera versión implementada en el prototipo** (época colonial). Alcantarillas y
-> alumbrado por épocas: diseñados, pendientes de implementar.
+> Estado: **primera versión implementada en el prototipo** (época colonial) y **portada y
+> ampliada en el motor** (`engine/src/city/economy.rs`: existencias por recurso, comercio por el
+> puerto, impuestos ajustables y presupuesto mensual). Alcantarillas y alumbrado por épocas:
+> diseñados, pendientes de implementar.
+
+## 0. En el motor: existencias, comercio, impuestos y presupuesto
+
+- **Existencias por recurso** (pan, carne, ladrillos, piedra, cueros, sebo) con capacidad de
+  depósito; lo que no entra se pierde. El precio sale de cuántos meses de reserva quedan.
+- **Comercio por el puerto**: con muelle y barcos, se importa lo que escasea (hasta mes y medio
+  de consumo) y se exporta lo que sobra de tres meses de reserva; los cueros se embarcan todos.
+  Un bloqueo lejano corta los barcos de ultramar.
+- **Impuestos ajustables** (0 a 20 %): contribución de los vecinos (por casa, según su nivel),
+  alcabala (ventas) y derechos de aduana. Por encima de la tasa habitual recaudan más pero
+  enojan a su sector y espantan pobladores; la aduana alta además alimenta el contrabando.
+- **Presupuesto mensual** línea por línea (ingresos y gastos), como el panel de presupuesto del
+  género: contribución, alcabala, aduana, mantenimiento de calles y servicios, faroles, pósito,
+  subsidio del pan, limpieza.
 
 ## Objetivo
 

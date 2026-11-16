@@ -21,8 +21,9 @@ use lots::{corners_of, LevelChange, Lot, Lots, Obstacle};
 use roads::{polyline_length, RoadKind, RoadNetwork};
 use voxelize::{build_rotated, plaza_edits, road_edits, road_restore, PLAZA_SIZE};
 
-/// Cuadra del damero (m, entre ejes de calle).
-pub const BLOCK: f32 = 84.0;
+/// Cuadra del damero entre ejes de calle: 100 varas castellanas (0,866 m), como en la traza
+/// de Montevideo.
+pub const BLOCK: f32 = 86.6;
 /// Segundos de juego por mes (a velocidad 1).
 pub const MONTH_SECONDS: f32 = 10.0;
 pub const START_YEAR: u32 = 1726;
@@ -147,7 +148,7 @@ impl City {
         self.plaza = Some((c, angle));
         self.lots.plaza_center = Some(c);
         self.lots.obstacles.push(Obstacle { c, f, w: PLAZA_SIZE, d: PLAZA_SIZE });
-        let church_c = c - f * (BLOCK * 0.5 + 4.6 + 21.0);
+        let church_c = c - f * (BLOCK * 0.5 + RoadKind::Stone.width() * 0.5 + 0.6 + 21.0);
         self.lots.obstacles.push(Obstacle { c: church_c, f, w: 18.0, d: 44.0 });
         let mut e = Edits::default();
         plaza_edits(t, c, f, &mut e);

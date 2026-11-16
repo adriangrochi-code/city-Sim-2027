@@ -263,7 +263,7 @@ impl Game {
             i.lines.push(format!("Valor del suelo: {} %", (value * 100.0) as i32));
             i.lines.push(format!("Calle: {}", front.map_or("—", |k| k.name())));
             if l.level > 0 {
-                i.lines.push(format!("Antigüedad: {} meses", l.age));
+                i.lines.push(format!("Antigüedad: {} {}", l.age, if l.age == 1 { "mes" } else { "meses" }));
             }
             if l.zone == 0 {
                 i.why.push("Sin zonificar: pinta la zona mixta (5).".into());
@@ -503,7 +503,7 @@ mod tests {
         g.city.money = 1_000_000;
         // Recta: el primer clic se engancha a la esquina de la plaza, el segundo construye.
         g.set_tool(1);
-        let corner = c + Vec2::new(42.0, -42.0);
+        let corner = c + Vec2::new(BLOCK * 0.5, -BLOCK * 0.5);
         assert!(g.press(&t, corner + Vec2::new(3.0, 2.0)).is_none());
         assert_eq!(g.p0, corner);
         assert!(g.press(&t, corner + Vec2::new(0.0, -120.0)).is_some(), "{}", g.message);
