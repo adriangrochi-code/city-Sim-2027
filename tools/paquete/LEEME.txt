@@ -1,4 +1,4 @@
-CITY SIM 2027 (nombre provisional) · Primera versión de prueba (Linux y Windows, x86_64)
+CITY SIM 2027 (nombre provisional) · Versión de prueba (Linux y Windows, x86_64)
 ===============================================================================
 
 Contiene dos programas:
@@ -17,12 +17,21 @@ Contiene dos programas:
    R girar · G iglesia · O objetivos · F seguir vecino · Espacio pausa ·
    F5 guardar · F9 cargar · Esc cancelar
 
-2) MOTOR DE VÓXELES (sandbox)  ->  ./motor-voxel.sh  (Windows: motor-voxel.bat)
-   Ciudad colonial en vóxeles, mundo que se genera al moverte, colocar
-   estructuras, excavar y rellenar.
+2) EL JUEGO EN EL MOTOR DE VÓXELES (nuevo) ->  ./motor-voxel.sh  (Windows: motor-voxel.bat)
+   Fundar la plaza, trazar calles y zonificar con la interfaz nueva:
+   barra de categorías abajo, cajón de tarjetas, fichas de recursos arriba.
+   ZONAS: residencial, comercial e industrial, en densidad baja, media o alta,
+   con el medidor de demanda R/C/I. ORDENANZAS y PRESUPUESTO con impuestos
+   en la categoría Ordenanzas. Clic en un solar (Capas de datos > Ver) para
+   saber por qué no crece.
    Controles: WASD/flechas mover · Q/E girar · rueda zoom · botón central
-   orbitar · botón derecho arrastrar · clic izq. colocar · clic der. excavar ·
-   F rellenar · 1-9/Tab estructura · R rotar · [ ] hora · P pausar día · F12 captura
+   orbitar · botón derecho arrastrar · Tab tipo de calle · [ ] pincel ·
+   R girar la plaza · Espacio pausa · Esc cancelar
+
+   SANDBOX DE VÓXELES ->  ./motor-sandbox.sh  (Windows: motor-sandbox.bat)
+   Ciudad colonial en vóxeles para recorrer, colocar estructuras, excavar y
+   rellenar: clic izq. colocar · clic der. excavar · F rellenar ·
+   1-9/Tab estructura · R rotar · [ ] hora · P pausar día · F12 captura
 
    MEDIR FPS EN TU EQUIPO:  ./motor-voxel.sh --bench salida/
                             (Windows: medir-fps.bat)
