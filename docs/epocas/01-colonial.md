@@ -343,7 +343,7 @@ Duración objetivo de la época: **entre 4 y 8 horas** de juego.
 
 ## 14. Alcance del primer prototipo
 
-> **Estado:** los 7 puntos del recorte están hechos en el prototipo de Godot, además de la muralla con portones y aduana y los acontecimientos lejanos. Pendiente: la decisión final de la muralla, la iglesia matriz por fases, el campo (estancias, saladeros) y guardar partida.
+> **Estado:** la época colonial está completa en el prototipo de Godot: los 7 puntos del recorte, muralla con aduana, acontecimientos lejanos, iglesia matriz por fases, estancias y saladeros, objetivos y la decisión final de la muralla que abre la época 2, y guardar/cargar. Pendiente: lazareto y epidemias, y el atahona/horno de ladrillos como cadenas de producción.
 
 Un recorte mínimo para validar lo esencial de esta época:
 1. Mapa grande con península, bahía, arroyos y cuchillas; parcela inicial más la compra de

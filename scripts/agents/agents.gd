@@ -234,8 +234,16 @@ func _build_schedule() -> void:
 				var t := 19.5 + _rng.randf() * 1.5
 				_schedule.append([t / 24.0, id, "a la tertulia en la pulpería"])
 				_schedule.append([minf(t + 1.0 + _rng.randf() * 1.5, 23.9) / 24.0, id, "vuelve de la tertulia"])
+	# El campo: arreos de las estancias al saladero y cueros del saladero al puerto.
+	if services != null:
+		for sid in services.of_type(Services.Type.ESTANCIA):
+			for k in 3:
+				_schedule.append([(6.0 + _rng.randf() * 8.0) / 24.0, -3000 - int(sid), "arreo"])
+		for sid in services.of_type(Services.Type.SALADERO):
+			for k in 3:
+				_schedule.append([(8.0 + _rng.randf() * 8.0) / 24.0, -5000 - int(sid), "cueros"])
 	# Carretas que traen cueros y alimentos del campo durante el día.
-	var carts := 4 + int(lots.population() / 70.0)
+	var carts := mini(4 + int(lots.population() / 200.0), 30)
 	for k in carts:
 		_schedule.append([(6.5 + _rng.randf() * 9.0) / 24.0, -1, "trae cueros y trigo del campo"])
 	_schedule.sort_custom(func(a, b): return a[0] < b[0])
@@ -255,6 +263,10 @@ func _spawn_scheduled() -> void:
 		_sched_i += 1
 		if item[1] == -1:
 			_spawn_cart()
+		elif int(item[1]) <= -5000:
+			_spawn_hides_cart(-5000 - int(item[1]))
+		elif int(item[1]) <= -3000:
+			_spawn_herd_cart(-3000 - int(item[1]))
 		elif int(item[1]) <= -1000:
 			_start_round(-1000 - int(item[1]))
 		elif item[1] <= -2:
@@ -397,6 +409,46 @@ func _next_round(ag: Dictionary) -> void:
 		_pending.append([sim_time + 5.0, cont])
 	else:
 		spawn(Kind.WALK, here, services.items[sid]["c"], -1, "vuelve al puesto al amanecer", _rng.randi() % 100000, TEMPERS[0])
+
+
+func _nearest(type: int, p: Vector2) -> int:
+	var best := -1
+	var bd := INF
+	for sid in services.of_type(type):
+		var d := (services.items[sid]["c"] as Vector2).distance_to(p)
+		if d < bd:
+			bd = d
+			best = sid
+	return best
+
+
+func _spawn_herd_cart(estancia: int) -> void:
+	if not services.items.has(estancia):
+		return
+	var from: Vector2 = services.items[estancia]["c"]
+	var sal := _nearest(Services.Type.SALADERO, from)
+	var to := _plaza_point() if sal == -1 else (services.items[sal]["c"] as Vector2)
+	var why := "lleva ganado de la estancia al saladero" if sal != -1 else "lleva cueros crudos de la estancia al mercado"
+	var id := spawn(Kind.CART, from, to, -1, why, _rng.randi() % 100000, TEMPERS[_rng.randi() % TEMPERS.size()])
+	if id != -1:
+		by_id[id]["carter"] = "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
+		by_id[id]["to_saladero"] = sal
+
+
+func _spawn_hides_cart(sal: int) -> void:
+	if not services.items.has(sal) or int(services.items[sal]["stock"]) <= 0:
+		return
+	services.items[sal]["stock"] = int(services.items[sal]["stock"]) - 1
+	var from: Vector2 = services.items[sal]["c"]
+	var to := _plaza_point()
+	var why := "lleva cueros salados y tasajo al mercado"
+	if port != null and port.has_pier:
+		to = port.land_point
+		why = "lleva cueros salados del saladero a la barraca del puerto"
+	var id := spawn(Kind.CART, from, to, -1, why, _rng.randi() % 100000, TEMPERS[_rng.randi() % TEMPERS.size()])
+	if id != -1:
+		by_id[id]["carter"] = "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
+		by_id[id]["hides"] = 25
 
 
 ## Entrada desde el campo: el extremo de calle más alejado de la plaza.
@@ -625,14 +677,14 @@ func _drive(ag: Dictionary, lanes: Dictionary, dt: float) -> void:
 
 	# Adelantamiento prudente: solo jinetes, detrás de algo lento y con el contrario libre.
 	if ag["over"]:
-		if leader.is_empty() or s > float(ag["over_s"]) or not _opposite_clear(ag, 25.0):
+		if leader.is_empty() or s > float(ag["over_s"]) or not _opposite_clear(ag, 25.0, lanes):
 			ag["over"] = false
 		else:
 			leader = {}
 			ag["state"] = "adelantando"
 	elif not leader.is_empty() and ag["kind"] == Kind.RIDER and float(leader["v"]) < 0.6 * float(p["v0"]):
 		var lgap := float(leader["s"]) - float(leader["p"]["len"]) - s
-		if lgap < 14.0 and to_end > 45.0 and _rng.randf() < float(ag["temper"]["overtake"]) * 0.05 and _opposite_clear(ag, 60.0):
+		if lgap < 14.0 and to_end > 45.0 and _rng.randf() < float(ag["temper"]["overtake"]) * 0.05 and _opposite_clear(ag, 60.0, lanes):
 			ag["over"] = true
 			overtakes += 1
 			ag["over_s"] = float(leader["s"]) + 6.0
@@ -669,7 +721,7 @@ func _drive(ag: Dictionary, lanes: Dictionary, dt: float) -> void:
 	# Aduana: las carretas se detienen en el portón a ser revisadas.
 	if wall != null and ag["kind"] == Kind.CART and not wall.gates.is_empty():
 		var g := wall.gate_ahead(leg[0], leg[1], s, net.edges[leg[0]]["len"])
-		if not g.is_empty() and not (ag.get("insp", {}) as Dictionary).has(g[0]):
+		if not g.is_empty() and not (ag.get("insp", {}) as Dictionary).has(g[0]) and _entering(ag, g[0]):
 			var dist := float(g[1]) - s
 			if dist < APPROACH:
 				# El punto de parada es el propio portón (se descuenta la distancia mínima).
@@ -716,16 +768,25 @@ func _drive(ag: Dictionary, lanes: Dictionary, dt: float) -> void:
 			ag["state"] = "esperando en la fila"
 
 
-func _opposite_clear(ag: Dictionary, ahead: float) -> bool:
+## ¿El vehículo va hacia adentro de la ciudad por este portón? (la aduana revisa solo lo que entra)
+func _entering(ag: Dictionary, gate_id: int) -> bool:
+	if gate_id >= wall.gates.size() or lots.plaza_center.x == INF:
+		return false
+	var leg: Array = ag["legs"][ag["li"]]
+	var L: float = net.edges[leg[0]]["len"]
+	var gs: float = wall.gates[gate_id]["s"]
+	var tan: Vector2 = net.edge_point(leg[0], gs)[1]
+	if int(leg[1]) == 1:
+		tan = -tan
+	return tan.dot(lots.plaza_center - (wall.gates[gate_id]["pos"] as Vector2)) > 0.0
+
+
+func _opposite_clear(ag: Dictionary, ahead: float, lanes: Dictionary) -> bool:
 	var leg: Array = ag["legs"][ag["li"]]
 	var L: float = net.edges[leg[0]]["len"]
 	var my_poly := float(ag["s"]) if int(leg[1]) == 0 else L - float(ag["s"])
-	for other in agents:
-		if other["kind"] == Kind.WALK or other["id"] == ag["id"]:
-			continue
+	for other in lanes.get(int(leg[0]) * 2 + 1 - int(leg[1]), []):
 		var ol: Array = other["legs"][other["li"]]
-		if ol[0] != leg[0] or ol[1] == leg[1]:
-			continue
 		var op := float(other["s"]) if int(ol[1]) == 0 else L - float(other["s"])
 		var rel := (op - my_poly) * (1.0 if int(leg[1]) == 0 else -1.0)
 		if rel > -5.0 and rel < ahead:
@@ -813,6 +874,13 @@ func _arrive(ag: Dictionary) -> void:
 		_pending.append([sim_time + 30.0 + _rng.randf() * 60.0, back2])
 	elif ag.has("watch"):
 		_next_round(ag)
+	elif ag.has("to_saladero"):
+		var sal: int = ag["to_saladero"]
+		if sal != -1 and services.items.has(sal):
+			services.items[sal]["stock"] = int(services.items[sal]["stock"]) + 1
+	elif ag.has("hides"):
+		if port != null and String(ag["purpose"]).contains("barraca"):
+			port.deliver_hides(int(ag["hides"]))
 	elif ag["kind"] == Kind.CART and String(ag["purpose"]).begins_with("trae"):
 		if port != null and String(ag["purpose"]).contains("barraca"):
 			port.deliver_hides(12 + _rng.randi() % 10)

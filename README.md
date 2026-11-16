@@ -54,8 +54,20 @@ Qué incluye:
 
 ![Carretas haciendo fila en el portón de la muralla](docs/capturas/prototipo1-porton.jpg)
 
-Pendiente: la decisión final de la muralla (paso a la época 2), la iglesia matriz como obra por
-fases, estancias y saladeros en el campo, y guardar/cargar partida.
+- **Iglesia matriz (tecla G):** gran proyecto en 5 fases (cimientos, muros, naves y techo,
+  cúpula, torres) que se ven en obra con andamios y grúa; cada fase atrae más pobladores.
+- **Campo (tecla C):** estancias con corral y ganado, y saladeros junto al agua. Las carretas llevan
+  el ganado al saladero y los cueros salados al puerto. El saladero huele mal (baja el valor del
+  suelo) y contamina los pozos cercanos.
+- **Objetivos de la época (tecla O)** y **el nuevo orden:** con 3.000 habitantes, la matriz
+  terminada y 300 cueros exportados, llega la gran decisión: derribar la muralla, conservar los
+  portones como monumento o conservar también un tramo. Con eso empieza la época 2.
+- **Guardar y cargar partida** (F5 / F9).
+
+![La gran decisión: cómo abrir la ciudad](docs/capturas/prototipo1-nuevo-orden.jpg)
+
+Pendiente: el contenido de la época 2 (ensanche, Ciudad Nueva), lazareto y epidemias, y
+optimizar los agentes para ciudades de más de 5.000 habitantes.
 
 ## Motor de vóxeles (Rust)
 

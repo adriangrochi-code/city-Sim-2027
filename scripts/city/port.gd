@@ -48,6 +48,7 @@ var pier_end := Vector2.ZERO
 var anchorage := Vector2.ZERO
 var sea_dir := Vector2.ZERO
 var hides := 0                      # cueros acopiados en la barraca
+var total_exported := 0
 var active_event: Dictionary = {}
 var event_months := 0
 var year_stats := {"ships": 0, "people": 0, "exported": 0, "imported": 0, "duty": 0}
@@ -307,6 +308,7 @@ func _finish_unloading(sh: Dictionary) -> void:
 	year_stats["people"] += people
 	year_stats["imported"] += bales
 	year_stats["exported"] += exported
+	total_exported += exported
 	year_stats["duty"] += duty
 	_pending_people += people
 	_pending_duty += duty

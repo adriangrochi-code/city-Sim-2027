@@ -9,7 +9,7 @@ const RoadNetwork = preload("res://scripts/roads/road_network.gd")
 const Lots = preload("res://scripts/city/lots.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 
-enum Type { WELL, CISTERN, WATER_CARRIERS, WATCH }
+enum Type { WELL, CISTERN, WATER_CARRIERS, WATCH, ESTANCIA, SALADERO }
 const INFO := {
 	Type.WELL: {"name": "Pozo de balde", "cost": 400, "upkeep": 4, "cap": 60, "quality": 0.7, "radius": 110.0, "size": Vector2(5, 5),
 		"desc": "Agua de pozo para unas 60 personas cercanas. Calidad regular."},
@@ -19,7 +19,12 @@ const INFO := {
 		"desc": "Los aguadores llenan barriles en el arroyo y los reparten en carro. Debe estar a menos de 250 m de un arroyo."},
 	Type.WATCH: {"name": "Puesto de serenos", "cost": 1200, "upkeep": 25, "cap": 0, "quality": 0.0, "radius": 260.0, "size": Vector2(6, 8),
 		"desc": "De noche los serenos encienden los faroles de las calles cercanas y hacen la ronda cantando la hora. Con calles iluminadas, los vecinos salen a la tertulia."},
+	Type.ESTANCIA: {"name": "Estancia", "cost": 3000, "upkeep": 0, "cap": 0, "quality": 0.0, "radius": 0.0, "size": Vector2(60, 60),
+		"desc": "Cría ganado en el campo, lejos de la ciudad. Sus carretas llevan el ganado al saladero (o al mercado si no hay)."},
+	Type.SALADERO: {"name": "Saladero", "cost": 5000, "upkeep": 20, "cap": 0, "quality": 0.0, "radius": 350.0, "size": Vector2(36, 44),
+		"desc": "Carnea el ganado y sala los cueros y el tasajo para embarcar. Necesita agua cerca. Huele mal: baja el valor del suelo y contamina los pozos cercanos."},
 }
+const CONTAMINATION := 300.0
 const FIRE_REACH := {Type.WELL: 140.0, Type.CISTERN: 180.0, Type.WATER_CARRIERS: 450.0}
 
 var gen: TerrainGen
@@ -71,8 +76,16 @@ func problem(type: int, c: Vector2, angle: float) -> String:
 			return "Demasiado cerca del agua"
 		if net.clearance(p, 20.0) < 0.5:
 			return "Está encima de una calle"
-	if net.clearance(c, 40.0) > 22.0:
-		return "Debe estar junto a una calle"
+	var size: Vector2 = INFO[type]["size"]
+	if net.clearance(c, 80.0) > maxf(22.0, size.y * 0.5 + 10.0):
+		return "Debe estar junto a una calle o camino"
+	if type == Type.ESTANCIA and lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 600.0:
+		return "Las estancias están en el campo, a más de 600 m de la plaza"
+	if type == Type.SALADERO:
+		if lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 350.0:
+			return "Demasiado cerca de la plaza: el saladero huele mal"
+		if gen.arroyo_distance(c.x, c.y) > 220.0 and not _near_coast(c, 220.0):
+			return "El saladero necesita un arroyo o la costa a menos de 220 m"
 	for ob in lots.obstacles:
 		if Lots.polys_overlap(cs, Lots.corners_of(ob["c"], ob["f"], ob["w"], ob["d"])):
 			return "El lugar está ocupado"
@@ -97,7 +110,8 @@ func place(type: int, c: Vector2, angle: float) -> int:
 	var s := Lots.side_of(f)
 	mi.transform = Transform3D(Basis(Vector3(s.x, 0, s.y), Vector3.UP, Vector3(f.x, 0, f.y)), Vector3(c.x, base, c.y))
 	add_child(mi)
-	items[id] = {"id": id, "type": type, "c": c, "f": f, "node": mi, "served": 0}
+	items[id] = {"id": id, "type": type, "c": c, "f": f, "node": mi, "served": 0, "stock": 0}
+	_update_nuisances()
 	if type == Type.WATCH:
 		rebuild_lamps()
 	return id
@@ -113,6 +127,7 @@ func remove(id: int) -> void:
 			lots.obstacles.remove_at(i)
 	items.erase(id)
 	rebuild_lamps()
+	_update_nuisances()
 
 
 func at(p: Vector2) -> int:
@@ -121,6 +136,14 @@ func at(p: Vector2) -> int:
 		if Geometry2D.is_point_in_polygon(p, corners(it["type"], it["c"], it["f"])):
 			return id
 	return -1
+
+
+func save_data() -> Array:
+	var out := []
+	for id in items:
+		var it: Dictionary = items[id]
+		out.append([it["type"], it["c"], atan2((it["f"] as Vector2).x, (it["f"] as Vector2).y), it["stock"]])
+	return out
 
 
 func upkeep() -> int:
@@ -154,13 +177,16 @@ func update_water() -> void:
 				cands.append([d, id])
 		cands.sort_custom(func(a, b): return a[0] < b[0])
 		var used := 0
+		var quality: float = info["quality"]
+		if it["type"] == Type.WELL and contaminated(it["c"]):
+			quality = 0.35
 		for cnd in cands:
 			var lot: Dictionary = lots.lots[cnd[1]]
 			var need: int = Lots.CAP[lot["level"]]
 			if used + need > int(info["cap"]):
 				break
 			used += need
-			lot["water"] = info["quality"]
+			lot["water"] = quality
 			lot["water_src"] = sid
 		it["served"] = used
 
@@ -178,6 +204,40 @@ func fire_source(p: Vector2) -> int:
 			bd = d
 			best = id
 	return best
+
+
+## ¿El agua de un pozo en `p` está contaminada por un saladero cercano?
+func contaminated(p: Vector2) -> bool:
+	for id in items:
+		var it: Dictionary = items[id]
+		if it["type"] == Type.SALADERO and (it["c"] as Vector2).distance_to(p) < CONTAMINATION:
+			return true
+	return false
+
+
+func of_type(type: int) -> Array:
+	var out := []
+	for id in items:
+		if items[id]["type"] == type:
+			out.append(id)
+	return out
+
+
+func _near_coast(c: Vector2, r: float) -> bool:
+	for k in 16:
+		var a := TAU * k / 16.0
+		for d in [r * 0.33, r * 0.66, r]:
+			var q: Vector2 = c + Vector2(cos(a), sin(a)) * float(d)
+			if gen.height(q.x, q.y) < -0.5:
+				return true
+	return false
+
+
+func _update_nuisances() -> void:
+	lots.nuisances.clear()
+	for id in items:
+		if items[id]["type"] == Type.SALADERO:
+			lots.nuisances.append(items[id]["c"])
 
 
 ## ¿Hay faroles encendidos de noche en este punto?
@@ -241,6 +301,12 @@ func describe(id: int) -> String:
 	var info: Dictionary = INFO[it["type"]]
 	if it["type"] == Type.WATCH:
 		return "%s\n%s\nFaroles a su cargo: %d\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], lamps.size(), info["upkeep"]]
+	if it["type"] == Type.ESTANCIA:
+		return "%s\n%s" % [info["name"], info["desc"]]
+	if it["type"] == Type.SALADERO:
+		return "%s\n%s\nGanado esperando faena: %d\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], it["stock"], info["upkeep"]]
+	if it["type"] == Type.WELL and contaminated(it["c"]):
+		return "%s\n¡Agua contaminada por el saladero!\nAbastece a %d personas con agua mala" % [info["name"], it["served"]]
 	return "%s\n%s\nAbastece a %d de %d personas\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], it["served"], info["cap"], info["upkeep"]]
 
 
@@ -276,6 +342,45 @@ func _mesh(type: int) -> ArrayMesh:
 			BuildingGen.gable(st, Vector3(0, 3.1, 0), 2.8, 3.3, 1.4, BuildingGen.TILE_ROOF, cal, 2.5, 3.0)
 			BuildingGen.box(st, Vector3(0, 0, 3.02), Vector3(1.0, 2.1, 0.1), wood)
 			BuildingGen.box(st, Vector3(1.6, 1.8, 3.2), Vector3(0.45, 0.6, 0.45), Color(0.95, 0.75, 0.4, 0.0))
+		Type.ESTANCIA:
+			var adobe := Color(0.90, 0.86, 0.76)
+			BuildingGen.box(st, Vector3(-12, -0.6, 14), Vector3(16.0, 4.2, 7.0), adobe)
+			BuildingGen.gable(st, Vector3(-12, 3.6, 14), 8.5, 4.0, 2.2, BuildingGen.TILE_ROOF, adobe, 8.0, 3.5)
+			BuildingGen.box(st, Vector3(-12, 0, 17.55), Vector3(1.2, 2.2, 0.1), wood)
+			BuildingGen.box(st, Vector3(-12, -0.4, 22.0), Vector3(16.0, 0.4, 3.0), Color(0.55, 0.45, 0.32))
+			# Corral de palo a pique.
+			for side in 4:
+				var xf := Transform3D(Basis(Vector3.UP, PI * 0.5 * side), Vector3(8.0, 0, -6.0))
+				for k in 13:
+					BuildingGen.box(st, Vector3(-12.0 + k * 2.0, 0, 12.0), Vector3(0.25, 1.7, 0.25), wood, xf)
+				BuildingGen.box(st, Vector3(0, 1.1, 12.0), Vector3(24.0, 0.15, 0.15), wood, xf)
+			# Ganado.
+			for k in 14:
+				var cx := 8.0 + float((k * 37) % 19) - 9.0
+				var cz := -6.0 + float((k * 53) % 19) - 9.0
+				var cow := Transform3D(Basis(Vector3.UP, float(k) * 0.9), Vector3(cx, 0, cz))
+				var hide := Color(0.45, 0.30, 0.20) if k % 3 else Color(0.20, 0.16, 0.13)
+				BuildingGen.box(st, Vector3(0, 0.5, 0), Vector3(0.7, 0.8, 1.7), hide, cow)
+				BuildingGen.box(st, Vector3(0, 0.95, 1.0), Vector3(0.4, 0.4, 0.5), hide, cow)
+			# Ombú.
+			BuildingGen.box(st, Vector3(-20, 0, -18), Vector3(2.4, 3.5, 2.4), Color(0.40, 0.33, 0.25))
+			BuildingGen.box(st, Vector3(-20, 3.0, -18), Vector3(10.0, 3.5, 10.0), Color(0.27, 0.38, 0.17))
+			BuildingGen.box(st, Vector3(-20, 6.5, -18), Vector3(6.0, 1.5, 6.0), Color(0.29, 0.40, 0.18))
+		Type.SALADERO:
+			var brick := Color(0.66, 0.40, 0.30)
+			for gx in [-9.0, 9.0]:
+				BuildingGen.box(st, Vector3(gx, -0.6, 8.0), Vector3(14.0, 5.0, 24.0), brick)
+				var rot := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3.ZERO)
+				BuildingGen.gable(st, Vector3(-8.0, 4.4, gx), 12.5, 7.5, 2.4, BuildingGen.TILE_ROOF, brick, 12.0, 7.0, rot)
+			BuildingGen.box(st, Vector3(16.0, 0, 18.0), Vector3(1.6, 14.0, 1.6), brick.darkened(0.2))
+			# Tendederos de cueros al sol.
+			for row in 4:
+				for k in 6:
+					var x := -15.0 + k * 6.0
+					var z := -8.0 - row * 3.5
+					BuildingGen.box(st, Vector3(x, 0, z), Vector3(0.2, 2.2, 0.2), wood)
+					BuildingGen.box(st, Vector3(x + 3.0, 0.4, z), Vector3(5.2, 1.6, 0.08), Color(0.62, 0.48, 0.32))
+				BuildingGen.box(st, Vector3(0, 2.1, -8.0 - row * 3.5), Vector3(32.0, 0.1, 0.1), wood)
 		Type.WATER_CARRIERS:
 			BuildingGen.box(st, Vector3(0, -0.8, 0), Vector3(14.0, 1.0, 18.0), Color(0.55, 0.48, 0.36))
 			BuildingGen.box(st, Vector3(0, -0.5, -4.0), Vector3(10.0, 3.6, 7.0), Color(0.62, 0.50, 0.36))

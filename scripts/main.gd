@@ -17,12 +17,13 @@ const Services = preload("res://scripts/city/services.gd")
 const Fires = preload("res://scripts/city/fires.gd")
 const Port = preload("res://scripts/city/port.gd")
 const Wall = preload("res://scripts/city/wall.gd")
+const Church = preload("res://scripts/city/church.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
-enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER, PORT, WALL }
+enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER, PORT, WALL, FIELD }
 const TOOL_DEFS := [
-	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o el terreno para ver su información. F sigue al vecino elegido."},
+	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o la iglesia para ver su información. F sigue al vecino elegido · G financia la iglesia matriz · O objetivos de la época · F5 guardar · F9 cargar."},
 	{"key": "2", "name": "Plaza", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
 	{"key": "3", "name": "Recta", "hint": "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar."},
 	{"key": "4", "name": "Curva", "hint": "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija."},
@@ -33,8 +34,13 @@ const TOOL_DEFS := [
 	{"key": "9", "name": "Parcelas", "hint": "Compra parcelas contiguas a las tuyas (mercedes de tierras). Se desbloquean más con la población."},
 	{"key": "0", "name": "Servicios", "hint": "Pozos, aljibes, puesto de aguadores o de serenos, junto a una calle (R gira). Las casas de azotea necesitan agua y las de altos, buena agua; con agua cerca se apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
 	{"key": "P", "name": "Puerto", "hint": "Haz clic en la costa, junto a una calle, para construir el muelle con su barraca. Los barcos fondean en el río y las lanchas descargan pobladores y mercancías; las carretas traen cueros para embarcar."},
+	{"key": "C", "name": "Campo", "hint": "Estancias (lejos de la ciudad) y saladeros (junto a un arroyo o la costa). Las carretas llevan el ganado al saladero y los cueros salados al puerto. El saladero huele mal y contamina los pozos cercanos."},
 	{"key": "M", "name": "Muralla", "hint": "Clic en el inicio y clic en el final de cada tramo; sigue encadenando y Esc para terminar. Donde cruza una calle se abre un portón con aduana: las carretas se detienen a ser revisadas y pagan."},
 ]
+const WATER_TYPES := [Services.Type.WELL, Services.Type.CISTERN, Services.Type.WATER_CARRIERS, Services.Type.WATCH]
+const FIELD_TYPES := [Services.Type.ESTANCIA, Services.Type.SALADERO]
+const SAVE_PATH := "user://partida.txt"
+static var pending_load := {}
 const WINDS := [["pampero", Vector2(0.7, -0.7)], ["sudestada", Vector2(-0.7, -0.7)], ["viento norte", Vector2(0.0, 1.0)], ["viento del este", Vector2(-1.0, 0.0)], ["brisa del río", Vector2(0.0, -1.0)]]
 const SPEEDS := [0.0, 1.0, 2.0, 4.0]
 const MONTH_SECONDS := 10.0
@@ -60,6 +66,13 @@ var service_type := Services.Type.WELL
 var service_angle := 0.0
 var port: Port
 var wall: Wall
+var church: Church
+var church_c := Vector2.ZERO
+var field_type := Services.Type.ESTANCIA
+var era := 1
+var _transition_offered := false
+var era_goals := {"pop": 3000, "exported": 300}
+var _auto_church := false
 var rig: CameraRig
 var hud: Hud
 
@@ -155,6 +168,7 @@ func _ready() -> void:
 	hud.setup(TOOL_DEFS)
 	hud.tool_selected.connect(_select_tool)
 	hud.option_selected.connect(_on_option)
+	hud.choice_made.connect(_on_open_city)
 	hud.speed_selected.connect(_select_speed)
 	parcels.changed.connect(terrain.refresh)
 	_select_road_type(RoadNetwork.Type.DIRT)
@@ -162,6 +176,10 @@ func _ready() -> void:
 	_select_tool(Tool.PLAZA)
 	_refresh_tool_lock()
 	hud.toast("Funda la ciudad: elige el sitio de la plaza mayor en la península")
+	if not pending_load.is_empty():
+		var d: Dictionary = pending_load
+		pending_load = {}
+		_apply_save(d)
 	_handle_args()
 
 
@@ -207,6 +225,15 @@ func _month_tick() -> void:
 	month += 1
 	var pop := lots.population()
 	var arrivals := 4 + int(pop * 0.03) + port.month_tick(pop)
+	if church != null:
+		church.month_tick()
+		arrivals = int(arrivals * church.attraction())
+		if church.building:
+			var entry := agents._entry_node()
+			if entry != -1:
+				for k in 2:
+					agents.spawn(Agents.Kind.CART, net.nodes[entry], church_c, -1, "lleva ladrillos y cal a la obra de la matriz", rng.randi() % 100000, Agents.TEMPERS[1])
+	_check_transition(pop)
 	pool = mini(pool + arrivals, 600)
 	money += wall.take_duty() - wall.upkeep() - (Port.PIER_UPKEEP if port.has_pier else 0)
 	money += int(pop * 1.2) - int(net.total_length() * 0.01) - services.upkeep()
@@ -254,11 +281,12 @@ func _refresh_hud() -> void:
 		"date": "%s de %d" % [MONTHS[month % 12].capitalize(), START_YEAR + month / 12],
 		"money": "%s pesos" % Hud.fmt(money),
 		"pop": "Población: %s" % Hud.fmt(pop),
-		"pool": "Pobladores esperando: %d" % pool,
+		"pool": "Esperan casa: %d" % pool,
 		"stage": "Etapa: %s" % _stage_name,
-		"parcels": "Parcelas: %d/%d" % [parcels.owned.size(), parcels.max_owned],
+		"parcels": "Parcelas %d/%d" % [parcels.owned.size(), parcels.max_owned],
 		"wind": "Viento: %s%s" % [fires.wind_name, (" · %d incendios" % fires.burning.size()) if fires.burning.size() > 0 else ""],
-		"clock": "%s %s · %d en las calles" % [DayNight.WEEKDAYS[day.weekday()].capitalize(), day.clock_text(), agents.active_count()],
+		"era": "Época %d: %s" % [era, "colonial" if era == 1 else "Ciudad Nueva"],
+		"clock": "%s %s · %d en la calle" % [DayNight.WEEKDAYS[day.weekday()].substr(0, 3).capitalize(), day.clock_text(), agents.active_count()],
 	})
 	if agents.selected_id != -1:
 		hud.show_info(agents.describe(agents.selected_id))
@@ -282,14 +310,17 @@ func _select_tool(t: int) -> void:
 	hud.select_tool(t)
 	lots.set_show_candidates(t == Tool.ZONE or t == Tool.DEZONE)
 	lots.set_overlay_mode("water" if t == Tool.WATER else "zone")
+	if t != Tool.INSPECT:
+		hud.show_info("")
 	terrain.set_overlay(t == Tool.PARCELS)
 	if t == Tool.STRAIGHT or t == Tool.CURVE or t == Tool.GRID:
 		hud.set_options("Tipo de calle (Tab):", ["Camino de tierra", "Calle empedrada"], road_type)
-	elif t == Tool.WATER:
+	elif t == Tool.WATER or t == Tool.FIELD:
+		var types: Array = WATER_TYPES if t == Tool.WATER else FIELD_TYPES
 		var names := []
-		for k in Services.INFO:
+		for k in types:
 			names.append("%s (%s)" % [Services.INFO[k]["name"], Hud.fmt(Services.INFO[k]["cost"])])
-		hud.set_options("Construir (Tab):", names, service_type)
+		hud.set_options("Construir (Tab):", names, types.find(service_type if t == Tool.WATER else field_type))
 	else:
 		hud.set_options("", [], -1)
 
@@ -301,7 +332,10 @@ func _select_road_type(t: int) -> void:
 
 func _on_option(i: int) -> void:
 	if tool == Tool.WATER:
-		service_type = i
+		service_type = WATER_TYPES[i]
+		hud.select_option(i)
+	elif tool == Tool.FIELD:
+		field_type = FIELD_TYPES[i]
 		hud.select_option(i)
 	else:
 		_select_road_type(i)
@@ -337,6 +371,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			_select_tool(Tool.PORT)
 		elif k == KEY_M:
 			_select_tool(Tool.WALL)
+		elif k == KEY_C:
+			_select_tool(Tool.FIELD)
+		elif k == KEY_G:
+			fund_church()
+		elif k == KEY_O:
+			hud.show_info(objectives_text())
+		elif k == KEY_F5:
+			save_game()
+		elif k == KEY_F9:
+			load_game()
 		elif k == KEY_ESCAPE:
 			if _stage > 0:
 				_stage = 0
@@ -346,7 +390,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_follow = not _follow
 		elif k == KEY_TAB:
 			if tool == Tool.WATER:
-				_on_option((service_type + 1) % Services.INFO.size())
+				_on_option((WATER_TYPES.find(service_type) + 1) % WATER_TYPES.size())
+			elif tool == Tool.FIELD:
+				_on_option((FIELD_TYPES.find(field_type) + 1) % FIELD_TYPES.size())
 			else:
 				_select_road_type(1 - road_type)
 		elif k == KEY_SPACE:
@@ -411,6 +457,8 @@ func _on_click() -> void:
 			place_service(service_type, _hover, service_angle)
 		Tool.PORT:
 			build_pier(_hover)
+		Tool.FIELD:
+			place_service(field_type, _hover, service_angle)
 		Tool.WALL:
 			if _stage == 0:
 				_p0 = _wall_snap(_hover)
@@ -566,21 +614,22 @@ func plaza_problem(c: Vector2, angle: float) -> String:
 	return ""
 
 
-func found_plaza(c: Vector2, angle: float) -> bool:
+func found_plaza(c: Vector2, angle: float, loading := false) -> bool:
 	if plaza_founded:
 		hud.toast("La plaza mayor ya está fundada")
 		return false
-	var err := plaza_problem(c, angle)
+	var err := "" if loading else plaza_problem(c, angle)
 	if err != "":
 		hud.toast(err)
 		return false
+	plaza_angle = angle
 	var fr := _plaza_frame(angle)
 	var f: Vector2 = fr[0]
 	var s: Vector2 = fr[1]
 	plaza_founded = true
 	lots.plaza_center = c
 	lots.obstacles.append({"c": c, "f": f, "w": PLAZA_SIZE, "d": PLAZA_SIZE})
-	var church_c := c - f * (BLOCK * 0.5 + 4.6 + 17.0)
+	church_c = c - f * (BLOCK * 0.5 + 4.6 + 17.0)
 	lots.obstacles.append({"c": church_c, "f": f, "w": 18.0, "d": 34.0})
 	# Suelo empedrado de la plaza y un rollo (columna) en el centro.
 	var top := -INF
@@ -608,14 +657,16 @@ func found_plaza(c: Vector2, angle: float) -> bool:
 	column.material_override = bmat
 	column.transform = Transform3D(basis, Vector3(c.x, top + 0.35, c.y))
 	add_child(column)
-	var church := MeshInstance3D.new()
-	church.mesh = BuildingGen.church_mesh()
-	church.material_override = bmat
 	var ch := INF
 	for p in Lots.corners_of(church_c, f, 16.0, 32.0):
 		ch = minf(ch, gen.height(p.x, p.y))
-	church.transform = Transform3D(basis, Vector3(church_c.x, ch, church_c.y))
+	church = Church.new()
 	add_child(church)
+	church.setup(Transform3D(basis, Vector3(church_c.x, ch, church_c.y)))
+	church.event.connect(hud_toast)
+	if loading:
+		plaza_founded = true
+		return true
 	# Calles empedradas alrededor de la plaza.
 	var half := BLOCK * 0.5
 	var q := [c + (s + f) * half, c + (-s + f) * half, c + (-s - f) * half, c + (s - f) * half]
@@ -649,6 +700,147 @@ func place_service(type: int, c: Vector2, angle: float) -> bool:
 	lots.refresh_overlay()
 	trees.mark_dirty()
 	return true
+
+
+func fund_church() -> void:
+	if church == null:
+		hud.toast("Primero funda la plaza mayor")
+		return
+	var err := church.next_problem(lots.population(), money)
+	if err != "":
+		hud.toast(err)
+		return
+	money -= church.start_next()
+
+
+func objectives_text() -> String:
+	var pop := lots.population()
+	var ok := func(b: bool) -> String: return "[x]" if b else "[ ]"
+	var txt := "Objetivos de la época colonial\n\n"
+	txt += "%s Población de %d (ahora %d)\n" % [ok.call(pop >= era_goals["pop"]), era_goals["pop"], pop]
+	txt += "%s Iglesia matriz terminada (fase %d de %d) · G financia la siguiente\n" % [ok.call(church != null and church.finished()), church.phase if church else 0, Church.PHASES.size() - 1]
+	txt += "%s Exportar %d cueros por el puerto (van %d)\n" % [ok.call(port.total_exported >= era_goals["exported"]), era_goals["exported"], port.total_exported]
+	txt += "\nCon todo cumplido llegará el «nuevo orden» y tendrás que decidir cómo abrir la ciudad."
+	return txt
+
+
+func _check_transition(pop: int) -> void:
+	if era != 1 or _transition_offered or church == null:
+		return
+	if pop < era_goals["pop"] or not church.finished() or port.total_exported < era_goals["exported"]:
+		return
+	_transition_offered = true
+	_select_speed(0)
+	var text := "Gaceta: la ciudad ya no depende de la Corona. Empieza un nuevo orden y la ciudad quiere crecer más allá de sus muros.\n\n¿Cómo abrimos la ciudad? La decisión marca su forma para siempre: el terreno de la muralla y el ejido serán el ensanche de la Ciudad Nueva."
+	var options := ["Derribar toda la muralla (máximo espacio para el ensanche)",
+		"Derribarla y conservar los portones como monumento",
+		"Conservar los portones y un tramo de la muralla vieja"]
+	if wall.segments.is_empty():
+		options = ["La ciudad nunca tuvo muralla: crecer libremente hacia el ejido."]
+	hud.show_choice("Un nuevo orden", text, options)
+
+
+func _on_open_city(i: int) -> void:
+	if not wall.segments.is_empty():
+		wall.open_city(i)
+		lots.on_roads_changed([])
+	era = 2
+	trees.mark_dirty()
+	hud.toast("Comienza la época 2: la Ciudad Nueva. (El ensanche llegará en el próximo prototipo)")
+	_select_speed(1)
+
+
+# --- Guardar y cargar -----------------------------------------------------------------
+
+func save_game() -> void:
+	var d := {
+		"version": 1, "money": money, "pool": pool, "month": month, "era": era, "offered": _transition_offered,
+		"day": [day.time, day.day_index], "parcels": parcels.owned.keys(), "max_owned": parcels.max_owned,
+		"plaza": [plaza_founded, lots.plaza_center, plaza_angle],
+		"church": [church.phase, church.building, church.months_left] if church != null else [],
+		"net": [net.nodes, net.node_edges, net.edges, net._next_node, net._next_edge],
+		"lots": lots.save_data(), "services": services.save_data(),
+		"port": [port.has_pier, port.land_point, port.hides, port.year_stats, port.total_exported, port.active_event, port.event_months],
+		"wall": [wall.segments, wall.monuments, wall.carts_inspected],
+	}
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f == null:
+		hud.toast("No se pudo guardar la partida")
+		return
+	f.store_string(var_to_str(d))
+	f.close()
+	hud.toast("Partida guardada")
+
+
+func load_game() -> void:
+	if not FileAccess.file_exists(SAVE_PATH):
+		hud.toast("No hay partida guardada")
+		return
+	var d = str_to_var(FileAccess.get_file_as_string(SAVE_PATH))
+	if typeof(d) != TYPE_DICTIONARY:
+		hud.toast("La partida guardada está dañada")
+		return
+	pending_load = d
+	get_tree().reload_current_scene()
+
+
+func _apply_save(d: Dictionary) -> void:
+	money = d["money"]
+	pool = d["pool"]
+	month = d["month"]
+	era = d["era"]
+	_transition_offered = d["offered"]
+	day.time = d["day"][0]
+	day.day_index = d["day"][1]
+	parcels.owned.clear()
+	for t in d["parcels"]:
+		parcels.owned[t] = true
+	parcels.max_owned = d["max_owned"]
+	parcels.changed.emit()
+	var n: Array = d["net"]
+	net.nodes = n[0]
+	net.node_edges = n[1]
+	net.edges = n[2]
+	net._next_node = n[3]
+	net._next_edge = n[4]
+	net._rebuild_hash()
+	net.changed.emit()
+	var pz: Array = d["plaza"]
+	if pz[0]:
+		found_plaza(pz[1], pz[2], true)
+		var ch: Array = d["church"]
+		if not ch.is_empty():
+			church.set_state(ch[0], ch[1], ch[2])
+	for sv in d["services"]:
+		services.place(sv[0], sv[1], sv[2])
+	for sid in services.items:
+		for sv in d["services"]:
+			if (sv[1] as Vector2).distance_to(services.items[sid]["c"]) < 0.01:
+				services.items[sid]["stock"] = sv[3]
+	var pt: Array = d["port"]
+	if pt[0]:
+		port.build_pier(pt[1])
+	port.hides = pt[2]
+	port.year_stats = pt[3]
+	port.total_exported = pt[4]
+	if pt.size() > 6:
+		port.active_event = pt[5]
+		port.event_months = pt[6]
+	var wl: Array = d["wall"]
+	for sg in wl[0]:
+		wall.add_segment(sg[0], sg[1])
+	wall.monuments = wl[1]
+	wall.carts_inspected = wl[2]
+	wall.update_gates()
+	lots.restore(d["lots"])
+	services.update_water()
+	lots.refresh_overlay()
+	trees.mark_dirty()
+	_refresh_tool_lock()
+	_select_tool(Tool.INSPECT)
+	if pz[0]:
+		rig.look_at_point(Vector3(lots.plaza_center.x, gen.height(lots.plaza_center.x, lots.plaza_center.y), lots.plaza_center.y), 700.0)
+	hud.toast("Partida cargada")
 
 
 func build_pier(p: Vector2) -> bool:
@@ -710,6 +902,8 @@ func _tree_blocked(p: Vector2) -> bool:
 # --- Información ---------------------------------------------------------------------
 
 func _describe(p: Vector2) -> String:
+	if church != null and Geometry2D.is_point_in_polygon(p, Lots.corners_of(church_c, _plaza_frame(plaza_angle)[0], 18.0, 34.0)):
+		return church.describe()
 	var sid := services.at(p)
 	if sid != -1:
 		return services.describe(sid)
@@ -844,8 +1038,15 @@ func _update_preview() -> void:
 				_circle(_hover, Services.INFO[service_type]["radius"], Color(0.4, 0.7, 1.0, 0.7))
 				for sid in services.items:
 					var it: Dictionary = services.items[sid]
-					_circle(it["c"], Services.INFO[it["type"]]["radius"], Color(0.4, 0.7, 1.0, 0.35))
+					if WATER_TYPES.has(it["type"]):
+						_circle(it["c"], Services.INFO[it["type"]]["radius"], Color(0.4, 0.7, 1.0, 0.35))
 				_dyn_hint = "%s · %s" % [Services.INFO[service_type]["desc"], services.problem(service_type, _hover, service_angle)]
+			Tool.FIELD:
+				var ok := services.problem(field_type, _hover, service_angle) == ""
+				_outline(services.corners(field_type, _hover, services.frame(service_angle)), 2.0, _ok_col(ok))
+				for sid in services.of_type(Services.Type.SALADERO):
+					_circle(services.items[sid]["c"], Services.CONTAMINATION, Color(0.6, 0.45, 0.2, 0.5))
+				_dyn_hint = "%s · %s" % [Services.INFO[field_type]["desc"], services.problem(field_type, _hover, service_angle)]
 			Tool.PORT:
 				var err := port.pier_problem(_hover)
 				_marker(_hover)
@@ -959,6 +1160,13 @@ func _handle_args() -> void:
 	for a in OS.get_cmdline_user_args():
 		var parts := a.trim_prefix("--").split("=", true, 1)
 		args[parts[0]] = parts[1] if parts.size() > 1 else ""
+	if args.has("auto-church"):
+		_auto_church = true
+	if args.has("goals"):
+		era_goals = {"pop": 100, "exported": 0}
+	if args.has("load"):
+		var d = str_to_var(FileAccess.get_file_as_string(SAVE_PATH))
+		_apply_save(d)
 	if args.has("demo"):
 		build_demo()
 	if args.has("months"):
@@ -966,6 +1174,13 @@ func _handle_args() -> void:
 	if args.has("time"):
 		day.time = float(args["time"])
 		day.apply()
+	if args.has("choose"):
+		if hud.choice_open():
+			hud._choice.queue_free()
+			hud._choice = null
+			_on_open_city(int(args["choose"]))
+	if args.has("save"):
+		save_game()
 	if args.has("fire"):
 		# Prende fuego a ranchos sin agua cerca (para probar la propagación).
 		var cands := []
@@ -1004,6 +1219,14 @@ func _handle_args() -> void:
 				port._tick(0.05)
 		elif args["focus"] == "gate" and not wall.gates.is_empty():
 			fp = wall.gates[0]["pos"]
+		elif args["focus"] == "monument" and not wall.monuments.is_empty():
+			fp = wall.monuments[0]["pos"]
+		elif args["focus"] == "church" and church != null:
+			fp = church_c
+		elif args["focus"] == "estancia" and not services.of_type(Services.Type.ESTANCIA).is_empty():
+			fp = services.items[services.of_type(Services.Type.ESTANCIA)[0]]["c"]
+		elif args["focus"] == "saladero" and not services.of_type(Services.Type.SALADERO).is_empty():
+			fp = services.items[services.of_type(Services.Type.SALADERO)[0]]["c"]
 		if fp != Vector2.INF:
 			rig.look_at_point(Vector3(fp.x, maxf(gen.height(fp.x, fp.y), 0.0), fp.y), float(args.get("dist", "160")))
 			rig.yaw = deg_to_rad(float(args.get("yaw", "30")))
@@ -1027,6 +1250,8 @@ func print_stats() -> void:
 		if lot["level"] > 0:
 			var w: float = lot["water"]
 			water[2 if w >= 0.85 else (1 if w >= 0.5 else 0)] += 1
+	print("Elección pendiente: %s" % hud.choice_open())
+	print("Época %d · iglesia fase %d%s · campo: %d estancias, %d saladeros · pozos contaminados: %d" % [era, church.phase if church else -1, " (en obra)" if church and church.building else "", services.of_type(Services.Type.ESTANCIA).size(), services.of_type(Services.Type.SALADERO).size(), services.of_type(Services.Type.WELL).filter(func(w): return services.contaminated(services.items[w]["c"])).size()])
 	print("Puerto: muelle %s · cueros en barraca %d · año: %s · acontecimiento: %s" % [port.has_pier, port.hides, port.year_stats, port.active_event.get("name", "ninguno")])
 	print("Muralla: %d m · portones %d · carretas revisadas %d · faroles %d" % [int(wall.total_length()), wall.gates.size(), wall.carts_inspected, services.lamps.size()])
 	print("Agua: buena %d · regular %d · sin agua %d · fuentes %d · incendios activos %d, apagados %d, casas quemadas %d" % [water[2], water[1], water[0], services.items.size(), fires.burning.size(), fires.put_out_total, fires.destroyed_total])
@@ -1089,6 +1314,24 @@ func build_demo() -> void:
 		if services.problem(Services.Type.WATCH, pos, plaza_angle) == "":
 			place_service(Services.Type.WATCH, pos, plaza_angle)
 			break
+	# Campo: una estancia al final del camino y un saladero cerca del agua.
+	var placed_e := false
+	var placed_s := false
+	for eid in net.edges.keys():
+		var e: Dictionary = net.edges[eid]
+		var d := 10.0
+		while d < float(e["len"]) and not (placed_e and placed_s):
+			var pt: Array = net.edge_point(eid, d)
+			var nrm := Vector2(-(pt[1] as Vector2).y, (pt[1] as Vector2).x)
+			for side in [1.0, -1.0]:
+				var pe: Vector2 = (pt[0] as Vector2) + nrm * side * 40.0
+				var ps: Vector2 = (pt[0] as Vector2) + nrm * side * 30.0
+				if not placed_e and services.problem(Services.Type.ESTANCIA, pe, plaza_angle) == "":
+					placed_e = place_service(Services.Type.ESTANCIA, pe, plaza_angle)
+				elif not placed_s and services.problem(Services.Type.SALADERO, ps, plaza_angle) == "":
+					placed_s = place_service(Services.Type.SALADERO, ps, plaza_angle)
+			d += 20.0
+	print("demo campo: estancia=", placed_e, " saladero=", placed_s)
 	lots.paint(c, 420.0, 1)
 	lots.paint(exit - f * 400.0, 200.0, 1)
 	_select_tool(Tool.INSPECT)
@@ -1121,6 +1364,8 @@ func simulate(seconds: float) -> void:
 func fast_forward(months: int) -> void:
 	services.update_water()
 	for m in months:
+		if _auto_church and church != null and church.next_problem(lots.population(), money) == "":
+			fund_church()
 		_month_tick()
 		port.flush_ships()
 		var arrived := port.take_arrivals()

@@ -25,6 +25,7 @@ var obstacles: Array = []  # rectángulos orientados {"c", "f", "w", "d"} (plaza
 var plaza_center := Vector2(INF, INF)
 var show_candidates := false
 var overlay_mode := "zone"   # "zone" o "water"
+var nuisances: Array = []    # saladeros: su olor baja el valor del suelo
 const ROOF_H := [0.0, 5.0, 5.6, 12.5]
 var _next := 1
 var _hash := {}
@@ -116,7 +117,12 @@ func land_value(lot: Dictionary) -> float:
 	if plaza_center.x == INF:
 		return 0.2
 	var d := (lot["c"] as Vector2).distance_to(plaza_center)
-	return clampf(exp(-d / 650.0), 0.0, 1.0)
+	var v := clampf(exp(-d / 650.0), 0.0, 1.0)
+	for n in nuisances:
+		if (lot["c"] as Vector2).distance_to(n) < 350.0:
+			v *= 0.4
+			break
+	return v
 
 
 func frontage_type(lot: Dictionary) -> int:
@@ -325,6 +331,8 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 	for k in tries:
 		var lot: Dictionary = lots[zoned[rng.randi() % zoned.size()]]
 		var lvl: int = lot["level"]
+		if lvl >= 3:
+			continue
 		var need: int = CAP[lvl + 1] - CAP[lvl]
 		if pool - used < need:
 			continue
@@ -362,6 +370,42 @@ func burn_down(id: int) -> void:
 	var lot: Dictionary = lots[id]
 	_set_level(lot, 0)
 	lot["ruin"] = 3
+	_add_ruin(lot)
+	_overlay_dirty = true
+	lots_changed.emit()
+
+
+## Datos mínimos de cada solar para guardar la partida.
+func save_data() -> Array:
+	var out := []
+	for id in lots:
+		var l: Dictionary = lots[id]
+		out.append({"id": id, "c": l["c"], "f": l["f"], "zone": l["zone"], "level": l["level"], "age": l["age"], "seed": l["seed"], "ruin": l["ruin"]})
+	return out
+
+
+func restore(data: Array) -> void:
+	for id in lots.keys():
+		_remove_lot(id)
+	for d in data:
+		var id: int = d["id"]
+		_next = maxi(_next, id + 1)
+		lots[id] = {"id": id, "c": d["c"], "f": d["f"], "zone": d["zone"], "level": 0, "age": 0, "seed": d["seed"], "node": null,
+			"water": 0.0, "water_src": -1, "ruin": d["ruin"]}
+		var k := _cell(d["c"])
+		if not _hash.has(k):
+			_hash[k] = []
+		(_hash[k] as Array).append(id)
+		if int(d["level"]) > 0:
+			_set_level(lots[id], d["level"])
+		lots[id]["age"] = d["age"]
+		if int(d["ruin"]) > 0:
+			_add_ruin(lots[id])
+	_overlay_dirty = true
+	lots_changed.emit()
+
+
+func _add_ruin(lot: Dictionary) -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = BuildingGen.ruin_mesh(lot["seed"])
 	mi.material_override = _building_mat
@@ -374,8 +418,6 @@ func burn_down(id: int) -> void:
 	mi.transform = Transform3D(Basis(Vector3(s.x, 0, s.y), Vector3.UP, Vector3(f.x, 0, f.y)), Vector3(c.x, base, c.y))
 	add_child(mi)
 	lot["node"] = mi
-	_overlay_dirty = true
-	lots_changed.emit()
 
 
 func refresh_overlay() -> void:

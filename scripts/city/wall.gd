@@ -14,7 +14,7 @@ const UPKEEP_PER_100M := 6
 const HEIGHT := 7.0
 const THICK := 5.0
 const GATE_GAP := 14.0
-const INSPECT_SECONDS := 25.0     # segundos simulados que tarda la revisión de una carreta
+const INSPECT_SECONDS := 12.0     # segundos simulados que tarda la revisión de una carreta
 const DUTY_PER_CART := 6
 
 var gen: TerrainGen
@@ -24,6 +24,7 @@ var lots: Lots
 var segments: Array = []    # [a: Vector2, b: Vector2]
 var gates: Array = []       # {"id", "pos", "dir", "eid", "s"}
 var carts_inspected := 0
+var monuments: Array = []   # portones conservados como monumento (sin muralla ni aduana)
 var duty_month := 0
 var _seg_nodes: Array = []
 var _gate_nodes: Array = []
@@ -107,6 +108,31 @@ func gate_ahead(eid: int, dir: int, s: float, length: float) -> Array:
 	return best
 
 
+## La gran decisión del final de la época colonial.
+## 0 = derribar todo, 1 = conservar los portones como monumento, 2 = portones y el primer tramo.
+func open_city(mode: int) -> void:
+	var old_gates := gates.duplicate(true)
+	var keep := []
+	if mode == 2 and not segments.is_empty():
+		keep = [segments[0]]
+	for i in range(lots.obstacles.size() - 1, -1, -1):
+		if lots.obstacles[i].get("wall", false):
+			lots.obstacles.remove_at(i)
+	segments = []
+	for sg in keep:
+		add_segment(sg[0], sg[1])
+	monuments = []
+	if mode >= 1:
+		for g in old_gates:
+			var kept := false
+			for ng in gates:
+				if (ng["pos"] as Vector2).distance_to(g["pos"]) < 1.0:
+					kept = true
+			if not kept:
+				monuments.append({"pos": g["pos"], "dir": g["dir"]})
+	update_gates()
+
+
 func inspected() -> void:
 	carts_inspected += 1
 	duty_month += DUTY_PER_CART
@@ -172,7 +198,7 @@ func _rebuild_meshes() -> void:
 			mi.transform = Transform3D(Basis(Vector3(side.x, 0, side.y), Vector3.UP, Vector3(u.x, 0, u.y)), Vector3(mid.x, base, mid.y))
 			add_child(mi)
 			_seg_nodes.append(mi)
-	for g in gates:
+	for g in gates + monuments:
 		var gp: Vector2 = g["pos"]
 		var u: Vector2 = g["dir"]
 		var side := Vector2(u.y, -u.x)

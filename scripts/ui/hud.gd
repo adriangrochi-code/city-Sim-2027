@@ -3,6 +3,7 @@ extends CanvasLayer
 
 signal tool_selected(tool: int)
 signal option_selected(index: int)
+signal choice_made(index: int)
 signal speed_selected(speed: int)
 
 const PAPER := Color(0.91, 0.87, 0.77, 0.95)
@@ -21,6 +22,9 @@ var _info: Label
 var _info_panel: PanelContainer
 var _toast: Label
 var _toast_tween: Tween
+var _choice: PanelContainer
+var _choice_box: VBoxContainer
+var _root: Control
 
 
 func setup(tool_defs: Array) -> void:
@@ -29,15 +33,16 @@ func setup(tool_defs: Array) -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = _make_theme()
 	add_child(root)
+	_root = root
 
 	# Barra superior.
 	var top := PanelContainer.new()
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	root.add_child(top)
 	var hb := HBoxContainer.new()
-	hb.add_theme_constant_override("separation", 22)
+	hb.add_theme_constant_override("separation", 16)
 	top.add_child(hb)
-	for key in ["date", "money", "pop", "pool", "stage", "parcels", "wind"]:
+	for key in ["date", "money", "pop", "pool", "era", "stage", "parcels", "wind"]:
 		var l := Label.new()
 		hb.add_child(l)
 		_labels[key] = l
@@ -171,6 +176,43 @@ func _sb(col: Color, border := 2) -> StyleBoxFlat:
 	sb.content_margin_top = 6
 	sb.content_margin_bottom = 6
 	return sb
+
+
+## Decisión importante en un panel central (por ejemplo, abrir la ciudad).
+func show_choice(title: String, text: String, options: Array) -> void:
+	if _choice != null:
+		_choice.queue_free()
+	_choice = PanelContainer.new()
+	_choice.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_choice.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_choice.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_root.add_child(_choice)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	_choice.add_child(vb)
+	var t := Label.new()
+	t.text = title
+	t.add_theme_font_size_override("font_size", 22)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(t)
+	var body := Label.new()
+	body.text = text
+	body.custom_minimum_size = Vector2(560, 0)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(body)
+	for i in options.size():
+		var b := Button.new()
+		b.text = options[i]
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(func():
+			_choice.queue_free()
+			_choice = null
+			choice_made.emit(i))
+		vb.add_child(b)
+
+
+func choice_open() -> bool:
+	return _choice != null
 
 
 func select_tool(i: int) -> void:
