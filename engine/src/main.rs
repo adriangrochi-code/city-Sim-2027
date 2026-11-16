@@ -6,11 +6,13 @@
 //!   motor --shot salida.png [...]      una captura sin ventana (todo el mundo de una vez)
 //!   motor --auto-test carpeta          recorrido automático sin pantalla, con capturas
 //!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
+//!   motor --bench carpeta              banco de pruebas reproducible (tabla y capturas)
 //! Opciones: --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
-//!   --hour 10.5, --size 1600x900, --levels 8, --threads N, --msaa 1|4, --frames N,
+//!   --hour 10.5, --size 1600x900, --levels 8, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
 //!   --sin-suavizar (sin el suavizado de los escalones del terreno)
 
 mod app;
+mod bench;
 mod buildings;
 mod camera;
 mod lod;
@@ -49,6 +51,7 @@ struct Args {
     msaa: u32,
     threads: usize,
     smooth: bool,
+    bench: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -64,9 +67,10 @@ fn parse_args() -> Args {
         auto_test: None,
         window: false,
         frames: None,
-        msaa: 4,
+        msaa: 0,
         threads,
         smooth: true,
+        bench: None,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -89,8 +93,10 @@ fn parse_args() -> Args {
             }
             "--levels" => a.levels = next.parse().unwrap_or(8),
             "--auto-test" => a.auto_test = Some(next),
+            "--bench" => a.bench = Some(next),
             "--frames" => a.frames = next.parse().ok(),
             "--msaa" => a.msaa = if next == "1" { 1 } else { 4 },
+            // Sin --msaa: 4× en capturas y con GPU; 1× en la ventana si el render es por CPU.
             "--threads" => a.threads = next.parse().unwrap_or(a.threads).max(1),
             "--window" => {
                 a.window = true;
@@ -140,10 +146,12 @@ fn mesh_world(world: &World) -> Vec<(u32, Mesh)> {
                             let level = &world.levels[li];
                             let vs = level.spec.voxel();
                             let pad = mesher::padded(level, k);
-                            let origin = Vec3::new(k.x as f32, k.y as f32, k.z as f32) * (CHUNK as f32 * vs);
-                            (level.spec.lod, mesher::mesh_chunk(&pad, origin, vs))
+                            let mut m = mesher::mesh_chunk(&pad, IVec3::ZERO);
+                            m.origin = Vec3::new(k.x as f32, k.y as f32, k.z as f32) * (CHUNK as f32 * vs);
+                            m.voxel = vs;
+                            (level.spec.lod, m)
                         })
-                        .filter(|(_, m)| !m.indices.is_empty())
+                        .filter(|(_, m)| !m.is_empty())
                         .collect::<Vec<_>>()
                 })
             })
@@ -193,6 +201,14 @@ fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
 fn main() {
     let mut args = parse_args();
     let plaza = Vec2::new(13500.0, 16300.0);
+    if let Some(dir) = &args.bench {
+        let o = bench::Options { dir: dir.clone(), threads: args.threads, levels: args.levels, msaa: if args.msaa == 0 { 4 } else { args.msaa }, frames: args.frames.unwrap_or(5) as u32, size: if args.size == (1600, 900) { (1280, 720) } else { args.size } };
+        if let Err(e) = bench::run(&o) {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.shot.is_none() {
         let result = match (&args.auto_test, args.window) {
             (Some(dir), false) => run_headless_tour(&args, &dir.clone()),

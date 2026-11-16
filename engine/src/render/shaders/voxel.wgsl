@@ -16,13 +16,24 @@ struct Globals {
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_sampler: sampler_comparison;
 
+// Vértice compacto (16 bytes): posición en vóxeles relativa al origen de la malla, color con
+// el material en el alfa, y en `info` la dirección de la cara, la oclusión y la normal suave.
+// El origen de cada malla llega como dato por instancia (xyz en metros, w = tamaño del vóxel).
 struct VIn {
-    @location(0) pos: vec3<f32>,
+    @location(0) pos: vec4<u32>,
     @location(1) color: vec4<f32>,
-    @location(2) normal: vec4<f32>,
-    @location(3) smooth_n: vec4<f32>,
-    @location(4) voxel: f32,
+    @location(2) info: vec4<u32>,
+    @location(3) origin: vec4<f32>,
 };
+
+const DIRS = array<vec3<f32>, 6>(
+    vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0),
+    vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0),
+);
+
+fn world_pos(v: VIn) -> vec3<f32> {
+    return v.origin.xyz + vec3<f32>(v.pos.xyz) * v.origin.w;
+}
 
 struct VOut {
     @builtin(position) clip: vec4<f32>,
@@ -37,19 +48,23 @@ struct VOut {
 @vertex
 fn vs_main(v: VIn) -> VOut {
     var o: VOut;
-    o.clip = g.view_proj * vec4(v.pos, 1.0);
-    o.world = v.pos;
+    let p = world_pos(v);
+    o.clip = g.view_proj * vec4(p, 1.0);
+    o.world = p;
     o.color = v.color;
-    o.normal = v.normal.xyz;
-    o.ao = v.normal.w * 127.0 / 42.0;
-    o.voxel = v.voxel;
-    o.smooth_n = v.smooth_n.xyz;
+    var dirs = DIRS; // copia local: naga solo permite índices variables sobre variables
+    o.normal = dirs[v.info.x & 7u];
+    o.ao = f32(v.info.x >> 3u);
+    o.voxel = v.origin.w;
+    let sx = (f32(v.info.y) - 128.0) / 127.0;
+    let sz = (f32(v.info.z) - 128.0) / 127.0;
+    o.smooth_n = vec3(sx, sqrt(max(1.0 - sx * sx - sz * sz, 0.0)), sz);
     return o;
 }
 
 @vertex
 fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
-    return g.light_view_proj * vec4(v.pos, 1.0);
+    return g.light_view_proj * vec4(world_pos(v), 1.0);
 }
 
 fn hash3(p: vec3<f32>) -> f32 {
@@ -180,7 +195,12 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
 
     let ao = mix(select(0.42, 0.8, terr), 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
     let ndl = max(dot(ln, g.sun_dir.xyz), 0.0);
-    let sh = shadow(v.world, n);
+    // Las caras que no miran al sol no reciben su luz: no hace falta consultar la sombra
+    // (9 lecturas del mapa por fragmento). El resultado es idéntico.
+    var sh = 1.0;
+    if (ndl > 0.0) {
+        sh = shadow(v.world, n);
+    }
     let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, ln.y * 0.5 + 0.5);
     let bounce = vec3(0.35, 0.30, 0.22) * max(-ln.y, 0.0);
     var light = g.sun_color.rgb * ndl * sh + (sky * 0.55 + bounce * 0.2) * g.params.w * ao;

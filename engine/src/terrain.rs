@@ -22,6 +22,10 @@ pub struct TerrainGen {
     seg_a: Vec<Vec2>,
     seg_b: Vec<Vec2>,
     seg_hash: HashMap<(i32, i32), Vec<u32>>,
+    /// La misma tabla de segmentos en una grilla densa (más rápida que el HashMap).
+    seg_grid: Vec<Vec<u32>>,
+    grid_min: (i32, i32),
+    grid_size: (i32, i32),
     pub arroyos: Vec<Vec<Vec2>>,
 }
 
@@ -62,6 +66,9 @@ impl TerrainGen {
             seg_a: Vec::new(),
             seg_b: Vec::new(),
             seg_hash: HashMap::new(),
+            seg_grid: Vec::new(),
+            grid_min: (0, 0),
+            grid_size: (0, 0),
             arroyos: Vec::new(),
         };
         t.add_arroyo(&[
@@ -72,7 +79,29 @@ impl TerrainGen {
             (16400.0, 15900.0), (16600.0, 14600.0), (16200.0, 13300.0),
             (16900.0, 11800.0), (16500.0, 10200.0),
         ]);
+        t.build_grid();
         t
+    }
+
+    fn build_grid(&mut self) {
+        let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for &(cx, cz) in self.seg_hash.keys() {
+            x0 = x0.min(cx);
+            z0 = z0.min(cz);
+            x1 = x1.max(cx);
+            z1 = z1.max(cz);
+        }
+        if x0 > x1 {
+            return;
+        }
+        let (w, h) = (x1 - x0 + 1, z1 - z0 + 1);
+        let mut grid = vec![Vec::new(); (w * h) as usize];
+        for (&(cx, cz), list) in &self.seg_hash {
+            grid[((cx - x0) + (cz - z0) * w) as usize] = list.clone();
+        }
+        self.seg_grid = grid;
+        self.grid_min = (x0, z0);
+        self.grid_size = (w, h);
     }
 
     /// Línea de costa: para cada x, la z donde empieza el agua (al sur está el río).
@@ -85,7 +114,14 @@ impl TerrainGen {
 
     /// Altura del terreno en metros (negativa bajo el agua).
     pub fn height(&self, x: f32, z: f32) -> f32 {
-        let d = self.coast_z(x) - z;
+        self.height_with_coast(x, z, self.coast_z(x))
+    }
+
+    /// Igual que [`height`], con la costa ya calculada para esta `x` (la costa depende solo
+    /// de `x`: al recorrer una grilla se calcula una vez por columna en lugar de por punto).
+    #[inline]
+    pub fn height_with_coast(&self, x: f32, z: f32, coast: f32) -> f32 {
+        let d = coast - z;
         let mut h;
         if d < 0.0 {
             h = (d * 0.015).max(-14.0);
@@ -110,9 +146,20 @@ impl TerrainGen {
         let cx = (x / HASH_CELL).floor() as i32;
         let cz = (z / HASH_CELL).floor() as i32;
         let mut best = 1e9f32;
+        let (gx0, gz0) = self.grid_min;
+        let (gw, gh) = self.grid_size;
         for dz in -1..=1 {
+            let gz = cz + dz - gz0;
+            if gz < 0 || gz >= gh {
+                continue;
+            }
             for dx in -1..=1 {
-                if let Some(list) = self.seg_hash.get(&(cx + dx, cz + dz)) {
+                let gx = cx + dx - gx0;
+                if gx < 0 || gx >= gw {
+                    continue;
+                }
+                {
+                    let list = &self.seg_grid[(gx + gz * gw) as usize];
                     for &si in list {
                         let q = closest_on_segment(p, self.seg_a[si as usize], self.seg_b[si as usize]);
                         best = best.min(p.distance(q));
@@ -200,6 +247,32 @@ mod tests {
         assert!(t.height(13500.0, 16300.0) > 2.0, "el centro de la península debe ser tierra firme");
         assert!(t.height(13500.0, 20000.0) < 0.0, "al sur está el río");
         assert!(t.height(8000.0, 16900.0) < 0.0, "la bahía/río al oeste");
+    }
+
+    #[test]
+    fn la_grilla_densa_y_la_costa_cacheada_dan_lo_mismo() {
+        let t = TerrainGen::new(1726);
+        let slow = |x: f32, z: f32| {
+            let p = Vec2::new(x, z);
+            let (cx, cz) = ((x / HASH_CELL).floor() as i32, (z / HASH_CELL).floor() as i32);
+            let mut best = 1e9f32;
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    if let Some(list) = t.seg_hash.get(&(cx + dx, cz + dz)) {
+                        for &si in list {
+                            best = best.min(p.distance(closest_on_segment(p, t.seg_a[si as usize], t.seg_b[si as usize])));
+                        }
+                    }
+                }
+            }
+            best
+        };
+        for k in 0..4000 {
+            let x = 6000.0 + (k % 80) as f32 * 157.3;
+            let z = 5000.0 + (k / 80) as f32 * 233.1;
+            assert_eq!(t.arroyo_distance(x, z), slow(x, z));
+            assert_eq!(t.height(x, z), t.height_with_coast(x, z, t.coast_z(x)));
+        }
     }
 
     #[test]

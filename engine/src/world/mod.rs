@@ -54,15 +54,17 @@ struct LevelEdits {
 fn level_edits(edits: &Edits, lod: u32) -> LevelEdits {
     // Al reducir la resolución, cada vóxel grueso toma el material del vóxel fino más alto
     // que contiene (así desde arriba se ve el techo y no un moteado de materiales).
-    let mut best: HashMap<IVec3, (i32, Mat)> = HashMap::new();
+    // A igual altura decide la posición fina (x, z): el resultado no depende del orden del HashMap.
+    let mut best: HashMap<IVec3, (i32, i64, Mat)> = HashMap::new();
     for (&v, &m) in &edits.voxels {
         let k = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
-        let e = best.entry(k).or_insert((i32::MIN, m));
-        if v.y > e.0 {
-            *e = (v.y, m);
+        let tb = ((v.x as i64) << 32) | (v.z as u32 as i64);
+        let e = best.entry(k).or_insert((i32::MIN, i64::MIN, m));
+        if (v.y, tb) > (e.0, e.1) {
+            *e = (v.y, tb, m);
         }
     }
-    let vox: HashMap<IVec3, Mat> = best.into_iter().map(|(k, (_, m))| (k, m)).collect();
+    let vox: HashMap<IVec3, Mat> = best.into_iter().map(|(k, (_, _, m))| (k, m)).collect();
     let mut out = LevelEdits { voxels: HashMap::new(), surface: HashMap::new(), max_y: HashMap::new() };
     for (v, m) in vox {
         let ck = IVec3::new(v.x >> 5, v.y >> 5, v.z >> 5);
@@ -71,11 +73,15 @@ fn level_edits(edits: &Edits, lod: u32) -> LevelEdits {
         let e = out.max_y.entry(col).or_insert(i32::MIN);
         *e = (*e).max(v.y);
     }
-    let mut surf: HashMap<IVec2, Mat> = HashMap::new();
+    let mut surf: HashMap<IVec2, (i64, Mat)> = HashMap::new();
     for (&c, &m) in &edits.surface {
-        surf.entry(IVec2::new(c.x >> lod, c.y >> lod)).or_insert(m);
+        let tb = ((c.x as i64) << 32) | (c.y as u32 as i64);
+        let e = surf.entry(IVec2::new(c.x >> lod, c.y >> lod)).or_insert((i64::MIN, m));
+        if tb > e.0 {
+            *e = (tb, m);
+        }
     }
-    for (c, m) in surf {
+    for (c, (_, m)) in surf {
         let ck = IVec2::new(c.x >> 5, c.y >> 5);
         out.surface.entry(ck).or_default().push(((c.x & 31) as u8, (c.y & 31) as u8, m));
     }
@@ -129,11 +135,12 @@ fn gen_column(t: &TerrainGen, le: &LevelEdits, spec: LevelSpec, c: IVec2) -> (IV
     let p = (N + 2) as usize;
     // Alturas con un borde de un vóxel para calcular la pendiente.
     let mut hs = vec![0f32; p * p];
+    let coast: Vec<f32> = (0..p).map(|i| t.coast_z(((c.x * N + i as i32 - 1) as f32 + 0.5) * vs)).collect();
     for j in 0..p {
         for i in 0..p {
             let x = ((c.x * N + i as i32 - 1) as f32 + 0.5) * vs;
             let z = ((c.y * N + j as i32 - 1) as f32 + 0.5) * vs;
-            hs[i + j * p] = t.height(x, z);
+            hs[i + j * p] = t.height_with_coast(x, z, coast[i]);
         }
     }
     let mut top = vec![0i32; (N * N) as usize];

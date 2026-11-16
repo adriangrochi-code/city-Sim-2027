@@ -25,6 +25,14 @@ const Q: i32 = N + 2;
 
 pub type Key = (u32, IVec2);
 
+/// Contadores de tiempo de CPU (ns) para el banco de pruebas: generación del terreno y
+/// armado de las copias con borde, y mallado.
+pub static GEN_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static HEIGHT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static SURF_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static CHUNKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static MESH_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 struct Job {
     prio: f32,
     key: Key,
@@ -378,19 +386,33 @@ fn layer(depth: i32, soil: i32, surf: Mat) -> Mat {
 
 /// Genera y malla una columna de chunks completa de un nivel.
 pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>) -> Mesh {
+    let t_start = std::time::Instant::now();
+    let mut mesh_ns = 0u64;
+    let out = build_column_inner(t, store, spec, col, ring, &mut mesh_ns);
+    let total = t_start.elapsed().as_nanos() as u64;
+    GEN_NS.fetch_add(total.saturating_sub(mesh_ns), AtOrd::Relaxed);
+    MESH_NS.fetch_add(mesh_ns, AtOrd::Relaxed);
+    out
+}
+
+fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>, mesh_ns: &mut u64) -> Mesh {
     let vs = spec.voxel();
     let ls = &store.levels[spec.lod as usize];
     let p = N + 4;
     let base = col * N;
     // Alturas con dos vóxeles de margen (uno para el borde y otro para la pendiente).
+    let th = std::time::Instant::now();
     let mut hs = vec![0f32; (p * p) as usize];
+    let coast: Vec<f32> = (0..p).map(|i| t.coast_z(((base.x + i - 2) as f32 + 0.5) * vs)).collect();
     for j in 0..p {
         for i in 0..p {
             let x = ((base.x + i - 2) as f32 + 0.5) * vs;
             let z = ((base.y + j - 2) as f32 + 0.5) * vs;
-            hs[(i + j * p) as usize] = t.height(x, z);
+            hs[(i + j * p) as usize] = t.height_with_coast(x, z, coast[i as usize]);
         }
     }
+    HEIGHT_NS.fetch_add(th.elapsed().as_nanos() as u64, AtOrd::Relaxed);
+    let tsf = std::time::Instant::now();
     // Superficie y material de cada columna de vóxeles, con un vóxel de borde.
     let present = |gx: i32, gz: i32| ring.contains(&IVec2::new(gx >> 5, gz >> 5));
     let mut top = vec![i32::MIN; (Q * Q) as usize];
@@ -421,11 +443,13 @@ pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVe
             }
         }
     }
+    SURF_NS.fetch_add(tsf.elapsed().as_nanos() as u64, AtOrd::Relaxed);
     let soil = ((2.0 / vs).ceil() as i32).max(1);
     let edit_top = ls.max_y.get(&col).copied().unwrap_or(i32::MIN);
     let y0 = (tmin - 1).div_euclid(N);
     let y1 = tmax.max(edit_top).div_euclid(N);
-    let mut out = Mesh::default();
+    // Origen de la malla de la columna: esquina inferior del chunk más bajo.
+    let mut out = Mesh::new(Vec3::new(base.x as f32, (y0 * N) as f32, base.y as f32) * vs, vs);
     let mut pad = vec![AIR; (Q * Q * Q) as usize];
     for cy in y0..=y1 {
         let ck = IVec3::new(col.x, cy, col.y);
@@ -468,7 +492,7 @@ pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVe
         if any_edit {
             // Ediciones del propio chunk: se recorren todas.
             if let Some(map) = ls.voxels.get(&ck) {
-                for (&idx, &(_, m)) in map {
+                for (idx, m) in map.iter() {
                     let (lx, lz, ly) = ((idx & 31) as i32, ((idx >> 5) & 31) as i32, (idx >> 10) as i32);
                     pad[((lx + 1) + (lz + 1) * Q + (ly + 1) * Q * Q) as usize] = m;
                     solid += 1;
@@ -486,7 +510,7 @@ pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVe
                             continue;
                         }
                         if let Some(map) = ls.voxels.get(&chunk_of(g)) {
-                            if let Some(&(_, m)) = map.get(&local_index(g)) {
+                            if let Some(m) = map.get(local_index(g)) {
                                 pad[(i + j * Q + y * Q * Q) as usize] = m;
                                 solid += 1;
                             }
@@ -498,9 +522,11 @@ pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVe
         if solid == 0 {
             continue;
         }
-        let origin = Vec3::new(ck.x as f32, ck.y as f32, ck.z as f32) * (N as f32 * vs);
-        let m = mesher::mesh_chunk(&pad, origin, vs);
+        CHUNKS.fetch_add(1, AtOrd::Relaxed);
+        let tm = std::time::Instant::now();
+        let m = mesher::mesh_chunk(&pad, IVec3::new(0, (cy - y0) * N, 0));
         out.append(&m);
+        *mesh_ns += tm.elapsed().as_nanos() as u64;
     }
     out
 }

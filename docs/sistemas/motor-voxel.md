@@ -3,7 +3,8 @@
 > Documento de sistema. Complementa al [GDD](../GDD.md).
 > Estado: **aplicación interactiva**: ventana con cámara de constructor de ciudades, mundo en
 > *streaming* con hilos, sandbox de construir y excavar, y recorrido automático con capturas.
-> El modo captura (`--shot`) se mantiene. Código en [`engine/`](../../engine).
+> El modo captura (`--shot`) se mantiene. Optimizado con un banco de pruebas reproducible
+> (sección 11). Código en [`engine/`](../../engine).
 
 ![Ciudad colonial de vóxeles](../capturas/motor-voxel-ciudad.jpg)
 
@@ -285,3 +286,114 @@ cuadro.
 
 **Tests**: 18 en total (nuevos: orden de carga por cercanía, re-mallado solo de columnas
 tocadas, DDA sobre terreno y edificios, normal suave, edición más reciente gana).
+
+## 11. Optimización (medir → optimizar → verificar)
+
+> **Importante:** todas las medidas son con **lavapipe/llvmpipe, que dibuja con la CPU** (4
+> núcleos, sin GPU). El tiempo "total por cuadro" es, en realidad, rasterizar con la CPU. Los
+> FPS con una GPU real **no están medidos**; ahí el cuello de botella será otro (sobre todo
+> CPU por cuadro y subida de mallas, que también bajaron).
+
+### Banco de pruebas
+
+`motor --bench carpeta [--frames N] [--msaa 1|4] [--size AxB]` arma la escena de la ciudad,
+y para cuatro cámaras fijas (ciudad de cerca, península, lejos a 9 km y ciudad de noche):
+genera y malla en *streaming* hasta terminar, sube todo a la GPU, dibuja N cuadros fuera de
+pantalla y guarda una tabla (`bench.md`) y una captura por vista. Mide tiempo de generación
+y mallado (pared y CPU por fase), triángulos, vértices, bytes de vértices e índices en la
+GPU, llamadas de dibujo, CPU por cuadro, tiempo total por cuadro (con el mapa de sombras
+rehecho y en caché) y memoria.
+
+### Antes y después (1280×720, MSAA 4×, 3 hilos de trabajo, 5 cuadros por vista)
+
+| Métrica | Antes | Después |
+|---|---|---|
+| Generar + mallar una vista completa (pared) | 2,64–2,78 s | **0,91–1,00 s** (−65 %) |
+| CPU de generación del terreno por vista | 3,4–3,6 s | 2,0–2,2 s |
+| CPU de mallado por vista | 4,4–4,8 s | **0,69–0,77 s** (−84 %) |
+| Triángulos (ciudad) | 1,24 M | 1,24 M (idénticos) |
+| Bytes por vértice | 28 | **16** |
+| Vértices en GPU (ciudad) | 66,2 MB | **37,8 MB** (−43 %) |
+| Índices en GPU (ciudad) | 14,2 MB | **7,1 MB** (−50 %, índices de 16 bits) |
+| Dibujos principal / sombras (ciudad de cerca) | 3.600 / 1.872 | 1.323 / 397 |
+| CPU por cuadro (grabar comandos) | 6,7–8,0 ms | 2,2–8,1 ms |
+| Total por cuadro, ciudad de cerca | 334 ms | 251 ms (sombra rehecha) · **161 ms** (en caché) |
+| Total por cuadro, península | 382 ms | 315 ms · **216 ms** |
+| Total por cuadro, lejos (9 km) | 282 ms | 262 ms · **163 ms** |
+| Total por cuadro, ciudad de noche | 426 ms | 380 ms · **245 ms** |
+| Memoria de las ediciones de la escena | 109 MB | **41 MB** |
+| Memoria máxima del banco (VmHWM) | 793 MB | 713 MB |
+| Ventana 1280×720, MSAA 4× (FPS medio, 150 cuadros) | 2,6 | **4,1** |
+| Ventana 1280×720, MSAA 1× | 3,6 | **7,8** |
+| Recorrido: viaje de 3,3 km hasta tener todo cargado | ~1,9 s | **0,76 s** |
+| Modo captura: mallado de todo el mundo | ~1,4 s | 0,55 s |
+
+![Antes y después: la misma imagen, en menos tiempo](../capturas/motor-opt-peninsula.jpg)
+
+### Qué se hizo, en orden de impacto medido
+
+1. **Mallado con máscaras de bits.** Una fila de 34 vóxeles cabe en un `u64`: "sólido aquí y
+   aire en el vecino" se calcula por fila con operaciones de bits, y el material y la
+   oclusión solo se calculan donde hay una cara. El *greedy meshing* sigue igual, así que la
+   malla es idéntica. De ~1 ms a ~0,15 ms por chunk.
+2. **Mapa de sombras en caché.** Rehacer el mapa de 4096² en cada cuadro costaba ~90–160 ms
+   con lavapipe. Ahora se rehace solo si cambia la luz (hora, encuadre) o la geometría. Además
+   la caja de luz se ajusta a la grilla de texels, así las sombras no "titilan" al mover la cámara.
+3. **Descarte por frustum** (cámara y caja de luz) por columna, con su caja envolvente, y
+   **dibujo de cerca a lejos**: la prueba de profundidad descarta antes lo tapado y el orden de
+   dibujo es siempre el mismo.
+4. **Solo las caras que miran a la cámara.** Los índices de cada columna se agrupan por
+   dirección de cara (arriba, ±x, ±z, abajo) y se dibujan solo los grupos visibles desde la
+   cámara, en tramos contiguos. Hay más llamadas de dibujo pero menos vértices procesados.
+5. **Vértice compacto de 16 bytes** (antes 28): posición en vóxeles relativa al origen de la
+   columna (`u16`), color con el material en el alfa, y en un `u8×4` la dirección de la cara,
+   la oclusión y la normal suave de la ladera (x, z; la y se reconstruye). El origen y el tamaño
+   del vóxel de cada columna van en un búfer de instancias compartido. Índices de 16 bits.
+6. **Alturas del terreno más rápidas, mismo resultado.** La costa depende solo de x y se calcula
+   una vez por columna de la grilla (era un ruido de 5 octavas por punto), y la tabla de
+   segmentos de los arroyos pasó de un `HashMap` a una grilla densa. 1,85 s → 0,65 s de CPU por
+   vista. Hay una prueba que compara ambos caminos punto a punto.
+7. **Almacén de ediciones compacto y determinista.** Por chunk, índices ordenados con su altura
+   y material (5 bytes por vóxel, en lugar de un `HashMap` por vóxel): 109 → 41 MB. Además, al
+   reducir la resolución, los empates de altura dentro de una misma carga se deciden por la
+   posición fina y no por el orden aleatorio del `HashMap`: **ahora dos ejecuciones dan
+   exactamente la misma imagen** (antes variaba ~1 % de los píxeles de una corrida a otra).
+8. **Sombra solo donde da el sol**: las caras que no miran al sol no consultan el mapa de
+   sombras (9 lecturas por fragmento). Imagen idéntica, ganancia pequeña.
+9. **MSAA automático**: sin `--msaa`, la ventana usa 1× cuando el adaptador es la CPU (lavapipe,
+   llvmpipe) y 4× con GPU. Las capturas siguen en 4×.
+
+### Verificación de la imagen
+
+- Tests: 21 en verde. Los nuevos cubren la grilla densa y la costa cacheada (mismo resultado
+  punto a punto), el vértice de 16 bytes con su desempaquetado y sus grupos por dirección, el
+  almacén compacto (determinismo, bytes por vóxel y unión de ediciones).
+- Diferencia de píxeles entre la versión anterior y la nueva, mismas cámaras: 1,16 % (cerca),
+  0,42 % (península), 0,03 % (lejos) y 0,63 % (noche) de píxeles con diferencia > 8. Es del mismo
+  tamaño que lo que variaba **la versión anterior entre dos ejecuciones** (1,07 / 0,27 / 0,03 /
+  0,45 %), y está solo en techos lejanos de los niveles gruesos: el material elegido en los
+  empates de altura (punto 7). La nueva versión da diferencia 0 entre ejecuciones.
+- La ventana bajo xvfb, `--auto-test` y `--shot` siguen funcionando.
+
+### Lo que no mejoró o no valió la pena
+
+- **El cuadro con la sombra rehecha** sigue costando 250–380 ms con lavapipe: es rasterizar
+  4096² con la CPU. Bajar la resolución del mapa o las 9 lecturas del filtro de sombra lo
+  aceleraría, pero cambia la imagen y no se hizo.
+- **La memoria total del proceso** bajó poco (~80 MB): la mayor parte es del propio lavapipe
+  (texturas de MSAA y del mapa de sombras, búferes) y del montículo.
+- **La generación del terreno** sigue siendo la mayor parte del tiempo de *streaming* (las
+  alturas y el material de superficie usan ruido de varias octavas por punto).
+- **El modo captura** (`World::generate`) sigue tardando ~4,5 s en generar, porque reduce las
+  ediciones nivel por nivel con tablas hash. El juego usa el *streaming*, que ya está optimizado.
+- **Las juntas finas entre niveles de detalle** y **el solapamiento momentáneo al moverse rápido**
+  (problemas conocidos de la sección 10) siguen igual.
+
+### Pendiente
+
+- Medir con una GPU real (FPS, tiempo de GPU con *timestamp queries*).
+- Reutilizar alturas entre columnas vecinas y re-mallados, o generar el terreno en la GPU.
+- Dibujo indirecto en un solo búfer grande (menos llamadas de dibujo con GPU).
+- Sombras en cascadas (más baratas lejos y más nítidas cerca).
+- Quitar las columnas viejas apenas su zona está cubierta por las nuevas.
+
