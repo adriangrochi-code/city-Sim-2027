@@ -154,7 +154,7 @@ func _add_streams() -> void:
 			else:
 				tan = pts[i + 1] - pts[i - 1]
 			tan = tan.normalized()
-			var w := lerpf(5.0, 13.0, float(i) / total)
+			var w := lerpf(3.0, 8.0, float(i) / total)
 			var nrm := Vector2(-tan.y, tan.x) * w
 			var y := maxf(gen.arroyo_water_height(pts[i].x, pts[i].y), 0.05)
 			var l := Vector3(pts[i].x + nrm.x, y, pts[i].y + nrm.y)
@@ -170,7 +170,7 @@ func _add_streams() -> void:
 	mat.set_shader_parameter("water_color", Color(0.29, 0.27, 0.17))
 	mat.set_shader_parameter("far_color", Color(0.29, 0.27, 0.17))
 	mat.set_shader_parameter("specular_amount", 0.3)
-	mat.set_shader_parameter("view_bias", 0.004)
+	mat.set_shader_parameter("view_bias", 0.02)
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
 	mi.material_override = mat

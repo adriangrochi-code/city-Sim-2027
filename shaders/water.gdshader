@@ -25,7 +25,7 @@ void vertex() {
 	if (view_bias > 0.0) {
 		vec3 to_cam = CAMERA_POSITION_WORLD - wpos;
 		float d = length(to_cam);
-		vec3 moved = wpos + to_cam / max(d, 0.001) * min(d * view_bias, d * 0.5);
+		vec3 moved = wpos + to_cam / max(d, 0.001) * min(d * view_bias, 40.0);
 		VERTEX = (inverse(MODEL_MATRIX) * vec4(moved, 1.0)).xyz;
 	}
 }

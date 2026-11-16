@@ -172,7 +172,7 @@ func _ready() -> void:
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.gen = gen
-	rig.look_at_point(Vector3(13500, gen.height(13500, 16300), 16300), 1500.0)
+	rig.look_at_point(Vector3(gen.founding_site().x, gen.height(gen.founding_site().x, gen.founding_site().y), gen.founding_site().y), 1500.0)
 	var pm := StandardMaterial3D.new()
 	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1568,7 +1568,7 @@ func print_stats() -> void:
 
 func build_demo() -> void:
 	money = 200000
-	var c := Vector2(13500, 16300)
+	var c: Vector2 = gen.founding_site()
 	plaza_angle = deg_to_rad(8.0)
 	found_plaza(c, plaza_angle)
 	var fr := _plaza_frame(plaza_angle)
@@ -1577,7 +1577,15 @@ func build_demo() -> void:
 	var k := 3.0
 	var a := c - s * (BLOCK * (0.5 + k)) - f * (BLOCK * (0.5 + k))
 	road_type = RoadNetwork.Type.STONE
-	build_grid(_grid_lines(a, a + s * BLOCK * (2 * k + 1), a + f * BLOCK * (2 * k + 1)))
+	# Cuadra por cuadra: en el terreno real se salta los tramos que caen al agua o son empinados.
+	var n := int(2 * k + 1)
+	for i in n + 1:
+		for j in n:
+			for seg in [[a + s * BLOCK * i + f * BLOCK * j, a + s * BLOCK * i + f * BLOCK * (j + 1)],
+					[a + f * BLOCK * i + s * BLOCK * j, a + f * BLOCK * i + s * BLOCK * (j + 1)]]:
+				var line := RoadNetwork.line(seg[0], seg[1])
+				if road_problem(line, road_type) == "":
+					build_road(line)
 	road_type = RoadNetwork.Type.DIRT
 	var exit := c - f * (BLOCK * (0.5 + k))
 	build_road(RoadNetwork.bezier(exit, exit - f * 350.0 + s * 250.0, exit - f * 700.0 - s * 50.0))
