@@ -14,6 +14,7 @@ pub mod theme;
 
 use crate::city::game::fmt_thousands;
 use crate::city::game::{stage_name, Game, Inspect, InspectKind, Tool, TOOLS};
+use crate::city::economy::{Economy, Res, Sector, Tax, ORDINANCES, TAX_MAX, TOGGLE_COST};
 use crate::city::roads::RoadKind;
 use crate::terrain::TerrainGen;
 use egui::{vec2, Align2, Color32, RichText, Sense};
@@ -23,7 +24,9 @@ use std::collections::VecDeque;
 /// Nombre de la ciudad en la barra superior.
 pub const CITY_NAME: &str = "Montevideo";
 /// Velocidades de la simulación (pausa, normal, rápida, muy rápida) y su atajo.
-pub const SPEEDS: [(f32, &str, &str); 4] = [(0.0, "II", "Pausa · atajo: Espacio"), (1.0, ">", "Velocidad normal"), (2.0, ">>", "Rápido"), (4.0, ">>>", "Muy rápido")];
+pub const SPEEDS: [(f32, &str, &str); 4] = [(0.0, "II", "Pausa · atajo: Espacio"), (1.0, ">", "Velocidad normal · atajo: 0 cambia"), (2.0, ">>", "Rápido (×2) · atajo: 0 cambia"), (4.0, ">>>", "Muy rápido (×4) · atajo: 0 cambia")];
+/// Alto de la barra superior (en puntos de la interfaz).
+pub const TOP_BAR_H: f32 = 40.0;
 /// Segundos que se ve un aviso de la gaceta (el último segundo y medio se desvanece).
 pub const TOAST_SECS: f64 = 6.0;
 /// Motivo de las tarjetas de lo que el motor todavía no tiene.
@@ -137,11 +140,11 @@ impl Card {
 }
 
 /// Tarjetas del cajón de cada categoría.
-pub fn cards(cat: Category, game: &Game, list_open: bool) -> Vec<Card> {
+pub fn cards(cat: Category, game: &Game, list_open: bool, budget_open: bool) -> Vec<Card> {
     let per_m = format!("{} pesos/m", game.kind.cost_per_m());
     match cat {
         Category::Calles => vec![
-            Card::tool(game, 0, Icon::Plaza, "gratis".into(), "Fundar la plaza mayor (Q y E la giran)"),
+            Card::tool(game, 0, Icon::Plaza, "gratis".into(), "Fundar la plaza mayor (R la gira)"),
             Card::tool(game, 1, Icon::Recta, per_m.clone(), "Calle recta por tramos encadenados"),
             Card::tool(game, 2, Icon::Curva, per_m.clone(), "Calle curva: inicio, control y final"),
             Card::tool(game, 3, Icon::Damero, per_m, "Damero: un lado, el otro y la extensión"),
@@ -172,8 +175,8 @@ pub fn cards(cat: Category, game: &Game, list_open: bool) -> Vec<Card> {
             Card::soon(Icon::Aduana, "Aduana", "Cobra derechos al comercio"),
         ],
         Category::Ordenanzas => vec![
-            Card { icon: Icon::Ordenanzas, name: "Ordenanzas", cost: "panel".into(), tip: "Abrir las ordenanzas del cabildo".into(), action: Some(UiAction::ToggleList), disabled: None, selected: list_open },
-            Card::soon(Icon::Presupuesto, "Presupuesto", "Impuestos y gastos del cabildo"),
+            Card { icon: Icon::Ordenanzas, name: "Ordenanzas", cost: format!("{} vigentes", game.city.economy.active.len()), tip: "Abrir las ordenanzas del cabildo".into(), action: Some(UiAction::ToggleList), disabled: None, selected: list_open },
+            Card { icon: Icon::Presupuesto, name: "Presupuesto", cost: "impuestos".into(), tip: "Ingresos, gastos e impuestos del cabildo".into(), action: Some(UiAction::ToggleBudget), disabled: None, selected: budget_open },
         ],
         Category::Capas => vec![
             Card::tool(game, 7, Icon::Lupa, "gratis".into(), "Ver la ficha de un solar, una calle o el terreno"),
@@ -234,18 +237,42 @@ pub fn stats(game: &Game, hour: f32, balance: Option<i64>) -> TopStats {
     }
 }
 
-/// Fichas de recursos y opinión de la derecha: (ícono, nombre, valor, ayuda).
-/// El motor todavía no simula recursos ni opinión: se muestran con "—" y lo dicen.
-pub fn chips() -> Vec<(Icon, &'static str, String, &'static str)> {
-    let soon = "Todavía no se simula en el motor (llega con los recursos y las ordenanzas)";
+/// Coma decimal, a la uruguaya: 1,25.
+pub fn fmt_dec(v: f32, decimals: usize) -> String {
+    format!("{v:.decimals$}").replace('.', ",")
+}
+
+/// Fichas de recursos y opinión de la derecha: (ícono, valor, ayuda). Salen de la economía
+/// de la ciudad (existencias, precio del pan y opinión de los tres sectores).
+pub fn chips(game: &Game) -> Vec<(Icon, String, String)> {
+    let e = &game.city.economy;
+    let st = |r: Res| e.stock(r);
+    let opinion = |i: usize| {
+        let v = e.opinion[i].round() as i32;
+        let mood = if v >= 65 { "contentos" } else if v >= 40 { "conformes" } else { "enojados" };
+        (format!("{v}"), format!("Opinión de los {}: {v} de 100 ({mood})", Sector::ALL[i].name().to_lowercase()))
+    };
+    let stock_tip = |r: Res| {
+        let s = st(r);
+        format!("{}: {} en depósito (caben {}) · precio {} · el mes pasado: +{} producidos, +{} traídos, -{} usados", r.name(), s.amount.round() as i64, s.capacity.round() as i64, fmt_dec(s.price, 2), s.produced.round() as i64, s.imported.round() as i64, s.consumed.round() as i64)
+    };
+    let (v0, t0) = opinion(0);
+    let (v1, t1) = opinion(1);
+    let (v2, t2) = opinion(2);
     vec![
-        (Icon::Ladrillo, "Ladrillos", "—".into(), soon),
-        (Icon::Piedra, "Piedra", "—".into(), soon),
-        (Icon::Pan, "Pan", "—".into(), soon),
-        (Icon::Vecinos, "Vecinos", "—".into(), soon),
-        (Icon::Comercio, "Comerciantes", "—".into(), soon),
-        (Icon::Hacienda, "Hacendados", "—".into(), soon),
+        (Icon::Ladrillo, fmt_thousands(st(Res::Ladrillos).amount.round() as i64), stock_tip(Res::Ladrillos)),
+        (Icon::Piedra, fmt_thousands(st(Res::Piedra).amount.round() as i64), stock_tip(Res::Piedra)),
+        (Icon::Pan, fmt_dec(e.price(Res::Pan), 2), format!("Precio del pan (1,00 es el normal). {}", stock_tip(Res::Pan))),
+        (Icon::Vecinos, v0, t0),
+        (Icon::Comercio, v1, t1),
+        (Icon::Hacienda, v2, t2),
     ]
+}
+
+/// Balance del último mes cerrado según el presupuesto de la economía.
+pub fn month_balance(game: &Game) -> Option<i64> {
+    let last = &game.city.economy.last;
+    (!last.lines.is_empty()).then(|| last.balance())
 }
 
 fn capitalize(s: &str) -> String {
@@ -274,13 +301,39 @@ pub struct ListItem {
 #[derive(Clone, Debug, Default)]
 pub struct ListPanel {
     pub open: bool,
+    /// Si los ítems son las ordenanzas de la economía (se rehacen cada cuadro y el botón las
+    /// aprueba o deroga de verdad); si no, es un listado suelto (el ejemplo de las pruebas).
+    pub ordinances: bool,
     pub title: String,
     pub intro: String,
     pub items: Vec<ListItem>,
 }
 
 impl ListPanel {
-    /// Ejemplo de prueba (ordenanzas coloniales); el sistema de políticas real lo reemplaza.
+    /// Las ordenanzas del cabildo, leídas de la economía de la ciudad.
+    pub fn ordinances(e: &Economy, money: i64, open: bool) -> ListPanel {
+        let sectors = ["vecinos", "comerciantes", "hacendados"];
+        let items = ORDINANCES
+            .iter()
+            .map(|o| {
+                let mut effects: Vec<String> = o.opinion.iter().zip(sectors).filter(|(v, _)| **v != 0).map(|(v, s)| format!("{}{} opinión de los {s}", if *v > 0 { "+ " } else { "- " }, v.abs())).collect();
+                if o.monthly > 0 {
+                    effects.push(format!("- {} pesos al mes", o.monthly));
+                }
+                ListItem { title: o.name.into(), desc: o.desc.into(), cost: (o.monthly > 0).then_some(o.monthly), effects, active: e.is_on(o.id), enabled: money >= TOGGLE_COST, blocked: format!("Faltan pesos (el cambio cuesta {TOGGLE_COST})") }
+            })
+            .collect();
+        ListPanel {
+            open,
+            ordinances: true,
+            title: "Ordenanzas del cabildo".into(),
+            intro: format!("Aprobar o derogar una ordenanza cuesta {TOGGLE_COST} pesos de papeleo. Hay {} vigentes.", e.active.len()),
+            items,
+        }
+    }
+
+    /// Ejemplo suelto para las pruebas del panel genérico.
+    #[cfg(test)]
     pub fn example() -> ListPanel {
         let item = |t: &str, d: &str, c: i64, e: &[&str], active: bool, enabled: bool, blocked: &str| ListItem {
             title: t.into(),
@@ -293,6 +346,7 @@ impl ListPanel {
         };
         ListPanel {
             open: false,
+            ordinances: false,
             title: "Ordenanzas del cabildo (ejemplo)".into(),
             intro: "Panel de prueba: así se van a mostrar las políticas de comida, agua y recursos.".into(),
             items: vec![
@@ -317,11 +371,16 @@ pub enum UiAction {
     CloseInspect,
     ToggleList,
     ToggleItem(usize),
+    ToggleBudget,
+    /// Cambia un impuesto (índice en `Tax::ALL`) en tantos puntos.
+    Tax(usize, i32),
 }
 
 /// Estado propio de la interfaz entre cuadros.
 pub struct GameUi {
     pub list: ListPanel,
+    /// Panel de presupuesto abierto.
+    pub budget: bool,
     /// Categoría con el cajón abierto.
     pub open: Option<Category>,
     toasts: VecDeque<(String, f64)>,
@@ -339,7 +398,7 @@ pub struct GameUi {
 
 impl Default for GameUi {
     fn default() -> Self {
-        GameUi { list: ListPanel::example(), open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
+        GameUi { list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
     }
 }
 
@@ -359,6 +418,22 @@ impl GameUi {
             None => self.month_mark = Some((m, money)),
             _ => {}
         }
+    }
+
+    /// Cierra lo último que se abrió (listado, presupuesto, ficha, cajón). `false` si no había nada.
+    pub fn close_one(&mut self, game: &mut Game) -> bool {
+        if self.list.open {
+            self.list.open = false;
+        } else if self.budget {
+            self.budget = false;
+        } else if game.inspected.is_some() {
+            game.inspected = None;
+        } else if self.open.is_some() {
+            self.open = None;
+        } else {
+            return false;
+        }
+        true
     }
 
     pub fn push_toast(&mut self, text: String) {
@@ -381,6 +456,9 @@ impl GameUi {
     /// Dibuja toda la interfaz del juego y devuelve las acciones pedidas.
     pub fn draw(&mut self, ctx: &egui::Context, game: &Game, terrain: &TerrainGen, hour: f32, extra_status: &str) -> Vec<UiAction> {
         let mut acts = Vec::new();
+        if self.list.ordinances {
+            self.list = ListPanel::ordinances(&game.city.economy, game.city.money, self.list.open);
+        }
         self.top_bar(ctx, game, hour, extra_status, &mut acts);
         self.category_bar(ctx, game);
         match self.open {
@@ -392,6 +470,12 @@ impl GameUi {
             inspect_panel(ctx, &info, &mut acts);
         }
         self.gazette(ctx);
+        if self.budget {
+            let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
+            if budget_panel(ctx, game, reserved, &mut acts) {
+                self.budget = false;
+            }
+        }
         if self.list.open {
             let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
             list_panel(ctx, &self.list, reserved, &mut acts);
@@ -400,51 +484,47 @@ impl GameUi {
     }
 
     fn top_bar(&self, ctx: &egui::Context, game: &Game, hour: f32, extra: &str, acts: &mut Vec<UiAction>) {
-        let st = stats(game, hour, self.balance);
-        // Fondo: una franja de papel; encima, tres grupos (izquierda, centro, derecha).
-        egui::TopBottomPanel::top("barra").exact_height(40.0).frame(egui::Frame::none().fill(theme::PAPER).stroke(egui::Stroke::new(1.5_f32, theme::BORDER))).show(ctx, |_| {});
-        let y = 4.0;
-        egui::Area::new("barra-izq".into()).anchor(Align2::LEFT_TOP, vec2(12.0, y)).show(ctx, |ui| {
-            ui.horizontal(|ui| {
+        let st = stats(game, hour, month_balance(game).or(self.balance));
+        // Una franja de papel con tres grupos: ciudad y tiempo · tesoro y gente · fichas.
+        let frame = egui::Frame::none().fill(theme::PAPER).stroke(egui::Stroke::new(1.5_f32, theme::BORDER)).inner_margin(egui::Margin::symmetric(12.0, 4.0));
+        egui::TopBottomPanel::top("barra").exact_height(TOP_BAR_H).frame(frame).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
                 ui.label(RichText::new(CITY_NAME).size(theme::BODY * 1.15).strong()).on_hover_text(format!("Etapa: {}", st.stage));
                 ui.label(RichText::new(&st.date).color(theme::INK_SOFT));
-                ui.label(RichText::new(&st.hour).color(theme::INK_SOFT)).on_hover_text("Hora del día · + y - la cambian");
-                ui.add_space(4.0);
+                ui.label(RichText::new(&st.hour).color(theme::INK_SOFT)).on_hover_text("Hora del día · atajos: , y .");
                 for (v, label, tip) in SPEEDS {
                     if ui.selectable_label(game.speed == v, label).on_hover_text(tip).clicked() {
                         acts.push(UiAction::Speed(v));
                     }
                 }
-                ui.add_space(2.0);
-                if ui.small_button("−").on_hover_text("Atrasar la hora · atajo: -").clicked() {
+                if ui.small_button("−").on_hover_text("Atrasar la hora · atajo: ,").clicked() {
                     acts.push(UiAction::Hour(-0.5));
                 }
-                if ui.small_button("+").on_hover_text("Adelantar la hora · atajo: +").clicked() {
+                if ui.small_button("+").on_hover_text("Adelantar la hora · atajo: .").clicked() {
                     acts.push(UiAction::Hour(0.5));
                 }
-            });
-        });
-        egui::Area::new("barra-centro".into()).anchor(Align2::CENTER_TOP, vec2(-40.0, y)).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let bal_col = if self.balance.is_some_and(|b| b < 0) { theme::BAD } else { theme::GOOD };
+                ui.add_space(18.0);
+                ui.separator();
+                ui.add_space(6.0);
+                let bal_col = if month_balance(game).or(self.balance).is_some_and(|b| b < 0) { theme::BAD } else { theme::GOOD };
                 ui.label(RichText::new(&st.money).strong()).on_hover_text("Tesoro del cabildo");
-                ui.label(RichText::new(&st.balance).color(bal_col)).on_hover_text("Variación del tesoro en el último mes (se calcula al cerrar cada mes)");
-                ui.add_space(14.0);
+                ui.label(RichText::new(&st.balance).color(bal_col)).on_hover_text("Balance del último mes cerrado (detalle en Ordenanzas → Presupuesto)");
+                ui.add_space(10.0);
                 icons::show(ui, Icon::Vecinos, 18.0, theme::INK);
                 ui.label(&st.population).on_hover_text(format!("Población · etapa: {}", st.stage));
-                ui.add_space(10.0);
+                ui.add_space(6.0);
                 icons::show(ui, Icon::Aduana, 18.0, theme::INK_SOFT);
                 ui.label(&st.waiting).on_hover_text("Pobladores que esperan casa");
-            });
-        });
-        egui::Area::new("barra-der".into()).anchor(Align2::RIGHT_TOP, vec2(-10.0, y + 3.0)).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if !extra.is_empty() {
-                    ui.label(RichText::new(extra).small().color(theme::INK_SOFT));
-                }
-                for (icon, name, value, tip) in chips() {
-                    chip(ui, icon, &value).on_hover_text(format!("{name}: {tip}"));
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    // De derecha a izquierda: se invierten para leerlas en orden.
+                    for (icon, value, tip) in chips(game).into_iter().rev() {
+                        chip(ui, icon, &value).on_hover_text(tip);
+                    }
+                    if !extra.is_empty() {
+                        ui.label(RichText::new(extra).small().color(theme::INK_SOFT));
+                    }
+                });
             });
         });
     }
@@ -504,15 +584,17 @@ impl GameUi {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    for c in cards(cat, game, self.list.open) {
+                    for c in cards(cat, game, self.list.open, self.budget) {
                         let resp = card_button(ui, &c);
                         let tip = match &c.disabled {
                             Some(why) if why != SOON => format!("{} · no disponible: {why}", c.tip),
                             _ => c.tip.clone(),
                         };
                         if resp.on_hover_text(tip).clicked() && c.disabled.is_none() {
-                            if let Some(a) = c.action.clone() {
-                                acts.push(a);
+                            match c.action.clone() {
+                                Some(UiAction::ToggleBudget) => self.budget = !self.budget,
+                                Some(a) => acts.push(a),
+                                None => {}
                             }
                         }
                     }
@@ -601,17 +683,20 @@ fn card_button(ui: &mut egui::Ui, c: &Card) -> egui::Response {
     resp
 }
 
-/// Ficha pequeña de la barra superior: ícono y valor.
+/// Ficha pequeña de la barra superior: ícono y valor (dibujada a mano para que no dependa
+/// de la dirección del renglón).
 fn chip(ui: &mut egui::Ui, icon: Icon, value: &str) -> egui::Response {
-    egui::Frame::none().fill(theme::PAPER_DARK).rounding(10.0).inner_margin(egui::Margin::symmetric(7.0, 1.0)).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
-        ui.horizontal(|ui| {
-            icons::show(ui, icon, 16.0, theme::INK);
-            ui.label(RichText::new(value).small());
-        });
-    })
-    .response
-    .interact(Sense::hover())
+    let font = egui::FontId::proportional(theme::BODY * 0.8);
+    let galley = ui.painter().layout_no_wrap(value.to_string(), font, theme::INK);
+    let (icon_w, pad, gap) = (16.0, 8.0, 4.0);
+    let size = vec2(pad + icon_w + gap + galley.size().x + pad, 22.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 11.0, theme::PAPER_DARK);
+    let ir = egui::Rect::from_center_size(egui::pos2(rect.left() + pad + icon_w / 2.0, rect.center().y), vec2(icon_w, icon_w));
+    icons::paint(p, ir, icon, theme::INK);
+    p.galley(egui::pos2(ir.right() + gap, rect.center().y - galley.size().y / 2.0), galley, theme::INK);
+    resp
 }
 
 /// Ficha de información a la derecha: cabecera, secciones y botones de acción.
@@ -686,6 +771,70 @@ fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(2.0);
 }
 
+/// Panel de presupuesto: impuestos (con − y +) y el detalle del último mes cerrado.
+/// Devuelve `true` si se pidió cerrarlo.
+fn budget_panel(ctx: &egui::Context, game: &Game, reserved_bottom: f32, acts: &mut Vec<UiAction>) -> bool {
+    let e = &game.city.economy;
+    let mut close = false;
+    egui::Area::new("presupuesto".into()).anchor(Align2::LEFT_TOP, vec2(10.0, 52.0)).show(ctx, |ui| {
+        theme::paper_frame().show(ui, |ui| {
+            ui.set_width(360.0);
+            ui.horizontal(|ui| {
+                icons::show(ui, Icon::Presupuesto, 22.0, theme::INK);
+                ui.heading("Presupuesto del cabildo");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("×").on_hover_text("Cerrar").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            section(ui, "Impuestos");
+            egui::Grid::new("impuestos").num_columns(3).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
+                for (i, t) in Tax::ALL.iter().enumerate() {
+                    let rate = e.tax(*t);
+                    ui.label(RichText::new(t.name()).small()).on_hover_text(format!("Lo habitual es {} %; más arriba molesta a los {}", t.normal(), t.sector().name().to_lowercase()));
+                    let col = if rate > t.normal() { theme::BAD } else if rate < t.normal() { theme::GOOD } else { theme::INK };
+                    ui.label(RichText::new(format!("{rate} %")).small().color(col));
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(rate > 0, egui::Button::new(RichText::new("−").small())).on_hover_text("Bajar un punto").clicked() {
+                            acts.push(UiAction::Tax(i, -1));
+                        }
+                        if ui.add_enabled(rate < TAX_MAX, egui::Button::new(RichText::new("+").small())).on_hover_text(format!("Subir un punto (hasta {TAX_MAX} %)")).clicked() {
+                            acts.push(UiAction::Tax(i, 1));
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+            ui.add_space(4.0);
+            section(ui, "Último mes");
+            let last = &e.last;
+            if last.lines.is_empty() {
+                ui.label(RichText::new("Todavía no cerró ningún mes.").small().color(theme::INK_SOFT));
+            } else {
+                egui::ScrollArea::vertical().max_height((ctx.screen_rect().height() - 52.0 - reserved_bottom - 230.0).max(80.0)).show(ui, |ui| {
+                    egui::Grid::new("lineas").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        for l in &last.lines {
+                            ui.label(RichText::new(&l.concept).small());
+                            let col = if l.amount < 0 { theme::BAD } else { theme::GOOD };
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new(fmt_thousands(l.amount)).small().color(col)));
+                            ui.end_row();
+                        }
+                    });
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Ingresos {}", fmt_thousands(last.income()))).small().color(theme::GOOD));
+                    ui.label(RichText::new(format!("Gastos {}", fmt_thousands(last.expenses()))).small().color(theme::BAD));
+                    let b = last.balance();
+                    ui.label(RichText::new(format!("Balance {}{}", if b >= 0 { "+" } else { "" }, fmt_thousands(b))).small().strong());
+                });
+            }
+        });
+    });
+    close
+}
+
 /// Panel de listado genérico (políticas, ordenanzas…) centrado en la pantalla.
 /// `reserved_bottom` es el alto ocupado abajo (barra y cajón) que el panel no debe tapar.
 pub fn list_panel(ctx: &egui::Context, panel: &ListPanel, reserved_bottom: f32, acts: &mut Vec<UiAction>) {
@@ -695,7 +844,7 @@ pub fn list_panel(ctx: &egui::Context, panel: &ListPanel, reserved_bottom: f32, 
             ui.horizontal(|ui| {
                 ui.heading(&panel.title);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("x").on_hover_text("Cerrar").clicked() {
+                    if ui.small_button("×").on_hover_text("Cerrar").clicked() {
                         acts.push(UiAction::ToggleList);
                     }
                 });
@@ -751,6 +900,22 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             UiAction::Hour(d) => hour_delta += d,
             UiAction::CloseInspect => game.inspected = None,
             UiAction::ToggleList => list.open = !list.open,
+            UiAction::ToggleBudget => {}
+            UiAction::Tax(i, d) => {
+                if let Some(t) = Tax::ALL.get(*i) {
+                    let e = &mut game.city.economy;
+                    let now = e.tax(*t);
+                    e.set_tax(*t, now + d);
+                }
+            }
+            UiAction::ToggleItem(i) if list.ordinances => {
+                if let Some(o) = ORDINANCES.get(*i) {
+                    let c = &mut game.city;
+                    match c.economy.toggle(o.id, &mut c.money) {
+                        Ok(m) | Err(m) => game.say(m),
+                    }
+                }
+            }
             UiAction::ToggleItem(i) => {
                 if let Some(it) = list.items.get_mut(*i) {
                     if it.enabled {
@@ -799,21 +964,21 @@ mod tests {
         assert_eq!(CATEGORIES.len(), 8);
         // Cada herramienta del juego aparece en alguna tarjeta, con su atajo en el globo.
         for (i, _) in TOOLS.iter().enumerate() {
-            let found = CATEGORIES.iter().flat_map(|c| cards(*c, &g, false)).find(|c| c.action == Some(UiAction::Tool(i))).expect("la herramienta tiene tarjeta");
+            let found = CATEGORIES.iter().flat_map(|c| cards(*c, &g, false, false)).find(|c| c.action == Some(UiAction::Tool(i))).expect("la herramienta tiene tarjeta");
             assert!(found.tip.contains(&format!("atajo: {}", i + 1)), "{}", found.tip);
             assert!(!found.name.starts_with(char::is_numeric), "el atajo no va en el botón");
         }
         // Antes de fundar, las calles están desactivadas con el motivo; la plaza no.
-        let calles = cards(Category::Calles, &g, false);
+        let calles = cards(Category::Calles, &g, false, false);
         assert!(calles[0].disabled.is_none());
         assert_eq!(calles[1].disabled.as_deref(), Some("Falta la plaza"));
         assert_eq!(calles[4].disabled.as_deref(), Some(SOON), "lo que falta en el motor sale como próximamente");
         g.city.plaza = Some((Vec2::ZERO, 0.0));
-        let calles = cards(Category::Calles, &g, false);
+        let calles = cards(Category::Calles, &g, false, false);
         assert_eq!(calles[0].disabled.as_deref(), Some("Ya fundada"));
         assert!(calles[1].disabled.is_none());
         g.city.money = 10;
-        assert_eq!(cards(Category::Calles, &g, false)[1].disabled.as_deref(), Some("Sin fondos"));
+        assert_eq!(cards(Category::Calles, &g, false, false)[1].disabled.as_deref(), Some("Sin fondos"));
         assert_eq!(options_for(Category::Calles), Options::RoadKind);
         assert_eq!(options_for(Category::Zonas), Options::Brush);
         assert_eq!(options_for(Category::Servicios), Options::None);
@@ -833,7 +998,25 @@ mod tests {
         assert_eq!(st.hour, "09:30");
         assert_eq!(stats(&g, 9.5, Some(-1500)).balance, "-1.500/mes");
         assert_eq!(stats(&g, 9.5, Some(320)).balance, "+320/mes");
-        assert!(chips().iter().all(|c| c.2 == "—"), "sin datos inventados");
+        let ch = chips(&g);
+        assert_eq!(ch.len(), 6);
+        assert_eq!(ch[0].1, "200", "ladrillos de la fundación");
+        assert_eq!(ch[2].1, "1,00", "precio normal del pan");
+        assert!(ch[3].2.contains("vecinos"), "{}", ch[3].2);
+        assert_eq!(month_balance(&g), None, "sin mes cerrado todavía");
+    }
+
+    #[test]
+    fn escape_cierra_en_orden() {
+        let mut g = Game::default();
+        let mut ui = GameUi::default();
+        ui.open = Some(Category::Calles);
+        ui.list.open = true;
+        g.inspected = Some(Vec2::ZERO);
+        assert!(ui.close_one(&mut g) && !ui.list.open);
+        assert!(ui.close_one(&mut g) && g.inspected.is_none());
+        assert!(ui.close_one(&mut g) && ui.open.is_none());
+        assert!(!ui.close_one(&mut g), "nada más que cerrar: Esc sale");
     }
 
     #[test]
@@ -861,6 +1044,23 @@ mod tests {
         assert!(l.open);
         assert!(l.items[0].active, "el ítem habilitado se activa");
         assert!(!l.items[2].active, "el bloqueado no cambia");
+        // Con las ordenanzas de verdad: el botón aprueba en la economía y cobra el papeleo.
+        let money = g.city.money;
+        let mut o = ListPanel::ordinances(&g.city.economy, g.city.money, true);
+        assert_eq!(o.items.len(), ORDINANCES.len());
+        apply(&[UiAction::ToggleItem(1)], &mut g, &mut o);
+        assert!(g.city.economy.is_on(ORDINANCES[1].id));
+        assert_eq!(g.city.money, money - TOGGLE_COST);
+        assert!(g.message.contains("aprueba"), "{}", g.message);
+        let mut o = ListPanel::ordinances(&g.city.economy, 50, true);
+        assert!(o.items[1].active);
+        assert!(!o.items[0].enabled, "sin plata para el papeleo");
+        // Impuestos: se mueven de a un punto y no pasan del tope.
+        let before = g.city.economy.tax(Tax::ALL[0]);
+        apply(&[UiAction::Tax(0, 1), UiAction::Tax(0, 1)], &mut g, &mut o);
+        assert_eq!(g.city.economy.tax(Tax::ALL[0]), before + 2);
+        apply(&vec![UiAction::Tax(0, 1); 40], &mut g, &mut o);
+        assert_eq!(g.city.economy.tax(Tax::ALL[0]), TAX_MAX);
         // Antes de fundar la plaza, las herramientas de calle se rechazan.
         apply(&[UiAction::Tool(1)], &mut g, &mut l);
         assert_eq!(g.tool, Tool::Plaza);

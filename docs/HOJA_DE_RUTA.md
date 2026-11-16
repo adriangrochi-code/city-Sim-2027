@@ -25,7 +25,9 @@
 - [x] Opinión de tres sectores (vecinos, comerciantes, hacendados) con consecuencias
 - [x] Ordenanzas del cabildo (9 en la época colonial) — ver `docs/sistemas/politicas-y-recursos.md`
 - [x] Mejorar calles sin demoler (empedrar con piedra de cantera, poner faroles con costo mensual)
-- [ ] Mapa por defecto con la geografía real (Montevideo a escala ciudad; Uruguay a escala país)
+- [x] Mapa por defecto con la geografía real de Montevideo (24 km, ver `docs/sistemas/mapa-real.md`)
+- [x] Casas y calles a tamaño real (cuadra de 100 varas, calles de 10 y 12 varas)
+- [ ] Uruguay a escala país; las calles y solares deben esquivar los arroyos
 - [ ] Alcantarillas y saneamiento por épocas (diseñado)
 - [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (diseñado; la versión colonial ya existe)
 
@@ -35,7 +37,9 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 
 1. [x] Calles curvas, rectas y damero en el motor (grafo de calles, cruces, calzada en vóxeles)
 2. [x] Solares que siguen la calle, zonificación con pincel y crecimiento con el catálogo de vóxeles (rancho → azotea → altos), con edificios girados a cualquier ángulo
-3. [ ] Interfaz del juego en el motor (barra de herramientas, información, plano colonial)
+3. [x] Interfaz del juego en el motor: categorías con cajón de tarjetas, barra de fichas, ficha de información, gaceta, ordenanzas y presupuesto con impuestos
+3b. [x] Economía en el motor: existencias, mercado, comercio por el puerto, impuestos, presupuesto, opinión y ordenanzas
+3c. [ ] Mapa real de Montevideo en el motor
 4. [ ] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
 5. [ ] Servicios, agua, incendios, puerto, muralla, campo e iglesia
 6. [ ] Guardar y cargar en el motor

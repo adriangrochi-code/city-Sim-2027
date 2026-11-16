@@ -676,6 +676,127 @@ clics de todas las herramientas; la regla nueva del almacén.
   usar el índice espacial también ahí.
 - Los puentes no existen: una calle que toca agua se rechaza ("aún no hay puentes").
 - La capa de vistas previas no se oscurece de noche (zonas en verde brillante).
-- Sin interfaz gráfica todavía: la información va en el título de la ventana y en la
-  consola (paso 3 de la fase 2).
+- La interfaz gráfica ya existe (sección 14); el título de la ventana sigue mostrando la
+  línea de estado para depurar.
 - Las paredes oblicuas de 0,5 m se ven dentadas de cerca; no hay suavizado por subvóxel.
+
+## 14. Interfaz del juego
+
+Fase 2, paso 3: la interfaz del modo juego dibujada dentro del motor, con la estructura de
+los constructores de ciudades modernos y el aspecto de un plano colonial (papel, tinta
+sepia, bordes marrones, esquinas redondeadas).
+
+![Barra de categorías con el cajón de calles](../capturas/motor-ui-barra.jpg)
+
+### Estructura de la pantalla
+
+- **Barra superior compacta.** Izquierda: nombre de la ciudad, fecha, hora y velocidad
+  (pausa, ×1, ×2, ×4) con − / + para la hora. Centro: tesoro con el balance del último mes
+  (verde o rojo), población y pobladores que esperan casa. Derecha: fichas de ladrillos,
+  piedra, precio del pan y opinión de vecinos, comerciantes y hacendados, leídas de la
+  economía de la ciudad (`city/economy.rs`); el globo de cada ficha da el detalle.
+- **Barra inferior de categorías** con ícono y nombre: Calles, Zonas, Servicios,
+  Producción, Puerto y muralla, Ordenanzas, Capas de datos, Demoler. Un subrayado marca la
+  categoría de la herramienta en uso.
+- **Cajón de tarjetas** encima de la barra al elegir una categoría: ícono, nombre y costo.
+  Una tarjeta desactivada dice por qué en la propia tarjeta ("Falta la plaza", "Ya
+  fundada", "Sin fondos", "Próximamente") y lo explica en el globo. Calles lleva el
+  interruptor tierra / empedrado; Zonas, el pincel. Lo que el motor todavía no tiene
+  (servicios, producción, puerto, capas de datos, mejorar calle, demoler edificio) aparece
+  como tarjeta desactivada "Próximamente".
+- **Ficha de información** a la derecha (herramienta Inspeccionar): cabecera con ícono y
+  título, sección de datos, "¿Por qué no crece?" con el motivo concreto según las reglas de
+  crecimiento, y botones de acción (zonificar / quitar zona en un solar; demoler o
+  continuar una calle). Lo inspeccionado se marca en el mundo con un contorno dorado.
+- **Pista de la herramienta** abajo a la izquierda: qué hace, el costo en vivo mientras se
+  traza y el motivo de error en rojo (agua, pendiente, fondos…).
+- **Gaceta**: los avisos del juego aparecen arriba al centro, se ven 6 s y se desvanecen
+  (hasta tres a la vez).
+- **Panel de listado genérico** (`ListPanel`): título, introducción e ítems con título,
+  descripción, costo mensual, efectos (+ en verde, − en rojo) y botón Aprobar / Derogar
+  desactivado con motivo. Hoy muestra las 9 ordenanzas reales de la economía (aprobar
+  cobra los 100 pesos de papeleo y avisa en la gaceta); sirve igual para cualquier otra
+  lista de decisiones.
+- **Presupuesto** (tarjeta en Ordenanzas): impuestos con − / + (0 a 20 %, en rojo si pasan
+  de lo habitual), renglones del último mes, ingresos, gastos y balance.
+
+Los atajos de teclado van en los globos de ayuda, no en los botones. Esc cancela el
+trazado; si no hay trazado cierra, en orden, el listado, el presupuesto, la ficha y el
+cajón; si no queda nada abierto, sale.
+
+| Captura | Qué muestra |
+|---|---|
+| `motor-ui-barra.jpg` | Barra de categorías con el cajón de calles abierto (recta elegida, interruptor de tipo) |
+| `motor-ui-cajon-servicios.jpg` | Cajón de servicios: tarjetas "Próximamente" y el pincel de zonas en el mundo |
+| `motor-ui-ficha.jpg` | Ficha de un rancho con el motivo por el que no crece y el solar marcado |
+| `motor-ui-gaceta.jpg` | Aviso de la gaceta y pista con costo y error en vivo (calle que cruza el agua) |
+| `motor-ui-panel.jpg` | Ordenanzas del cabildo y presupuesto con datos reales de la economía |
+| `motor-ui-ventana.jpg` | La ventana real (Xvfb + lavapipe) tras clics de prueba con xdotool |
+
+### Arquitectura (`engine/src/ui/`)
+
+- **egui 0.29 + egui-wgpu 0.29 + egui-winit 0.29**, compatibles con el wgpu 22 y el winit
+  0.30 del motor (un solo wgpu en el árbol de dependencias).
+- `ui/mod.rs`: `GameUi` (estado entre cuadros: categoría abierta, avisos, paneles, balance)
+  y `draw()`, que arma toda la interfaz a partir de `Game` y devuelve una lista de
+  `UiAction`; `apply()` las aplica al juego después de dibujar. La lógica (tarjetas y sus
+  motivos, textos de la barra, fichas, acciones, avisos, Esc) está separada del dibujo y
+  tiene pruebas.
+- `ui/icons.rs`: los íconos se dibujan con trazos (líneas, arcos, polígonos) en código; no
+  hay imágenes de terceros.
+- `ui/theme.rs`: colores (papel `#E8DEC5`, tinta `#3D2B1A`, borde `#8A6F4D`), tamaños de
+  letra y estilo de los controles. Fuente: **EB Garamond** (SIL OFL 1.1, en
+  `engine/assets/fonts/` con su licencia). Esta copia tiene las cifras de altura de
+  mayúscula (el 0 no se confunde con la o) y los contornos pasados de CFF a TrueType: el
+  rasterizador de egui dibujaba la V, la W y la Y del original como cajas grises.
+- `ui/paint.rs`: `UiPainter` teselada y pinta la salida de egui en una pasada propia con
+  `LoadOp::Load` sobre la imagen ya dibujada (sin MSAA, después de la resolución).
+- `render/mod.rs`: `render_surface(..., ui)` y `capture_with(..., ui)` reciben un gancho que
+  pinta la interfaz en la misma entrega del cuadro o de la captura.
+- **Ratón**: cada evento pasa primero por egui. Si el cursor está sobre un área de la
+  interfaz (se compara la posición de ese instante con las áreas del cuadro anterior, porque
+  un clic puede llegar sin cuadros en medio) o egui está arrastrando un control, el clic y
+  la rueda no llegan al mundo. El clic en el mundo vuelve a calcular el punto bajo el
+  cursor en ese instante.
+- **Escala**: `zoom_for` ajusta la interfaz al alto de la ventana (800 px = 1; entre 0,75 y
+  2, sin volver a agrandar en pantallas de densidad doble).
+- **Redibujo**: el bucle sigue en reposo si nada cambia; la interfaz lo despierta mientras
+  hay avisos visibles, animaciones de egui o acciones.
+- **Capturas**: el recorrido `--demo-ciudad` tiene pasos `UiShot` que preparan la escena
+  (herramienta, cajón, ficha, aviso, paneles) y capturan con la interfaz encima, igual con
+  o sin ventana. Las pasadas de egui que no se pintan suben igual sus texturas.
+
+### Costo medido (4 núcleos, sin GPU, lavapipe)
+
+| Medición | Resultado |
+|---|---|
+| Ventana 1280×720 bajo Xvfb, 900 cuadros con clics | interfaz **1,0 ms de CPU por cuadro** de media (mediana 0,9; peor 9,7 en el primer cuadro, al crear la fuente) |
+| El mismo cuadro completo | ≈143 ms (7 FPS de media con render por CPU): la interfaz es < 1 % |
+| Capturas 1600×900 con interfaz (egui + pintar) | 0,4 a 3 ms por captura (la primera incluye la fuente) |
+
+Es tiempo de CPU (armar, teselar y subir); el dibujo de la interfaz en lavapipe no se midió
+aparte. Con GPU real falta medir.
+
+### Prueba
+
+```
+cd engine
+cargo build --release && cargo test --release
+./target/release/motor --demo-ciudad /tmp/demo   # 1600×900, capturas motor-ui-*.png
+xvfb-run -a -s "-screen 0 1280x720x24" ./target/release/motor --size 1280x720 --frames 900
+```
+
+La prueba de ventana se hizo con `xdotool`: un clic sobre la barra de categorías y otro
+sobre una tarjeta (encima del mundo) no fundan la plaza; un clic en el mundo libre sí.
+
+### Problemas conocidos
+
+- Faltan las herramientas de Servicios, Producción, Puerto y muralla, Capas de datos,
+  mejorar calle y demoler edificio (tarjetas "Próximamente").
+- El balance arriba es el del presupuesto de la economía; hasta que cierra el primer mes
+  muestra "—/mes".
+- La ficha de una calle o del terreno tiene pocos datos (tipo y largo; posición).
+- Sin pantalla de inicio, guardar / cargar ni menú de opciones (escala de la interfaz a
+  mano, idioma).
+- Los globos de ayuda no se ven en las capturas (no hay cursor en el modo sin pantalla).
+

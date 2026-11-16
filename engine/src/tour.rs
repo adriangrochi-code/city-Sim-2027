@@ -138,6 +138,7 @@ fn ui_panel(s: &mut Session, u: &mut GameUi) {
     g.hover = None;
     u.time += 30.0;
     u.list.open = true;
+    u.budget = true;
     u.open = Some(ui::Category::Ordenanzas);
 }
 

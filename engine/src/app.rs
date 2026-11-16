@@ -236,7 +236,8 @@ impl App {
         }
         match code {
             KeyCode::Escape => {
-                if !g.cancel() {
+                // Primero cancela el trazado, después cierra paneles; si no queda nada, sale.
+                if !g.cancel() && !self.ui.close_one(g) {
                     el.exit();
                 }
             }
@@ -334,13 +335,12 @@ impl ApplicationHandler for App {
                 // todavía no procesó este evento, y un clic puede llegar sin cuadros entre medio.
                 let ppp = ctx.pixels_per_point();
                 let at = egui::pos2(self.mouse.x as f32 / ppp, self.mouse.y as f32 / ppp);
-                (ctx.layer_id_at(at).is_some() || ctx.wants_pointer_input(), ctx.wants_keyboard_input())
+                // La capa de fondo cubre toda la pantalla: solo cuenta dentro de la barra superior.
+                let over = ctx.layer_id_at(at).is_some_and(|l| l.order != egui::Order::Background || at.y <= ui::TOP_BAR_H);
+                (over || ctx.is_using_pointer(), ctx.wants_keyboard_input())
             }
             _ => (false, false),
         };
-        if let WindowEvent::MouseInput { state: ElementState::Pressed, .. } = &event {
-            eprintln!("DBG clic en {:?} ui={ui_pointer} capa={:?}", self.mouse, self.gpu.as_ref().map(|g| { let c = g.egui.egui_ctx(); let p = c.pixels_per_point(); c.layer_id_at(egui::pos2(self.mouse.x as f32 / p, self.mouse.y as f32 / p)) }));
-        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
