@@ -179,6 +179,7 @@ impl App {
             self.ui.sync_news(g);
             let raw = gpu.egui.take_egui_input(&gpu.window);
             let ctx = gpu.egui.egui_ctx().clone();
+            ctx.set_zoom_factor(ui::zoom_for(gpu.config.height, gpu.window.scale_factor() as f32));
             let terrain = s.terrain.clone();
             let hour = s.hour;
             let mut acts = Vec::new();
@@ -384,8 +385,8 @@ impl ApplicationHandler for App {
                     }
                 }
                 (MouseButton::Left, ElementState::Released) => self.session.game_release(),
-                (MouseButton::Middle, st) => self.middle = st == ElementState::Pressed,
                 (MouseButton::Right, ElementState::Pressed) | (MouseButton::Middle, ElementState::Pressed) if ui_pointer => {}
+                (MouseButton::Middle, st) => self.middle = st == ElementState::Pressed,
                 (MouseButton::Right, ElementState::Pressed) => {
                     self.right = Some(self.mouse);
                     self.right_moved = 0.0;

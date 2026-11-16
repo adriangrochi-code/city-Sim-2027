@@ -11,7 +11,7 @@ Salida en assets/mapas/montevideo/:
   contexto.bin      lo mismo, más grueso, para el anillo exterior del terreno.
   arroyos.json      arroyos calculados desde el relieve (polilíneas en metros locales).
   meta.json         origen geográfico, escala, tamaños, codificación y puntos de referencia.
-  vista_previa.png  imagen de control (no la usa el juego).
+Además guarda docs/capturas/mapa-real-relieve.jpg como imagen de control (no la usa el juego).
 
 Coordenadas locales: x hacia el este y z hacia el sur, en metros, con (0, 0) en la esquina
 noroeste del mapa jugable (como el resto del juego).
@@ -267,6 +267,74 @@ def sitio_fundacion(h, step):
     return mejor
 
 
+def limpiar_agua(h, step):
+    """Separa el río de los pozos del relieve y suaviza el fondo.
+
+    - El agua conectada con el borde sur (el Río de la Plata) es río: su fondo se reemplaza
+      por una pendiente suave según la distancia a la costa, porque la batimetría de los
+      Terrain Tiles cerca de la costa trae bandas horizontales.
+    - Las celdas bajas que NO conectan con el río son pozos del modelo de elevación (muy
+      comunes en zona urbana): se rellenan a tierra firme.
+    """
+    from collections import deque
+    ny, nx = h.shape
+    bajo = h <= 0.3
+    rio = np.zeros(h.shape, bool)
+    q = deque()
+    for j in range(nx):
+        if bajo[ny - 1, j]:
+            rio[ny - 1, j] = True
+            q.append((ny - 1, j))
+    while q:
+        i, j = q.popleft()
+        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            a, b = i + di, j + dj
+            if 0 <= a < ny and 0 <= b < nx and bajo[a, b] and not rio[a, b]:
+                rio[a, b] = True
+                q.append((a, b))
+    pozos = bajo & ~rio
+    h = h.copy()
+    h[pozos] = np.maximum(h[pozos], 1.5)
+    # Distancia a la costa (en celdas) dentro del río, por BFS desde la tierra.
+    dist = np.full(h.shape, -1, dtype=np.int32)
+    q = deque()
+    for i in range(ny):
+        for j in range(nx):
+            if not rio[i, j]:
+                dist[i, j] = 0
+                q.append((i, j))
+    while q:
+        i, j = q.popleft()
+        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            a, b = i + di, j + dj
+            if 0 <= a < ny and 0 <= b < nx and dist[a, b] < 0:
+                dist[a, b] = dist[i, j] + 1
+                q.append((a, b))
+    d_m = dist.astype(np.float64) * step
+    h[rio] = -np.minimum(0.4 + d_m[rio] * 0.004, 7.5)
+    return h
+
+
+def suavizar_tierra(h):
+    """Quita los picos del modelo de elevación en tierra.
+
+    SRTM mide la superficie (techos, copas de árboles), no el suelo: en la zona urbana
+    aparecen saltos de 10 a 20 m entre celdas vecinas que en el juego se ven como
+    pendientes de roca. Mediana de 5×5 (100 m) y luego media de 3×3, solo en tierra, sin
+    mover la costa.
+    """
+    from numpy.lib.stride_tricks import sliding_window_view as ventanas
+    tierra = h > 0.5
+    p = np.pad(h, 2, mode="edge")
+    med = np.median(ventanas(p, (5, 5)), axis=(-2, -1))
+    p = np.pad(med, 1, mode="edge")
+    media = ventanas(p, (3, 3)).mean(axis=(-2, -1))
+    out = h.copy()
+    ok = tierra & (media > 0.5)
+    out[ok] = media[ok]
+    return out
+
+
 def guardar_u16(ruta, h):
     v = np.clip(np.round((h + 50.0) * 200.0), 0, 65535).astype("<u2")
     with open(ruta, "wb") as f:
@@ -290,6 +358,9 @@ def main():
     xs_o = np.arange(-OUTER, MAP_SIZE + OUTER + OUTER_STEP / 2, OUTER_STEP)
     h_o = muestrear(alto, ox, oy, xs_o, xs_o)
     print(f"  mapa {h.shape} min {h.min():.1f} máx {h.max():.1f}", flush=True)
+    h = limpiar_agua(h, STEP)
+    h = suavizar_tierra(h)
+    h_o = limpiar_agua(h_o, OUTER_STEP)
 
     print("Calculando arroyos…", flush=True)
     lineas, acc = arroyos(h, STEP)
@@ -333,7 +404,8 @@ def main():
     for p in polis:
         d.line([(x / STEP, z / STEP) for x, z in p], fill=(40, 90, 200), width=2)
     d.ellipse([sitio[1] / STEP - 5, sitio[2] / STEP - 5, sitio[1] / STEP + 5, sitio[2] / STEP + 5], outline=(200, 0, 0), width=2)
-    img.save(os.path.join(args.salida, "vista_previa.png"))
+    previa = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "capturas", "mapa-real-relieve.jpg")
+    img.convert("RGB").save(previa, quality=85)
     print(json.dumps(meta, ensure_ascii=False, indent=2))
 
 

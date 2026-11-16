@@ -18,12 +18,17 @@ func setup(g: TerrainGen, blocked: Callable) -> void:
 	is_blocked = blocked
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
+	# Monte nativo a lo largo de los arroyos: cada ~20 m de cauce, unos árboles a los costados.
 	for path in gen.arroyos:
 		var pts: PackedVector2Array = path
 		for i in range(0, pts.size() - 1):
-			for k in 3:
-				var p := pts[i] + Vector2(rng.randf_range(-1, 1), rng.randf_range(-1, 1)).normalized() * rng.randf_range(14.0, 95.0)
-				_try_add(p, rng.randf_range(0.6, 1.0), false, rng)
+			var seg := pts[i].distance_to(pts[i + 1])
+			var n := maxi(1, int(seg / 20.0))
+			for j in n:
+				var base := pts[i].lerp(pts[i + 1], (j + rng.randf()) / n)
+				for k in 3:
+					var p := base + Vector2(rng.randf_range(-1, 1), rng.randf_range(-1, 1)).normalized() * rng.randf_range(14.0, 80.0)
+					_try_add(p, rng.randf_range(0.6, 1.0), false, rng)
 	for k in 4500:
 		var p := Vector2(rng.randf_range(0, TerrainGen.MAP_SIZE), rng.randf_range(0, TerrainGen.MAP_SIZE))
 		_try_add(p, rng.randf_range(0.9, 1.4), true, rng)
@@ -33,7 +38,7 @@ func setup(g: TerrainGen, blocked: Callable) -> void:
 
 func _try_add(p: Vector2, s: float, ombu: bool, rng: RandomNumberGenerator) -> void:
 	var h := gen.height(p.x, p.y)
-	if h < 1.0:
+	if h < 1.0 or gen.arroyo_distance(p.x, p.y) < 12.0:
 		return
 	var col := Color(0.24, 0.34, 0.16).lerp(Color(0.34, 0.42, 0.20), rng.randf())
 	if ombu:

@@ -9,6 +9,16 @@ impl UiPainter {
         UiPainter { renderer: egui_wgpu::Renderer::new(device, format, None, 1, false) }
     }
 
+    /// Sube a la GPU los cambios de texturas (fuente) de una pasada que no se va a pintar.
+    pub fn update_textures(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta: &egui::TexturesDelta) {
+        for (id, d) in &delta.set {
+            self.renderer.update_texture(device, queue, *id, d);
+        }
+        for id in &delta.free {
+            self.renderer.free_texture(id);
+        }
+    }
+
     /// Pinta la salida de egui en `view` (cargando lo que ya hay: la escena).
     #[allow(clippy::too_many_arguments)]
     pub fn paint(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, size: (u32, u32), ctx: &egui::Context, out: egui::FullOutput) {

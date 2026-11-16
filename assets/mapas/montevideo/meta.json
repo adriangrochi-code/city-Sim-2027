@@ -20,13 +20,13 @@
   },
   "codificacion": "uint16 little-endian; metros = valor / 200 - 50; filas de norte a sur",
   "fundacion": {
-    "x": 11057.7,
-    "z": 14108.9,
-    "desnivel_m": 3.24
+    "x": 11297.7,
+    "z": 14348.9,
+    "desnivel_m": 1.75
   },
   "cerro": {
     "x": 5923.7,
     "z": 12269.8,
-    "altura_m": 133.7
+    "altura_m": 127.2
   }
 }

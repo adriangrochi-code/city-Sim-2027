@@ -24,6 +24,7 @@ func setup(g: TerrainGen, p: Parcels) -> void:
 	material.set_shader_parameter("map_size", TerrainGen.MAP_SIZE)
 	material.set_shader_parameter("tile_size", TerrainGen.TILE_SIZE)
 	_add_water()
+	_add_streams()
 	refresh()
 
 
@@ -122,6 +123,59 @@ func _build_chunk(t: Vector2i, step: float) -> MeshInstance3D:
 	mi.material_override = material
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if step <= 40.0 else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
+
+
+## Agua de los arroyos del mapa real: una cinta que sigue el cauce a la altura del terreno.
+func _add_streams() -> void:
+	if not gen.real or gen.arroyos.is_empty():
+		return
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for path in gen.arroyos:
+		var src: PackedVector2Array = path
+		var pts := PackedVector2Array()
+		for i in src.size() - 1:
+			var n := maxi(1, int(src[i].distance_to(src[i + 1]) / 10.0))
+			for k in n:
+				pts.append(src[i].lerp(src[i + 1], float(k) / n))
+		pts.append(src[src.size() - 1])
+		if pts.size() < 2:
+			continue
+		# El ancho crece aguas abajo (el arroyo suma caudal).
+		var total := float(pts.size())
+		var prev_l := Vector3.ZERO
+		var prev_r := Vector3.ZERO
+		for i in pts.size():
+			var tan: Vector2
+			if i == 0:
+				tan = pts[1] - pts[0]
+			elif i == pts.size() - 1:
+				tan = pts[i] - pts[i - 1]
+			else:
+				tan = pts[i + 1] - pts[i - 1]
+			tan = tan.normalized()
+			var w := lerpf(5.0, 13.0, float(i) / total)
+			var nrm := Vector2(-tan.y, tan.x) * w
+			var y := maxf(gen.arroyo_water_height(pts[i].x, pts[i].y), 0.05)
+			var l := Vector3(pts[i].x + nrm.x, y, pts[i].y + nrm.y)
+			var r := Vector3(pts[i].x - nrm.x, y, pts[i].y - nrm.y)
+			if i > 0:
+				for v in [prev_r, r, prev_l, r, l, prev_l]:
+					st.set_normal(Vector3.UP)
+					st.add_vertex(v)
+			prev_l = l
+			prev_r = r
+	var mat := ShaderMaterial.new()
+	mat.shader = WATER_SHADER
+	mat.set_shader_parameter("water_color", Color(0.29, 0.27, 0.17))
+	mat.set_shader_parameter("far_color", Color(0.29, 0.27, 0.17))
+	mat.set_shader_parameter("specular_amount", 0.3)
+	mat.set_shader_parameter("view_bias", 0.004)
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
 
 
 func _add_water() -> void:

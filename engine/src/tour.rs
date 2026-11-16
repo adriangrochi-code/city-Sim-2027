@@ -3,6 +3,7 @@
 //! Funciona igual con ventana o sin pantalla.
 
 use crate::render::Renderer;
+use crate::ui::{self, paint::UiPainter, GameUi};
 use crate::session::{memory_mb, Session};
 use glam::Vec2;
 use std::time::{Duration, Instant};
@@ -24,6 +25,17 @@ pub enum Act {
     Travel(f32, f32, u32),
     /// Una acción del modo juego (fundar, trazar, zonificar, crecer); devuelve lo que pasó.
     Game(&'static str, fn(&mut Session) -> String),
+    /// Captura con la interfaz del juego encima, después de prepararla (herramienta, ficha,
+    /// avisos, panel) con la función dada.
+    UiShot(&'static str, fn(&mut Session, &mut GameUi)),
+}
+
+/// Interfaz para las capturas sin pantalla: contexto de egui, pintor y estado del juego.
+struct TourUi {
+    ctx: egui::Context,
+    painter: UiPainter,
+    game_ui: GameUi,
+    ms: Vec<f64>,
 }
 
 /// Recorrido del modo juego: funda la plaza, traza un damero y una calle curva, zonifica,
@@ -59,7 +71,68 @@ pub fn city_steps() -> Vec<Act> {
         Hour(20.5),
         WaitIdle("noche"),
         Shot("motor-ciudad-noche"),
+        Hour(10.5),
+        Cam([c.x + 40.0, c.y + 30.0, 330.0, 205.0, 40.0]),
+        WaitIdle("vista para la interfaz"),
+        UiShot("motor-ui-barra", ui_toolbar),
+        UiShot("motor-ui-cajon-servicios", ui_services),
+        UiShot("motor-ui-ficha", ui_inspect),
+        UiShot("motor-ui-gaceta", ui_gazette),
+        UiShot("motor-ui-panel", ui_panel),
     ]
+}
+
+/// Barra de categorías con el cajón de calles abierto (calle recta elegida).
+fn ui_toolbar(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(1);
+    u.open = Some(ui::Category::Calles);
+    g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
+    u.sync_news(g);
+    u.time += 30.0; // sin avisos en esta captura
+}
+
+/// Cajón de servicios: tarjetas de lo que llega más adelante, desactivadas con el motivo.
+fn ui_services(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(4);
+    g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
+    u.open = Some(ui::Category::Servicios);
+}
+
+/// Ficha de un solar que todavía puede crecer (el de nivel más bajo cerca de la plaza).
+fn ui_inspect(s: &mut Session, u: &mut GameUi) {
+    u.open = None;
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    let c = crate::city::game_demo::PLAZA;
+    let lot = g.city.lots.lots.values().filter(|l| l.level == 1).min_by_key(|l| l.c.distance(c + Vec2::new(-40.0, -120.0)) as i32).map(|l| l.c);
+    g.inspected = lot;
+    g.hover = lot;
+}
+
+/// Un aviso de la gaceta y una calle recta empezada que no se puede trazar (cruza el río).
+fn ui_gazette(s: &mut Session, u: &mut GameUi) {
+    let terrain = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    g.inspected = None;
+    g.set_tool(1);
+    let c = crate::city::game_demo::PLAZA;
+    let _ = g.press(&terrain, c + Vec2::new(0.0, 160.0));
+    g.hover = Some(Vec2::new(c.x, 19000.0));
+    g.say("Llegaron 40 pobladores en la fragata «Santa Rosa»; piden solares cerca del puerto.");
+    u.sync_news(g);
+}
+
+/// El panel genérico de decisiones con el ejemplo de ordenanzas.
+fn ui_panel(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.cancel();
+    g.set_tool(7);
+    g.hover = None;
+    u.time += 30.0;
+    u.list.open = true;
+    u.open = Some(ui::Category::Ordenanzas);
 }
 
 pub struct Tour {
@@ -71,6 +144,7 @@ pub struct Tour {
     step_start: Instant,
     travel: Option<(Vec2, Vec2, u32, u32)>,
     pub report: Vec<String>,
+    ui: Option<TourUi>,
 }
 
 pub fn default_steps() -> Vec<Act> {
@@ -124,7 +198,7 @@ pub fn default_steps() -> Vec<Act> {
 impl Tour {
     pub fn with_steps(dir: &str, width: u32, height: u32, steps: Vec<Act>) -> Tour {
         let _ = std::fs::create_dir_all(dir);
-        Tour { steps, i: 0, dir: dir.to_string(), width, height, step_start: Instant::now(), travel: None, report: Vec::new() }
+        Tour { steps, i: 0, dir: dir.to_string(), width, height, step_start: Instant::now(), travel: None, report: Vec::new(), ui: None }
     }
 
     pub fn done(&self) -> bool {
@@ -195,6 +269,58 @@ impl Tour {
                     let t0 = Instant::now();
                     match r.capture(&s.cam, s.hour, self.width, self.height, &path) {
                         Ok(()) => println!("Captura {path} ({:.2?})", t0.elapsed()),
+                        Err(e) => eprintln!("Error en la captura {path}: {e}"),
+                    }
+                    self.next();
+                }
+                Act::UiShot(name, setup) => {
+                    let u = self.ui.get_or_insert_with(|| {
+                        let ctx = egui::Context::default();
+                        ui::theme::install(&ctx);
+                        TourUi { ctx, painter: UiPainter::new(r.device(), r.format()), game_ui: GameUi::default(), ms: Vec::new() }
+                    });
+                    setup(s, &mut u.game_ui);
+                    r.set_overlay(&s.overlay());
+                    let ppp = ui::zoom_for(self.height, 1.0);
+                    let (w, h) = (self.width, self.height);
+                    let terrain = s.terrain.clone();
+                    let hour = s.hour;
+                    let g = s.game.as_ref().unwrap();
+                    // Varias pasadas: egui mide las áreas en la primera y las muestra en la siguiente.
+                    // Las texturas (la fuente) de las pasadas descartadas se suben en orden.
+                    let mut full = None;
+                    let t0 = Instant::now();
+                    for k in 0..3 {
+                        u.game_ui.time += 0.05;
+                        let mut out = u.ctx.run(ui::headless_input(w, h, ppp, u.game_ui.time), |ctx| {
+                            let _ = u.game_ui.draw(ctx, g, &terrain, hour, "");
+                        });
+                        if k == 2 {
+                            full = Some(out);
+                        } else {
+                            u.painter.update_textures(r.device(), r.queue(), &std::mem::take(&mut out.textures_delta));
+                        }
+                    }
+                    let full = full.unwrap();
+                    let ms_run = t0.elapsed().as_secs_f64() * 1000.0 / 3.0;
+                    let path = format!("{}/{}.png", self.dir, name);
+                    let (ctx, painter) = (&u.ctx, &mut u.painter);
+                    let mut paint_ms = 0.0;
+                    let mut out = Some(full);
+                    let mut hook = |d: &wgpu::Device, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, size: (u32, u32)| {
+                        if let Some(f) = out.take() {
+                            let t = Instant::now();
+                            painter.paint(d, q, enc, view, size, ctx, f);
+                            paint_ms = t.elapsed().as_secs_f64() * 1000.0;
+                        }
+                    };
+                    match r.capture_with(&s.cam, s.hour, w, h, &path, Some(&mut hook)) {
+                        Ok(()) => {
+                            u.ms.push(ms_run + paint_ms);
+                            let line = format!("Captura con interfaz {path}: interfaz {:.2} ms de CPU (egui {ms_run:.2} + pintar {paint_ms:.2})", ms_run + paint_ms);
+                            println!("{line}");
+                            self.report.push(line);
+                        }
                         Err(e) => eprintln!("Error en la captura {path}: {e}"),
                     }
                     self.next();

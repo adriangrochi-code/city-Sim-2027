@@ -16,7 +16,7 @@ const MAP_DIR := "res://assets/mapas/montevideo/"
 
 ## Mapa real: centro sugerido para la plaza mayor (Ciudad Vieja, junto a la Plaza Matriz) y
 ## cumbre del Cerro. Los mismos valores están en assets/mapas/montevideo/meta.json.
-const FOUNDING_SITE := Vector2(11057.7, 14108.9)
+const FOUNDING_SITE := Vector2(11297.7, 14348.9)
 const CERRO := Vector2(5923.7, 12269.8)
 
 ## Mapa ficticio del primer prototipo.
@@ -142,7 +142,7 @@ func raw_height(x: float, z: float) -> float:
 func arroyo_water_height(x: float, z: float) -> float:
 	if not real:
 		return 0.0
-	return raw_height(x, z) - CAUCE_PROFUNDIDAD * 0.55
+	return raw_height(x, z) - 0.2
 
 
 # --- Consultas comunes ---------------------------------------------------------------------

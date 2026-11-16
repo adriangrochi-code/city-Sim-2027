@@ -34,7 +34,7 @@ void fragment() {
 	vec3 mud = vec3(0.36, 0.31, 0.23);
 	float slope = 1.0 - normalize(wnorm).y;
 
-	vec3 col = mix(sand, grass, smoothstep(0.7, 2.4, wpos.y + n * 0.8));
+	vec3 col = mix(sand, grass, smoothstep(0.5, 1.4, wpos.y + n * 0.5));
 	col = mix(col, rock, smoothstep(0.22, 0.42, slope + n * 0.08));
 	col = mix(mud, col, smoothstep(-0.8, 0.3, wpos.y));
 

@@ -2,6 +2,8 @@ extends RefCounted
 ## Parcelas del mapa: cuadrícula de 8 × 8 parcelas de 3 × 3 km.
 ## Se empieza con una y las demás se desbloquean con la población y se compran.
 
+const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
+
 signal changed
 
 const TILES := 8
@@ -9,7 +11,8 @@ const TILE_SIZE := 3000.0
 const BASE_PRICE := 6000
 
 var owned := {}
-var start_tile := Vector2i(4, 5)
+## La parcela inicial es la que contiene el sitio de fundación (la Ciudad Vieja en el mapa real).
+var start_tile := Vector2i(TerrainGen.founding_site_default() / TILE_SIZE)
 var max_owned := 1
 
 

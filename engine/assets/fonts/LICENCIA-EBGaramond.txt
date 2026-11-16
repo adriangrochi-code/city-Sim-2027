@@ -528,3 +528,10 @@ License: GPL-2+
 
  On Debian systems, the complete text of the GNU General
  Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
+
+-----------------------------------------------------------------------
+Nota de modificación (city-Sim-2027): en esta copia la tabla de caracteres
+(cmap) apunta las cifras 0-9 a sus variantes de altura de mayúscula
+(glifos *.lnum, ya incluidos en la fuente) para que el 0 no se confunda
+con la o en la interfaz. No se cambió ningún dibujo. La fuente sigue bajo
+la SIL Open Font License 1.1.

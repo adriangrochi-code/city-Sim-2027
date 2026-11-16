@@ -15,7 +15,7 @@ pub const BAD: Color32 = Color32::from_rgb(150, 40, 25);
 pub const GOOD: Color32 = Color32::from_rgb(55, 100, 40);
 
 /// Tamaño base de letra (Garamond tiene la x baja: se usa un poco más grande).
-pub const BODY: f32 = 19.0;
+pub const BODY: f32 = 18.0;
 
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -41,32 +41,32 @@ pub fn install(ctx: &egui::Context) {
     v.override_text_color = Some(INK);
     v.panel_fill = PAPER;
     v.window_fill = PAPER;
-    v.window_stroke = Stroke::new(2.0, BORDER);
+    v.window_stroke = Stroke::new(2.0_f32, BORDER);
     v.window_rounding = Rounding::same(4.0);
     v.window_shadow = egui::epaint::Shadow { offset: egui::vec2(2.0, 3.0), blur: 8.0, spread: 0.0, color: Color32::from_black_alpha(60) };
     v.popup_shadow = v.window_shadow;
     v.extreme_bg_color = PAPER_LIGHT;
     v.faint_bg_color = PAPER_LIGHT;
     v.selection.bg_fill = PRESSED;
-    v.selection.stroke = Stroke::new(1.0, PRESSED_TEXT);
+    v.selection.stroke = Stroke::new(1.0_f32, PRESSED_TEXT);
     let w = &mut v.widgets;
     for (st, bg) in [(&mut w.inactive, PAPER_DARK), (&mut w.hovered, PAPER_LIGHT), (&mut w.active, PRESSED), (&mut w.open, PAPER_DARK)] {
         st.bg_fill = bg;
         st.weak_bg_fill = bg;
-        st.bg_stroke = Stroke::new(1.0, BORDER);
-        st.fg_stroke = Stroke::new(1.5, INK);
+        st.bg_stroke = Stroke::new(1.0_f32, BORDER);
+        st.fg_stroke = Stroke::new(1.5_f32, INK);
         st.rounding = Rounding::same(3.0);
     }
     w.noninteractive.bg_fill = PAPER;
     w.noninteractive.weak_bg_fill = PAPER;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, INK);
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, BORDER);
+    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, INK);
     ctx.set_style(style);
 }
 
 /// Marco de papel para los paneles flotantes.
 pub fn paper_frame() -> egui::Frame {
-    egui::Frame::none().fill(PAPER).stroke(Stroke::new(2.0, BORDER)).rounding(4.0).inner_margin(egui::Margin::symmetric(12.0, 8.0)).shadow(egui::epaint::Shadow {
+    egui::Frame::none().fill(PAPER).stroke(Stroke::new(2.0_f32, BORDER)).rounding(4.0).inner_margin(egui::Margin::symmetric(12.0, 8.0)).shadow(egui::epaint::Shadow {
         offset: egui::vec2(2.0, 3.0),
         blur: 8.0,
         spread: 0.0,

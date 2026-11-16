@@ -4,6 +4,10 @@ render_mode blend_mix, depth_draw_opaque, cull_disabled, diffuse_burley, specula
 // El Río de la Plata: agua color "león", marrón dorado, con oleaje suave.
 uniform vec3 water_color : source_color = vec3(0.40, 0.31, 0.20);
 uniform vec3 far_color : source_color = vec3(0.36, 0.30, 0.22);
+uniform float specular_amount = 0.55;
+// Arroyos: acerca el agua a la cámara (sin moverla en pantalla) para que el terreno lejano,
+// más grueso que el cauce, no la tape. 0 para el río.
+uniform float view_bias = 0.0;
 
 
 varying vec3 wpos;
@@ -18,6 +22,12 @@ float vnoise(vec2 p) {
 
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	if (view_bias > 0.0) {
+		vec3 to_cam = CAMERA_POSITION_WORLD - wpos;
+		float d = length(to_cam);
+		vec3 moved = wpos + to_cam / max(d, 0.001) * min(d * view_bias, d * 0.5);
+		VERTEX = (inverse(MODEL_MATRIX) * vec4(moved, 1.0)).xyz;
+	}
 }
 
 void fragment() {
@@ -35,6 +45,6 @@ void fragment() {
 	float far = clamp(length(wpos.xz - vec2(12000.0, 12000.0)) / 30000.0, 0.0, 1.0);
 	ALBEDO = mix(water_color, far_color, far) * (0.92 + 0.08 * h2);
 	ROUGHNESS = 0.12;
-	SPECULAR = 0.55;
+	SPECULAR = specular_amount;
 	ALPHA = 0.9;
 }

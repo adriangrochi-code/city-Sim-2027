@@ -61,6 +61,16 @@ pub struct Inspect {
     pub lines: Vec<String>,
     /// "¿Por qué no crece?" (vacío si no aplica).
     pub why: Vec<String>,
+    pub kind: InspectKind,
+}
+
+/// Qué se está inspeccionando (decide los botones de acción de la ficha).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InspectKind {
+    Lot,
+    Road,
+    #[default]
+    Terrain,
 }
 
 /// Nombre de la etapa de la ciudad según su población (como en el prototipo).
@@ -239,26 +249,6 @@ impl Game {
         (n > 0 && !e.voxels.is_empty()).then_some(e)
     }
 
-    pub fn describe(&self, p: Vec2) -> String {
-        if let Some(id) = self.city.lots.lot_at(p) {
-            let l = &self.city.lots.lots[&id];
-            let calle = self.city.lots.frontage(l, &self.city.net).map_or("—", |k| k.name());
-            return format!(
-                "Solar: {} · zona {} · {} habitantes · valor del suelo {} % · calle: {}",
-                LEVEL_NAMES[l.level as usize],
-                if l.zone > 0 { "mixta" } else { "sin zonificar" },
-                CAP[l.level as usize],
-                (self.city.lots.land_value(l) * 100.0) as i32,
-                calle
-            );
-        }
-        if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
-            let ed = &self.city.net.edges[&e.edge];
-            return format!("{} · tramo de {} m", ed.kind.name(), ed.len() as i32);
-        }
-        format!("Terreno en ({:.0}, {:.0})", p.x, p.y)
-    }
-
     /// Ficha del punto inspeccionado: solar (nivel, habitantes, valor del suelo y por qué no
     /// crece), calle (tipo y largo) o terreno.
     pub fn inspect_info(&self) -> Option<Inspect> {
@@ -267,7 +257,7 @@ impl Game {
             let l = &self.city.lots.lots[&id];
             let front = self.city.lots.frontage(l, &self.city.net);
             let value = self.city.lots.land_value(l);
-            let mut i = Inspect { title: capitalize(LEVEL_NAMES[l.level as usize]), ..Default::default() };
+            let mut i = Inspect { title: capitalize(LEVEL_NAMES[l.level as usize]), kind: InspectKind::Lot, ..Default::default() };
             i.lines.push(format!("Zona: {}", if l.zone > 0 { "mixta (vivienda, tienda y taller)" } else { "sin zonificar" }));
             i.lines.push(format!("Habitantes: {}", CAP[l.level as usize]));
             i.lines.push(format!("Valor del suelo: {} %", (value * 100.0) as i32));
@@ -314,9 +304,9 @@ impl Game {
         }
         if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
             let ed = &self.city.net.edges[&e.edge];
-            return Some(Inspect { title: ed.kind.name().into(), lines: vec![format!("Largo del tramo: {} m", ed.len() as i32)], why: vec![] });
+            return Some(Inspect { title: ed.kind.name().into(), lines: vec![format!("Largo del tramo: {} m", ed.len() as i32)], why: vec![], kind: InspectKind::Road });
         }
-        Some(Inspect { title: "Terreno".into(), lines: vec![format!("Posición: {:.0}, {:.0}", p.x, p.y)], why: vec![] })
+        Some(Inspect { title: "Terreno".into(), lines: vec![format!("Posición: {:.0}, {:.0}", p.x, p.y)], why: vec![], kind: InspectKind::Terrain })
     }
 
     /// Pista de la herramienta para la interfaz: (ayuda con el costo en vivo, motivo de error).
@@ -335,7 +325,7 @@ impl Game {
         let Some(h) = self.hover else { return (help, None) };
         let road = |pts: &[Vec2]| -> (i64, Option<String>) {
             let cost = City::road_cost(pts, self.kind);
-            let err = self.city.road_problem(t, pts, self.kind).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {cost} pesos")));
+            let err = self.city.road_problem(t, pts, self.kind).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {} pesos", fmt_thousands(cost))));
             (cost, err)
         };
         let (cost, err) = match self.tool {
@@ -351,7 +341,7 @@ impl Game {
             Tool::Grid if self.stage == 2 => {
                 let lines = grid_lines(self.p0, self.p1, h);
                 let cost: i64 = lines.iter().map(|l| City::road_cost(l, self.kind)).sum();
-                let err = lines.iter().find_map(|l| self.city.road_problem(t, l, self.kind)).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {cost} pesos")));
+                let err = lines.iter().find_map(|l| self.city.road_problem(t, l, self.kind)).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {} pesos", fmt_thousands(cost))));
                 (Some(cost), err)
             }
             Tool::Zone | Tool::Dezone => {
@@ -361,7 +351,7 @@ impl Game {
             _ => (None, None),
         };
         if let Some(c) = cost {
-            help = format!("{help}\n{} · costo: {c} pesos", self.kind.name());
+            help = format!("{help}\n{} · costo: {} pesos", self.kind.name(), fmt_thousands(c));
         }
         (help, err)
     }
@@ -407,6 +397,16 @@ impl Game {
             }
             let col = if l.zone > 0 { [0.42, 0.85, 0.36, 0.45] } else if show_free { [1.0, 0.97, 0.85, 0.18] } else { continue };
             quad(&mut out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
+        }
+        // Lo inspeccionado queda marcado mientras la ficha está abierta.
+        if let Some(p) = self.inspected {
+            if let Some(id) = self.city.lots.lot_at(p) {
+                let l = &self.city.lots.lots[&id];
+                outline(&mut out, t, &corners_of(l.c, l.f, W, D), 1.6, [1.0, 0.85, 0.3, 0.95]);
+            } else if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
+                let ed = &self.city.net.edges[&e.edge];
+                ribbon(&mut out, t, &ed.pts, ed.kind.width() + 1.0, [1.0, 0.85, 0.3, 0.7]);
+            }
         }
         let Some(h) = self.hover else { return out };
         match self.tool {
@@ -547,6 +547,23 @@ mod tests {
     }
 }
 
+
+/// Número con puntos de miles, a la uruguaya: 12.500.
+pub fn fmt_thousands(n: i64) -> String {
+    let s = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push('.');
+        }
+        out.push(c);
+    }
+    if n < 0 {
+        format!("-{out}")
+    } else {
+        out
+    }
+}
 
 fn capitalize(s: &str) -> String {
     let mut c = s.chars();
