@@ -12,6 +12,14 @@ Estética rioplatense a lo largo de las épocas. Ciudades del tamaño de Montevi
 
 Motor previsto: Godot 4.
 
+## Versión de prueba (Linux y Windows)
+
+`tools/empaquetar.sh` arma en `dist/` dos paquetes listos para probar, cada uno con el
+prototipo jugable y el motor de vóxeles, lanzadores e instrucciones (`LEEME.txt`):
+
+- `city-sim-2027-linux-x86_64.tar.xz` → `jugar.sh` y `motor-voxel.sh`
+- `city-sim-2027-windows-x86_64.zip` → `jugar.bat`, `jugar-demo.bat`, `motor-voxel.bat`, `medir-fps.bat`
+
 ## Prototipo 1: época colonial
 
 ![Plaza mayor e iglesia matriz](docs/capturas/prototipo1-close.jpg)

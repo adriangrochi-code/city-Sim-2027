@@ -1,0 +1,41 @@
+CITY SIM 2027 (nombre provisional) · Primera versión de prueba (Linux y Windows, x86_64)
+===============================================================================
+
+Contiene dos programas:
+
+1) PROTOTIPO JUGABLE (época colonial)  ->  ./jugar.sh  (Windows: jugar.bat)
+   Fundar la ciudad, calles rectas/curvas/damero, zonas, agua, incendios,
+   puerto, muralla con aduana, serenos, campo, iglesia matriz por fases,
+   ampliar edificios y la decisión del "nuevo orden".
+   Para empezar con una ciudad ya armada:  ./jugar.sh -- --demo --months=60
+                                  (Windows: jugar-demo.bat)
+   Si no arranca (equipo sin Vulkan):    ./jugar.sh --rendering-method gl_compatibility
+                                  (Windows: jugar-compatible.bat)
+
+   Controles: WASD mover · Q/E girar · rueda zoom · botón central orbitar ·
+   botón derecho arrastrar · 1-9, 0, P, C, M herramientas · Tab tipo ·
+   R girar · G iglesia · O objetivos · F seguir vecino · Espacio pausa ·
+   F5 guardar · F9 cargar · Esc cancelar
+
+2) MOTOR DE VÓXELES (sandbox)  ->  ./motor-voxel.sh  (Windows: motor-voxel.bat)
+   Ciudad colonial en vóxeles, mundo que se genera al moverte, colocar
+   estructuras, excavar y rellenar.
+   Controles: WASD/flechas mover · Q/E girar · rueda zoom · botón central
+   orbitar · botón derecho arrastrar · clic izq. colocar · clic der. excavar ·
+   F rellenar · 1-9/Tab estructura · R rotar · [ ] hora · P pausar día · F12 captura
+
+   MEDIR FPS EN TU EQUIPO:  ./motor-voxel.sh --bench salida/
+                            (Windows: medir-fps.bat)
+   y enviar el archivo salida/bench.md.
+
+Requisitos en Linux: x86_64, controlador gráfico con Vulkan (Mesa o el
+del fabricante) y libxkbcommon-x11 (para la ventana del motor).
+En Ubuntu/Debian:  sudo apt install mesa-vulkan-drivers libxkbcommon-x11-0
+
+Requisitos en Windows: Windows 10 u 11 de 64 bits con los controladores
+de la placa de video al día (el motor usa DirectX 12 o Vulkan). Windows
+puede avisar que el programa no está firmado: elegir "Más información"
+y "Ejecutar de todas formas".
+
+Es una versión de prueba: puede tener errores. Cualquier problema, anotar
+qué se hizo y qué pasó (y si es posible, una captura).
