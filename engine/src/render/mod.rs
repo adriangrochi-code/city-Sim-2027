@@ -77,13 +77,19 @@ struct CullParams {
     _pad: u32,
 }
 
+/// Argumentos de dibujo indexado indirecto (20 bytes, como `VkDrawIndexedIndirectCommand`).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct DrawArgs {
-    vertex_count: u32,
+    index_count: u32,
     instance_count: u32,
-    first_vertex: u32,
+    first_index: u32,
+    base_vertex: i32,
     first_instance: u32,
+}
+
+fn draw_args(first: u32, count: u32) -> DrawArgs {
+    DrawArgs { index_count: 6, instance_count: count, first_index: 0, base_vertex: 0, first_instance: first }
 }
 
 #[repr(C)]
@@ -147,6 +153,11 @@ fn visible_dirs(eye: Vec3, lo: Vec3, hi: Vec3) -> [bool; 6] {
     [eye.y > lo.y, eye.x > lo.x, eye.x < hi.x, eye.z > lo.z, eye.z < hi.z, eye.y < hi.y]
 }
 
+/// Grupos de caras que miran al sol (`sun` apunta hacia el sol), orden de [`crate::mesher::DIRS`].
+fn sun_dirs(sun: Vec3) -> [bool; 6] {
+    [sun.y > 0.0, sun.x > 0.0, sun.x < 0.0, sun.z > 0.0, sun.z < 0.0, sun.y < 0.0]
+}
+
 /// Medición de un cuadro para el banco de pruebas.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct FrameStats {
@@ -186,6 +197,8 @@ pub struct Renderer {
     shadow_vox_bg: wgpu::BindGroup,
     /// Megabúfer con las caras de todas las columnas y su asignador por bloques.
     quads: wgpu::Buffer,
+    /// Índices compartidos de una cara (0, 1, 2, 0, 2, 3).
+    quad_index: wgpu::Buffer,
     alloc: Buddy,
     frame: u64,
     /// Tabla de columnas para el descarte en GPU y sus argumentos de dibujo.
@@ -203,12 +216,18 @@ pub struct Renderer {
     timestamps: Option<(wgpu::QuerySet, wgpu::Buffer, wgpu::Buffer, f32)>,
     /// Bytes de caras subidos (acumulado; el título y el banco de pruebas muestran la diferencia).
     pub uploaded_bytes: u64,
+    /// Sube con cada cambio de geometría o de resaltado (parte de la clave del cuadro).
+    pub scene_version: u64,
+    overlay_key: u64,
     /// Llamadas de dibujo del último cuadro de la ventana (principal, sombras).
     pub last_draws: (u32, u32),
+    /// Bytes de caras subidos en el último cuadro de la ventana.
+    pub upload_frame: u64,
+    upload_mark: u64,
     free_slots: Vec<u32>,
     next_slot: u32,
     batches: Vec<Batch>,
-    columns: HashMap<(u32, IVec2), Batch>,
+    columns: HashMap<(u32, IVec2), Batch, crate::fxhash::FxBuild>,
     overlay: wgpu::Buffer,
     overlay_count: u32,
     targets: Option<Targets>,
@@ -231,6 +250,7 @@ pub struct Renderer {
 /// Matrices del cuadro, para descartar lo que no se ve.
 struct View {
     eye: Vec3,
+    sun: Vec3,
     view_proj: Mat4,
     light_vp: Mat4,
 }
@@ -562,10 +582,11 @@ impl Renderer {
         }
         let water = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("agua"), contents: bytemuck::cast_slice(&wv), usage: wgpu::BufferUsages::VERTEX });
         let alloc = Buddy::new(INITIAL_ORDER);
+        let quad_index = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("índices de cara"), contents: bytemuck::cast_slice(&[0u16, 1, 2, 0, 2, 3, 0, 0]), usage: wgpu::BufferUsages::INDEX });
         let quads = make_quad_buffer(&device, alloc.capacity());
         let buf = |label: &str, size: u64, usage| device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
         let cols = buf("columnas", ORIGIN_SLOTS as u64 * 64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
-        let args_size = ORIGIN_SLOTS as u64 * 6 * 16;
+        let args_size = ORIGIN_SLOTS as u64 * 6 * std::mem::size_of::<DrawArgs>() as u64;
         let args_main = buf("args principal", args_size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT);
         let args_shadow = buf("args sombras", args_size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT);
         let args_cpu = buf("args cpu", args_size * 2, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
@@ -656,6 +677,7 @@ impl Renderer {
             origins,
             shadow_vox_bg,
             quads,
+            quad_index,
             alloc,
             frame: 0,
             cols,
@@ -671,11 +693,15 @@ impl Renderer {
             can_indirect,
             timestamps,
             uploaded_bytes: 0,
+            scene_version: 0,
+            overlay_key: 0,
             last_draws: (0, 0),
+            upload_frame: 0,
+            upload_mark: 0,
             free_slots: Vec::new(),
             next_slot: 0,
             batches: Vec::new(),
-            columns: HashMap::new(),
+            columns: HashMap::default(),
             overlay,
             overlay_count: 0,
             targets: None,
@@ -710,6 +736,7 @@ impl Renderer {
     }
 
     fn free_batch(&mut self, b: Batch) {
+        self.scene_version += 1;
         // La columna deja de dibujarse en la GPU y su bloque se libera con retraso.
         self.queue.write_buffer(&self.cols, b.slot as u64 * 64, bytemuck::bytes_of(&ColGpu::zeroed()));
         self.alloc.free_later(self.frame, b.start / QUAD_UNIT, b.order);
@@ -734,6 +761,7 @@ impl Renderer {
     }
 
     fn make_batch(&mut self, m: &Mesh, lod: u32) -> Option<Batch> {
+        self.scene_version += 1;
         self.shadow_dirty_if(m);
         if m.is_empty() {
             return None;
@@ -896,10 +924,30 @@ impl Renderer {
     /// Cajas de resaltado para el próximo cuadro.
     pub fn set_overlay(&mut self, verts: &[OverlayVertex]) {
         let n = verts.len().min(4096);
-        if n > 0 {
-            self.queue.write_buffer(&self.overlay, 0, bytemuck::cast_slice(&verts[..n]));
+        let bytes: &[u8] = bytemuck::cast_slice(&verts[..n]);
+        let mut h = crate::fxhash::FxHasher::default();
+        std::hash::Hasher::write(&mut h, bytes);
+        let key = std::hash::Hasher::finish(&h);
+        if key != self.overlay_key || n as u32 != self.overlay_count {
+            if n > 0 {
+                self.queue.write_buffer(&self.overlay, 0, bytes);
+            }
+            self.overlay_key = key;
+            self.overlay_count = n as u32;
+            self.scene_version += 1;
         }
-        self.overlay_count = n as u32;
+    }
+
+    /// Clave del cuadro (técnica de Tisma engine, `frame_key()` en apps/tisma/renderer.cpp):
+    /// si no cambiaron la cámara, la hora, el tamaño ni la escena, el cuadro sería idéntico y
+    /// no hace falta dibujarlo.
+    pub fn frame_key(&self, cam: &OrbitCamera, hour: f32, size: (u32, u32)) -> [u64; 4] {
+        let c = [cam.target.x, cam.target.y, cam.target.z, cam.yaw, cam.pitch, cam.distance, cam.fov_y, hour];
+        let mut h = crate::fxhash::FxHasher::default();
+        for v in c {
+            std::hash::Hasher::write_u32(&mut h, v.to_bits());
+        }
+        [std::hash::Hasher::finish(&h), self.scene_version, size.0 as u64, size.1 as u64]
     }
 
     fn write_globals(&self, cam: &OrbitCamera, hour: f32, aspect: f32) -> View {
@@ -931,7 +979,7 @@ impl Renderer {
             extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
-        View { eye: cam.eye(), view_proj, light_vp }
+        View { eye: cam.eye(), sun: l.sun_dir, view_proj, light_vp }
     }
 
     fn make_targets(&self, width: u32, height: u32) -> Targets {
@@ -977,21 +1025,34 @@ impl Renderer {
                 while g < 6 && (vis[g] || b.groups[g] == b.groups[g + 1]) {
                     g += 1;
                 }
-                out.push(DrawArgs { vertex_count: 6, instance_count: b.groups[g] - start, first_vertex: 0, first_instance: b.start + start });
+                out.push(draw_args(b.start + start, b.groups[g] - start));
             }
         }
         out
     }
 
-    /// Tramos del pase de sombras: niveles finos dentro de la caja de luz, todas las caras.
-    fn shadow_ranges(&self, light_vp: Mat4) -> Vec<DrawArgs> {
+    /// Tramos del pase de sombras: niveles finos dentro de la caja de luz, y solo los grupos
+    /// de caras que miran al sol. En volúmenes cerrados de vóxeles la superficie más cercana a
+    /// la luz siempre es una cara que la mira, así que el mapa de profundidad no cambia.
+    fn shadow_ranges(&self, light_vp: Mat4, sun: Vec3) -> Vec<DrawArgs> {
         let lp = frustum_planes(light_vp);
-        self.batches
-            .iter()
-            .chain(self.columns.values())
-            .filter(|b| b.lod <= SHADOW_MAX_LOD && box_visible(&lp, b.lo, b.hi))
-            .map(|b| DrawArgs { vertex_count: 6, instance_count: b.quads, first_vertex: 0, first_instance: b.start })
-            .collect()
+        let vis = sun_dirs(sun);
+        let mut out = Vec::new();
+        for b in self.batches.iter().chain(self.columns.values()).filter(|b| b.lod <= SHADOW_MAX_LOD && box_visible(&lp, b.lo, b.hi)) {
+            let mut g = 0;
+            while g < 6 {
+                if !vis[g] || b.groups[g] == b.groups[g + 1] {
+                    g += 1;
+                    continue;
+                }
+                let start = b.groups[g];
+                while g < 6 && (vis[g] || b.groups[g] == b.groups[g + 1]) {
+                    g += 1;
+                }
+                out.push(draw_args(b.start + start, b.groups[g] - start));
+            }
+        }
+        out
     }
 
     fn cull_params(&self, m: Mat4, eye: Vec3, shadow: bool) -> CullParams {
@@ -1018,7 +1079,8 @@ impl Renderer {
             // Descarte en la GPU: un compute shader llena los argumentos indirectos.
             self.queue.write_buffer(&self.cull_params_main, 0, bytemuck::bytes_of(&self.cull_params(view.view_proj, view.eye, false)));
             if redraw {
-                self.queue.write_buffer(&self.cull_params_shadow, 0, bytemuck::bytes_of(&self.cull_params(view.light_vp, view.eye, true)));
+                // En el pase de sombras "eye" lleva la dirección del sol (w = 0).
+                self.queue.write_buffer(&self.cull_params_shadow, 0, bytemuck::bytes_of(&self.cull_params(view.light_vp, view.sun, true)));
             }
             let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("descarte"), timestamp_writes: None });
             cp.set_pipeline(self.cull_pipe.as_ref().unwrap());
@@ -1031,7 +1093,7 @@ impl Renderer {
         }
         // Rangos de la CPU (modos directo e indirecto). En indirecto se escriben en un solo
         // búfer: primero los de sombra y después los principales.
-        let shadow_cpu = if redraw && !gpu { self.shadow_ranges(view.light_vp) } else { Vec::new() };
+        let shadow_cpu = if redraw && !gpu { self.shadow_ranges(view.light_vp, view.sun) } else { Vec::new() };
         let main_cpu = if !gpu { self.main_ranges(view) } else { Vec::new() };
         let indirect = self.draw_mode == DrawMode::Indirect && self.can_indirect;
         if indirect {
@@ -1060,19 +1122,20 @@ impl Renderer {
             pass.set_pipeline(&self.shadow_pipe);
             pass.set_bind_group(0, &self.shadow_vox_bg, &[]);
             pass.set_vertex_buffer(0, self.quads.slice(..));
+            pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
             if gpu {
                 if slots > 0 {
-                    pass.multi_draw_indirect(&self.args_shadow, 0, slots * 6);
+                    pass.multi_draw_indexed_indirect(&self.args_shadow, 0, slots * 6);
                     ds = 1;
                 }
             } else if indirect {
                 if !shadow_cpu.is_empty() {
-                    pass.multi_draw_indirect(&self.args_cpu, 0, shadow_cpu.len() as u32);
+                    pass.multi_draw_indexed_indirect(&self.args_cpu, 0, shadow_cpu.len() as u32);
                     ds = 1;
                 }
             } else {
                 for a in &shadow_cpu {
-                    pass.draw(0..6, a.first_instance..a.first_instance + a.instance_count);
+                    pass.draw_indexed(0..6, 0, a.first_instance..a.first_instance + a.instance_count);
                     ds += 1;
                 }
             }
@@ -1102,20 +1165,21 @@ impl Renderer {
         pass.set_pipeline(&self.voxel_pipe);
         pass.set_bind_group(0, &self.main_bg, &[]);
         pass.set_vertex_buffer(0, self.quads.slice(..));
+        pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
         if gpu {
             if slots > 0 {
-                pass.multi_draw_indirect(&self.args_main, 0, slots * 6);
+                pass.multi_draw_indexed_indirect(&self.args_main, 0, slots * 6);
                 dm = 1;
             }
         } else if indirect {
             if !main_cpu.is_empty() {
                 let off = (shadow_cpu.len() * std::mem::size_of::<DrawArgs>()) as u64;
-                pass.multi_draw_indirect(&self.args_cpu, off, main_cpu.len() as u32);
+                pass.multi_draw_indexed_indirect(&self.args_cpu, off, main_cpu.len() as u32);
                 dm = 1;
             }
         } else {
             for a in &main_cpu {
-                pass.draw(0..6, a.first_instance..a.first_instance + a.instance_count);
+                pass.draw_indexed(0..6, 0, a.first_instance..a.first_instance + a.instance_count);
                 dm += 1;
             }
         }
@@ -1150,6 +1214,8 @@ impl Renderer {
         let mut enc = self.device.create_command_encoder(&Default::default());
         let draws = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, None);
         self.last_draws = draws;
+        self.upload_frame = self.uploaded_bytes - self.upload_mark;
+        self.upload_mark = self.uploaded_bytes;
         self.queue.submit([enc.finish()]);
         frame.present();
         self.frame += 1;

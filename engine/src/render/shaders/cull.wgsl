@@ -10,9 +10,10 @@ struct Col {
     g: array<u32, 7>, // inicio de cada grupo de caras (relativo a start)
 };
 struct Args {
-    vertex_count: u32,
+    index_count: u32,
     instance_count: u32,
-    first_vertex: u32,
+    first_index: u32,
+    base_vertex: i32,
     first_instance: u32,
 };
 struct Params {
@@ -50,13 +51,17 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         vis = false;
     }
     let e = p.eye.xyz;
-    // Mismo orden que mesher::DIRS: +y, +x, -x, +z, -z, -y.
-    let facing = array<bool, 6>(e.y > c.lo.y, e.x > c.lo.x, e.x < c.hi.x, e.z > c.lo.z, e.z < c.hi.z, e.y < c.hi.y);
+    // Mismo orden que mesher::DIRS: +y, +x, -x, +z, -z, -y. Vista principal: caras que miran a
+    // la cámara; sombras: caras que miran al sol (eye = dirección del sol).
+    var facing = array<bool, 6>(e.y > c.lo.y, e.x > c.lo.x, e.x < c.hi.x, e.z > c.lo.z, e.z < c.hi.z, e.y < c.hi.y);
+    if (p.shadow == 1u) {
+        facing = array<bool, 6>(e.y > 0.0, e.x > 0.0, e.x < 0.0, e.z > 0.0, e.z < 0.0, e.y < 0.0);
+    }
     var g = c.g;
     var f = facing;
     for (var d = 0u; d < 6u; d++) {
         let n = g[d + 1u] - g[d];
-        let show = vis && n > 0u && (p.shadow == 1u || f[d]);
-        args[i * 6u + d] = Args(6u, select(0u, n, show), 0u, c.start + g[d]);
+        let show = vis && n > 0u && f[d];
+        args[i * 6u + d] = Args(6u, select(0u, n, show), 0u, 0i, c.start + g[d]);
     }
 }

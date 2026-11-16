@@ -14,6 +14,7 @@
 mod app;
 mod bench;
 mod buildings;
+mod fxhash;
 mod camera;
 mod lod;
 mod mesher;
@@ -187,6 +188,7 @@ fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
     r.smooth_terrain = args.smooth;
     println!("Adaptador: {} · listo en {:.2?} · {} hilos de trabajo", r.adapter_name, t0.elapsed(), args.threads);
     let mut s = session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour);
+    s.view_h = args.size.1 as f32;
     let mut tour = tour::Tour::new(dir, args.size.0, args.size.1);
     let mut first_logged = false;
     loop {

@@ -43,6 +43,7 @@ pub struct Options {
 }
 
 pub fn run(o: &Options) -> Result<(), String> {
+    let lod_px = std::env::var("MOTOR_LOD_FIJO").is_err();
     std::fs::create_dir_all(&o.dir).map_err(|e| e.to_string())?;
     let terrain = Arc::new(TerrainGen::new(1726));
     let t0 = Instant::now();
@@ -74,7 +75,13 @@ pub fn run(o: &Options) -> Result<(), String> {
         let center = Vec2::new(v.cam[0], v.cam[1]);
         let mut s = Streamer::new(terrain.clone(), store.clone(), o.levels, o.threads);
         let ts = Instant::now();
-        s.update(center);
+        let ground0 = terrain.height(v.cam[0], v.cam[1]).max(0.0);
+        let cam0 = OrbitCamera { target: Vec3::new(v.cam[0], ground0, v.cam[1]), yaw: v.cam[3], pitch: v.cam[4], distance: v.cam[2], fov_y: 50.0 };
+        if lod_px {
+            s.update_view(center, cam0.eye().y - ground0, cam0.fov_y, o.size.1 as f32);
+        } else {
+            s.update(center);
+        }
         let mut upload = Duration::ZERO;
         let up0 = r.uploaded_bytes;
         loop {

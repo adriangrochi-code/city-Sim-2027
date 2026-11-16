@@ -24,29 +24,26 @@ struct Globals {
 struct VIn {
     @location(0) qa: u32,
     @location(1) qb: u32,
-    @location(2) snorm: vec2<u32>,
+    @location(2) suave: vec2<u32>,
     @location(3) slot: u32,
     @builtin(vertex_index) vi: u32,
 };
 @group(0) @binding(3) var<storage, read> origins: array<vec4<f32>>;
 
-const DIRS = array<vec3<f32>, 6>(
-    vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0),
-    vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0),
-);
-// Ejes u y v de cada dirección (u = eje + 1, v = eje + 2, módulo 3).
-const UAX = array<vec3<u32>, 6>(
-    vec3(0u, 0u, 1u), vec3(0u, 1u, 0u), vec3(0u, 1u, 0u),
-    vec3(1u, 0u, 0u), vec3(1u, 0u, 0u), vec3(0u, 0u, 1u),
-);
-const VAX = array<vec3<u32>, 6>(
-    vec3(1u, 0u, 0u), vec3(0u, 0u, 1u), vec3(0u, 0u, 1u),
-    vec3(0u, 1u, 0u), vec3(0u, 1u, 0u), vec3(1u, 0u, 0u),
-);
-const POSITIVE = array<bool, 6>(true, true, false, true, false, false);
-const TRIS = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-const TRIS_FLIP = array<u32, 6>(1u, 2u, 3u, 1u, 3u, 0u);
-const NEG = array<u32, 4>(0u, 3u, 2u, 1u);
+// Dirección de cara (orden de mesher::DIRS: +y, +x, -x, +z, -z, -y) sin tablas: en el render
+// por CPU (llvmpipe) los índices dinámicos sobre arreglos locales cuestan accesos a memoria.
+fn dir_axis(d: u32) -> u32 {
+    // 0 = x, 1 = y, 2 = z
+    return select(select(2u, 0u, d == 1u || d == 2u), 1u, d == 0u || d == 5u);
+}
+fn dir_normal(d: u32) -> vec3<f32> {
+    let s = select(-1.0, 1.0, d == 0u || d == 1u || d == 3u);
+    let ax = dir_axis(d);
+    return vec3(select(0.0, s, ax == 0u), select(0.0, s, ax == 1u), select(0.0, s, ax == 2u));
+}
+fn unit(ax: u32) -> vec3<u32> {
+    return vec3(select(0u, 1u, ax == 0u), select(0u, 1u, ax == 1u), select(0u, 1u, ax == 2u));
+}
 
 struct Corner {
     pos: vec3<f32>,
@@ -64,30 +61,19 @@ fn corner(v: VIn) -> Corner {
     let h = ((v.qb >> 5u) & 31u) + 1u;
     let ao = (v.qb >> 10u) & 255u;
     c.mat = (v.qb >> 18u) & 255u;
-    let a0 = ao & 3u;
-    let a1 = (ao >> 2u) & 3u;
-    let a2 = (ao >> 4u) & 3u;
-    let a3 = (ao >> 6u) & 3u;
-    var tris = TRIS;
-    var flip = TRIS_FLIP;
-    var t = tris[v.vi];
-    if (a0 + a2 < a1 + a3) {
-        t = flip[v.vi];
-    }
-    var pos_tab = POSITIVE;
-    var neg = NEG;
-    if (!pos_tab[c.dir]) {
-        t = neg[t];
-    }
+    // Índices compartidos 0,1,2,0,2,3 sobre 4 vértices por cara (así se reutilizan los
+    // vértices): la diagonal y el sentido se eligen rotando y reflejando las esquinas.
+    let flip = (ao & 3u) + ((ao >> 4u) & 3u) < ((ao >> 2u) & 3u) + ((ao >> 6u) & 3u);
+    var t = (v.vi + select(0u, 1u, flip)) & 3u;
+    let positive = c.dir == 0u || c.dir == 1u || c.dir == 3u;
+    t = select((4u - t) & 3u, t, positive);
     c.k = t;
-    var aos = array<u32, 4>(a0, a1, a2, a3);
-    c.ao = aos[t];
+    c.ao = (ao >> (t * 2u)) & 3u;
     let du = select(0u, w, t == 1u || t == 2u);
     let dv = select(0u, h, t == 2u || t == 3u);
-    var ua = UAX;
-    var va = VAX;
+    let ax = dir_axis(c.dir);
     let o = origins[v.slot];
-    c.pos = o.xyz + vec3<f32>(base + ua[c.dir] * du + va[c.dir] * dv) * o.w;
+    c.pos = o.xyz + vec3<f32>(base + unit((ax + 1u) % 3u) * du + unit((ax + 2u) % 3u) * dv) * o.w;
     return c;
 }
 
@@ -110,11 +96,10 @@ fn vs_main(v: VIn) -> VOut {
     o.clip = g.view_proj * vec4(c.pos, 1.0);
     o.world = c.pos;
     o.color = vec4(palette[c.mat].rgb, f32(c.mat) / 255.0);
-    var dirs = DIRS; // copia local: naga solo permite índices variables sobre variables
-    o.normal = dirs[c.dir];
+    o.normal = dir_normal(c.dir);
     o.ao = f32(c.ao);
     o.voxel = origins[v.slot].w;
-    let sw = (v.snorm[c.k / 2u] >> ((c.k % 2u) * 16u)) & 0xffffu;
+    let sw = (v.suave[c.k / 2u] >> ((c.k % 2u) * 16u)) & 0xffffu;
     let sx = (f32(sw & 255u) - 128.0) / 127.0;
     let sz = (f32(sw >> 8u) - 128.0) / 127.0;
     o.smooth_n = vec3(sx, sqrt(max(1.0 - sx * sx - sz * sz, 0.0)), sz);

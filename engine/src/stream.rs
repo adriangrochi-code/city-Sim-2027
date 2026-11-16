@@ -7,7 +7,7 @@
 //! calcula directamente. Fuera del anillo del nivel se considera aire, igual que antes: así
 //! los bordes entre niveles generan "faldones" que tapan grietas.
 
-use crate::lod::{level_columns, LevelSpec, CHUNK};
+use crate::lod::{choose_first_level, level_columns_from, LevelSpec, CHUNK};
 use crate::mesher::{self, Mesh};
 use crate::palette::*;
 use crate::store::{chunk_of, local_index, EditStore};
@@ -16,7 +16,7 @@ use glam::{IVec2, IVec3, Vec2, Vec3};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtOrd};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread::JoinHandle;
 
@@ -24,6 +24,15 @@ const N: i32 = CHUNK;
 const Q: i32 = N + 2;
 
 pub type Key = (u32, IVec2);
+
+/// Tope de columnas terminadas esperando a ser subidas: los hilos de trabajo se detienen si
+/// el render no alcanza a consumirlas (pipeline con trabajo en vuelo acotado, como el
+/// `tbb::parallel_pipeline` de Tisma engine en src/gcode/writer.cpp). Así la memoria no crece
+/// sin límite cuando se generan columnas más rápido de lo que se suben.
+pub const MAX_READY: usize = 96;
+
+type FxMap<K, V> = HashMap<K, V, crate::fxhash::FxBuild>;
+type FxSet<K> = HashSet<K, crate::fxhash::FxBuild>;
 
 /// Contadores de tiempo de CPU (ns) para el banco de pruebas: generación del terreno y
 /// armado de las copias con borde, y mallado.
@@ -88,12 +97,14 @@ pub struct Streamer {
     pub specs: Vec<LevelSpec>,
     sets: Vec<Arc<HashSet<IVec2>>>,
     regions: Vec<(IVec2, IVec2)>,
-    versions: HashMap<Key, u32>,
-    ready: HashMap<Key, u32>,
+    versions: FxMap<Key, u32>,
+    ready: FxMap<Key, u32>,
     uploads: Vec<ColumnResult>,
-    retired: HashSet<Key>,
+    retired: FxSet<Key>,
     next_version: u32,
     center: Vec2,
+    /// Nivel más fino que se genera (LOD por tamaño en pantalla).
+    pub first: u32,
     shared: Arc<Shared>,
     rx: Receiver<ColumnResult>,
     workers: Vec<JoinHandle<()>>,
@@ -104,10 +115,10 @@ impl Streamer {
     pub fn new(terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, levels: u32, threads: usize) -> Streamer {
         let specs: Vec<LevelSpec> = (0..levels).map(|lod| LevelSpec { lod }).collect();
         let shared = Arc::new(Shared { queue: Mutex::new(BinaryHeap::new()), cv: Condvar::new(), quit: AtomicBool::new(false), in_flight: AtomicUsize::new(0) });
-        let (tx, rx) = channel();
+        let (tx, rx) = sync_channel(MAX_READY);
         let mut workers = Vec::new();
         for _ in 0..threads.max(1) {
-            let (sh, tx, t, s, specs): (Arc<Shared>, Sender<ColumnResult>, Arc<TerrainGen>, Arc<RwLock<EditStore>>, Vec<LevelSpec>) = (shared.clone(), tx.clone(), terrain.clone(), store.clone(), specs.clone());
+            let (sh, tx, t, s, specs): (Arc<Shared>, SyncSender<ColumnResult>, Arc<TerrainGen>, Arc<RwLock<EditStore>>, Vec<LevelSpec>) = (shared.clone(), tx.clone(), terrain.clone(), store.clone(), specs.clone());
             workers.push(std::thread::spawn(move || worker(sh, tx, t, s, specs)));
         }
         Streamer {
@@ -115,12 +126,13 @@ impl Streamer {
             specs,
             sets: Vec::new(),
             regions: Vec::new(),
-            versions: HashMap::new(),
-            ready: HashMap::new(),
+            versions: FxMap::default(),
+            ready: FxMap::default(),
             uploads: Vec::new(),
-            retired: HashSet::new(),
+            retired: FxSet::default(),
             next_version: 1,
             center: Vec2::ZERO,
+            first: 0,
             shared,
             rx,
             workers,
@@ -139,14 +151,28 @@ impl Streamer {
         c.distance(self.center) + key.0 as f32
     }
 
-    /// Recentra los anillos de detalle si la cámara se movió lo suficiente.
+    /// Recentra los anillos y elige el nivel más fino según la altura de la cámara sobre el
+    /// terreno, para no generar detalle que mediría menos de medio píxel.
+    pub fn update_view(&mut self, center: Vec2, eye_height: f32, fov_y: f32, view_h: f32) {
+        let first = choose_first_level(self.first, eye_height, fov_y, view_h, self.specs.len() as u32);
+        self.update_with(center, first);
+    }
+
+    /// Recentra los anillos de detalle si la cámara se movió lo suficiente (todos los niveles).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn update(&mut self, center: Vec2) {
+        self.update_with(center, 0);
+    }
+
+    fn update_with(&mut self, center: Vec2, first: u32) {
         self.center = center;
-        let regions: Vec<(IVec2, IVec2)> = self.specs.iter().map(|s| s.region(center)).collect();
+        let mut regions: Vec<(IVec2, IVec2)> = self.specs.iter().map(|s| s.region(center)).collect();
+        regions.push((IVec2::splat(first as i32), IVec2::ZERO));
         if regions == self.regions {
             return;
         }
-        let cols = level_columns(&self.specs, center);
+        self.first = first;
+        let cols = level_columns_from(&self.specs, center, first);
         let mut new_sets = Vec::new();
         for (li, list) in cols.into_iter().enumerate() {
             let lod = li as u32;
@@ -284,15 +310,56 @@ impl Streamer {
                 break;
             }
         }
-        // Lo que quedó fuera de los anillos se borra cuando ya no hay nada pendiente
-        // (o si se acumula mucho), así no aparecen agujeros mientras llega lo nuevo.
-        if !self.retired.is_empty() && (self.idle_now() || self.retired.len() > 3000) {
-            for key in self.retired.drain() {
+        // Lo que quedó fuera de los anillos se borra apenas su zona está cubierta por columnas
+        // nuevas ya subidas (antes se esperaba a que no quedara nada pendiente, y al moverse
+        // rápido se veían mallas de dos niveles superpuestas). Si se acumula mucho, se borra.
+        if !self.retired.is_empty() {
+            let flush = self.idle_now() || self.retired.len() > 3000;
+            let done: Vec<Key> = self.retired.iter().copied().filter(|k| flush || self.covered(*k)).collect();
+            for key in done {
+                self.retired.remove(&key);
                 self.ready.remove(&key);
                 ops.push(Op::Remove(key));
             }
         }
         ops
+    }
+
+    /// ¿La zona de esta columna (que ya no se quiere) está cubierta por columnas de otros
+    /// niveles que ya están en la GPU con su versión al día?
+    fn covered(&self, key: Key) -> bool {
+        let (l, c) = (key.0 as i32, key.1);
+        for k in (l - 3).max(0)..=(l + 3).min(self.specs.len() as i32 - 1) {
+            if k == l {
+                continue;
+            }
+            if k < l {
+                let f = 1 << (l - k);
+                for dz in 0..f {
+                    for dx in 0..f {
+                        let kk = (k as u32, c * f + IVec2::new(dx, dz));
+                        if !self.is_current(kk) {
+                            return false;
+                        }
+                    }
+                }
+            } else {
+                let f = 1 << (k - l);
+                let kk = (k as u32, IVec2::new(c.x.div_euclid(f), c.y.div_euclid(f)));
+                if !self.is_current(kk) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Una columna que no se quiere no bloquea; una que se quiere tiene que estar subida.
+    fn is_current(&self, key: Key) -> bool {
+        match self.versions.get(&key) {
+            None => true,
+            Some(v) => self.ready.get(&key) == Some(v),
+        }
     }
 
     fn idle_now(&self) -> bool {
@@ -334,7 +401,7 @@ impl Drop for Streamer {
     }
 }
 
-fn worker(sh: Arc<Shared>, tx: Sender<ColumnResult>, terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, specs: Vec<LevelSpec>) {
+fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, specs: Vec<LevelSpec>) {
     loop {
         let job = {
             let mut q = sh.queue.lock().unwrap();
@@ -607,5 +674,51 @@ mod tests {
         }
         let keys2 = s.edit(&q);
         assert_eq!(keys2.len(), keys.len());
+    }
+
+    #[test]
+    fn los_resultados_con_version_vieja_se_descartan() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(2)));
+        let mut s = Streamer::new(t.clone(), store, 2, 2);
+        s.update(Vec2::new(13500.0, 16300.0));
+        pump(&mut s, 120);
+        // Dos ediciones seguidas sobre la misma columna, sin dar tiempo a que se suba la
+        // primera: solo debe llegar a la GPU la malla con la última versión.
+        let v = IVec3::new(27010, terrain_top_l0(&t, 27010, 32610) + 1, 32610);
+        let mut e1 = Edits::default();
+        e1.fill(v, v + IVec3::splat(2), CAL);
+        let mut e2 = Edits::default();
+        e2.fill(v + IVec3::Y * 2, v + IVec3::new(2, 6, 2), TILE);
+        let k1 = s.edit(&e1);
+        let k2 = s.edit(&e2);
+        assert_eq!(k1, k2);
+        let key = (0u32, IVec2::new(27010 >> 5, 32610 >> 5));
+        let rebuilt = pump(&mut s, 60);
+        let n = rebuilt.iter().filter(|k| **k == key).count();
+        assert_eq!(n, 1, "la columna editada se subió {n} veces (debería subirse una sola, con la última versión)");
+        assert_eq!(s.ready.get(&key), s.versions.get(&key));
+    }
+
+    #[test]
+    fn las_columnas_viejas_se_quitan_apenas_su_zona_esta_cubierta() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(3)));
+        let mut s = Streamer::new(t, store, 3, 2);
+        s.update(Vec2::new(13500.0, 16300.0));
+        pump(&mut s, 120);
+        // Se mueve la cámara: hay columnas retiradas. Mientras llegan las nuevas, ninguna
+        // columna retirada puede seguir subida si su zona ya está cubierta.
+        s.update(Vec2::new(13500.0 + 600.0, 16300.0));
+        let t0 = Instant::now();
+        while !s.idle() && t0.elapsed() < Duration::from_secs(120) {
+            s.poll(20_000);
+            for k in &s.retired {
+                assert!(!s.covered(*k), "la columna {k:?} sigue subida con su zona ya cubierta");
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        s.poll(usize::MAX);
+        assert!(s.retired.is_empty());
     }
 }

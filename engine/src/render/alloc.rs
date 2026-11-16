@@ -113,7 +113,7 @@ impl Buddy {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(test), allow(dead_code))] // solo lo usan los tests
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -145,6 +145,7 @@ mod tests {
         b.free_later(10, c.0, c.1);
         b.free_later(10, d.0, d.1);
         assert_eq!(b.collect(11, 2), 0);
+        assert_eq!(b.pending_count(), 3);
         assert_eq!(b.collect(12, 2), 3);
         assert_eq!(b.used(), 0);
         // Todo volvió a unirse en un solo bloque raíz.
@@ -169,7 +170,7 @@ mod tests {
     #[test]
     fn es_determinista() {
         let run = || {
-            let mut b = Buddy::new(10);
+            let mut b = Buddy::new(16);
             let mut out = Vec::new();
             for i in 0..200u32 {
                 let r = b.alloc(1 + (i * 37) % 50).unwrap();

@@ -397,3 +397,140 @@ rehecho y en caché) y memoria.
 - Sombras en cascadas (más baratas lejos y más nítidas cerca).
 - Quitar las columnas viejas apenas su zona está cubierta por las nuevas.
 
+
+## 12. Optimización inspirada en Tisma engine
+
+Tisma engine es el *slicer* 3D del autor (C++, Vulkan). Se revisaron sus técnicas de rendimiento y
+se **reimplementaron** en Rust/wgpu las que sirven para un motor de vóxeles. No se copió código. Cada
+técnica cita en un comentario de dónde viene. Vulkan se usa **a través de wgpu**, con sus funciones
+opcionales: `MULTI_DRAW_INDIRECT`, `INDIRECT_FIRST_INSTANCE`, *compute shaders* y
+`TIMESTAMP_QUERY`. No se escribió Vulkan crudo.
+
+> **Advertencia:** todas las medidas son con **lavapipe/llvmpipe**, que dibuja con la CPU (3 hilos).
+> Los milisegundos por cuadro miden sobre todo cuánto le cuesta a la CPU rasterizar. **No se
+> midieron FPS con una GPU real.** Con una GPU real, menos llamadas de dibujo y menos bytes deberían
+> pesar más que acá. Las medidas con lavapipe varían ±15–20 % entre ejecuciones, así que el antes y
+> el después se corrieron alternados.
+
+### Antes y después (`motor --bench`, 1280×720, MSAA 4×, mismas cámaras)
+
+| Vista | Triángulos | Geometría en GPU | Dibujos (principal / sombras) | CPU por cuadro | Cuadro con sombra rehecha | Cuadro con sombra en caché | Generar+mallar |
+|---|---|---|---|---|---|---|---|
+| Ciudad de cerca | 1,24 M → 1,24 M | 44,9 → **11,8 MB** | 1323 / 397 → **1 / 1** | 2,6 → **0,5 ms** | 280 → 244 ms | 188 → 160 ms | 0,98 → 1,07 s |
+| Península | 1,24 M → **0,89 M** | 44,9 → **8,5 MB** | 3672 / 1810 → **1 / 1** | 7,1 → **0,6 ms** | 328 → 264 ms | 207 → 170 ms | 0,98 → **0,70 s** |
+| Lejos (9 km) | 0,69 M → **0,42 M** | 25,1 → **4,0 MB** | 4457 / 1825 → **1 / 1** | 7,0 → **0,6 ms** | 259 → 165 ms | 170 → 116 ms | 0,85 → **0,51 s** |
+| Ciudad de noche | 1,24 M → 1,24 M | 44,9 → **11,8 MB** | 2534 / 1219 → **1 / 1** | 4,8 → **0,6 ms** | 371 → 389 ms | 244 → 263 ms | 1,06 → 0,97 s |
+
+Memoria máxima del proceso: 703 MB → **573 MB**. "Geometría en GPU" antes son vértices más índices.
+Después son caras de 20 bytes. El megabúfer reserva 20 MB y crece si hace falta.
+
+Los cuadros de cerca y de noche (mismos triángulos) cambian dentro del ruido: lavapipe gasta el
+tiempo rasterizando, no en dibujar llamadas. En península y lejos se ganó porque la vista desde
+arriba ya no genera el nivel más fino que no se ve (punto 6).
+
+**Modos de dibujo** (`--draw directo|indirecto|gpu`; `--gpu-cull 0|1` es un atajo). Cuadro con
+sombra en caché, cerca / península / lejos / noche:
+
+| Modo | Cuadro | CPU por cuadro |
+|---|---|---|
+| Directo (una llamada por rango) | 161 / 186 / 126 / 257 ms | 0,5–1,3 ms |
+| Indirecto múltiple, descarte en CPU | 159 / 190 / 117 / 243 ms | 0,5–0,6 ms |
+| Indirecto múltiple, descarte en GPU (*compute*) | 179 / 183 / 131 / 261 ms | ~0,2 ms |
+
+Los tres modos dan **la misma imagen, píxel a píxel**. Con lavapipe el descarte en GPU no gana,
+porque el *compute shader* también corre en la CPU. Por eso el motor elige solo: **indirecto** en
+adaptadores de CPU y **GPU** en GPUs reales, si el adaptador tiene `MULTI_DRAW_INDIRECT`. Si no lo
+tiene, usa **directo**.
+
+### Qué se aplicó y dónde
+
+1. **Versión por columna y *pipeline* acotado** (Tisma: `tbb::parallel_pipeline` con fichas
+   limitadas en `src/gcode/writer.cpp`).
+   - `stream.rs`: cada pedido lleva una versión, y los resultados con versión vieja se descartan.
+   - La cola de resultados es un `sync_channel` de 96. Si el hilo principal se atrasa, los
+     generadores esperan en vez de acumular mallas.
+   - **Arregla el solapamiento momentáneo** de la sección 10: una columna retirada se quita apenas
+     su zona queda cubierta por niveles vigentes, en vez de esperar al vaciado completo.
+   - Tests `los_resultados_con_version_vieja_se_descartan` y
+     `las_columnas_viejas_se_quitan_apenas_su_zona_esta_cubierta`.
+2. **Caras compactas e instanciadas con *vertex pulling*** (Tisma: `PreviewInstance` +
+   `shaders/preview.vert`).
+   - `mesher.rs`: cada cara es un `Quad` de **20 bytes** (posición, tamaño, dirección, AO,
+     material, iluminación suave y *slot* de columna). Antes eran 4 vértices + 6 índices: 72 bytes.
+   - `voxel.wgsl` arma las esquinas con `vertex_index`, con un búfer de 6 índices compartido.
+     Conserva la rotación y el reflejo de la diagonal, así que los triángulos son los mismos.
+   - Los colores salen de una paleta uniforme y el origen de cada columna, de un búfer *storage*.
+   - Test `la_expansion_de_las_caras_es_igual_a_la_malla_anterior`: compara con el mallador
+     anterior, vértice a vértice.
+3. **Megabúfer con asignador por bloques y liberación diferida** (Tisma: búferes editables de
+   `apps/tisma/vk_view.cpp`).
+   - `render/alloc.rs`: un *buddy allocator* sobre un solo búfer de caras.
+   - Los bloques liberados se reutilizan recién 2 cuadros después, para no pisar lo que la GPU
+     todavía lee. No hace falta `device.poll(Wait)`.
+   - Si se llena, el búfer crece copiando en la GPU.
+   - Tests de unión de hermanos, crecimiento y determinismo.
+4. **Dibujo indirecto múltiple y descarte en GPU** (Tisma: ítem V4 pendiente de su `PLAN.md`).
+   - `render/mod.rs`: las caras de cada columna se guardan agrupadas por dirección.
+   - En modo indirecto, la CPU escribe los argumentos y se dibuja **todo con una llamada**
+     `multi_draw_indexed_indirect`.
+   - En modo GPU, `shaders/cull.wgsl` (un hilo por columna) prueba la caja contra el *frustum*,
+     descarta las caras que miran para atrás y llena los argumentos. La sombra hace lo mismo
+     contra la luz.
+5. **Clave de cuadro y clave de sombra** (Tisma: `frame_key()` en `apps/tisma/renderer.cpp`).
+   - `app.rs`: si la cámara, la hora, la escena y la interfaz no cambiaron, no se dibuja. La
+     ventana espera con `WaitUntil` en vez de girar.
+   - La sombra se invalida solo si la columna que cambió cae **dentro del *frustum* de la luz**.
+   - El pase de sombra dibuja **solo las caras que miran al sol**. Con eso, el cuadro con sombra
+     rehecha quedó igual o mejor que antes, aun con el costo de desempaquetar las caras.
+6. **Nivel de detalle por tamaño en pantalla** (Tisma: criterio de medio píxel en
+   `far_group()` / `merged_layers()`, `src/ui/scene.cpp`).
+   - `lod.rs`: `voxel_pixels()` mide cuántos píxeles ocupa un vóxel a la altura de la cámara.
+   - `choose_first_level()` no genera niveles cuyo vóxel mida menos de medio píxel. La histéresis
+     (0,45 / 0,55 px) evita que vaya y vuelva entre niveles.
+   - `MOTOR_LOD_FIJO=1` lo apaga para comparar.
+7. **Claves `u64` y FxHash** (Tisma: tablas con hash de enteros en `src/mesh/indexed_mesh.cpp`).
+   `fxhash.rs` reemplaza SipHash en los mapas de columnas, versiones y conjuntos del *streaming*.
+8. **Contadores y *timestamps* de GPU sin bloquear**.
+   - La barra de título muestra caras, MB en GPU, modo de dibujo, llamadas y MB subidos.
+   - El *benchmark* usa `TIMESTAMP_QUERY` para la columna "GPU pase principal".
+
+### Capturas y diferencia de píxeles
+
+![Península antes y después; a la derecha, los píxeles que cambiaron](../capturas/motor-opt2-peninsula.jpg)
+![Noche antes y después](../capturas/motor-opt2-noche.jpg)
+
+Píxeles con diferencia > 8 contra la versión anterior, con las mismas cámaras:
+
+- Con el nivel de detalle fijo (`MOTOR_LOD_FIJO=1`): **0 %** en cerca, península y lejos, y
+  **0,02 %** de noche.
+- Con el nivel por tamaño en pantalla: **1,13 %** en península (0,27 % con > 32) y **0,25 %** en
+  lejos. Es el detalle de menos de medio píxel que ya no se dibuja: techos de la ciudad vistos de
+  muy alto.
+- Cerca y noche no cambian.
+
+La ventana bajo xvfb, `--auto-test` y `--shot` siguen funcionando. Hay 29 tests en total.
+
+### Lo que no se hizo o se descartó
+
+- **Descarte en GPU como opción por defecto con lavapipe**: es 0–13 % más lento que el indirecto
+  con descarte en CPU (ver la tabla). Queda como opción por defecto solo en GPUs reales, y eso
+  todavía no se midió.
+- **Dibujo no indexado con *vertex pulling*** (6 vértices por cara sin índices): corría el
+  *vertex shader* 6 veces por cara en vez de 4, y era más lento. Se volvió al instanciado indexado.
+- ***Hash* de bordes para vecinos**: el mallado ya lee los bordes del anillo de chunks vecinos, y
+  no apareció en el perfil.
+- **Chunks uniformes con almacenamiento aparte**: los chunks de aire y los enterrados ya se
+  saltean (sección 11), así que lo que queda no justificaba otro formato.
+- ***Timestamps* en la ventana**: están solo en el *benchmark*. En la ventana habría que leerlos de
+  forma asíncrona un cuadro tarde.
+- **El costo de desempaquetar las caras en el *shader***: con llvmpipe cuesta un poco. Se
+  compensó en el pase de sombra, pero en el pase principal de noche el cuadro quedó en el ruido
+  (+5 %).
+
+### Pendiente
+
+- **Hi-Z / descarte por oclusión** en el *compute shader*: necesita una GPU real para que valga
+  la pena.
+- **Medir con una GPU real**: FPS, tiempo de GPU por pase, y los tres modos de dibujo.
+- *Timestamps* asíncronos en la ventana.
+- Sombras en cascadas y generación del terreno en la GPU (pendientes de la sección 11).

@@ -38,6 +38,8 @@ pub struct Session {
     pub first_frame: Option<Duration>,
     seed: u64,
     scene_rx: Option<Receiver<EditStore>>,
+    /// Alto de la imagen en píxeles (para elegir el nivel de detalle por tamaño en pantalla).
+    pub view_h: f32,
 }
 
 impl Session {
@@ -63,7 +65,7 @@ impl Session {
         });
         let ground = terrain.height(cam[0], cam[1]).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(cam[0], ground, cam[1]), yaw: cam[3], pitch: cam[4], distance: cam[2], fov_y: 50.0 };
-        Session { terrain, streamer, cam, hour, day_paused: true, tool: 2, rot: 0, hit: None, scene_ready: None, started, first_frame: None, seed: 1, scene_rx: Some(rx) }
+        Session { terrain, streamer, cam, hour, day_paused: true, tool: 2, rot: 0, hit: None, scene_ready: None, started, first_frame: None, seed: 1, scene_rx: Some(rx), view_h: 900.0 }
     }
 
     /// Avanza el estado: la cámara sigue el terreno, el día corre y el mundo se recentra.
@@ -84,7 +86,8 @@ impl Session {
                 self.scene_rx = None;
             }
         }
-        self.streamer.update(Vec2::new(self.cam.target.x, self.cam.target.z));
+        let eye_h = (self.cam.eye().y - self.cam.target.y).max(1.0);
+        self.streamer.update_view(Vec2::new(self.cam.target.x, self.cam.target.z), eye_h, self.cam.fov_y, self.view_h);
     }
 
     pub fn scene_loaded(&self) -> bool {
@@ -170,8 +173,14 @@ impl Session {
 
     pub fn title(&self, fps: f32, r: &Renderer) -> String {
         format!(
-            "Motor de vóxeles · {fps:.0} FPS · {:.2} M triángulos · {} columnas · pendientes {} · {:02}:{:02}{} · herramienta: {} (giro {})",
+            "Motor de vóxeles · {fps:.0} FPS · {:.2} M triángulos ({:.2} M caras, {:.0} MB) · dibujo {} · {} + {} llamadas · subido {:.1} MB · {} columnas · pendientes {} · {:02}:{:02}{} · herramienta: {} (giro {})",
             r.triangles() as f32 / 1e6,
+            r.quad_count() as f32 / 1e6,
+            r.mesh_mb(),
+            r.draw_mode.name(),
+            r.last_draws.0,
+            r.last_draws.1,
+            r.upload_frame as f32 / 1048576.0,
             r.column_count(),
             self.streamer.pending(),
             self.hour as u32,

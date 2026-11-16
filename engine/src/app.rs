@@ -52,7 +52,16 @@ struct App {
     fps: f32,
     fps_samples: Vec<f32>,
     error: Option<String>,
+    /// Clave del último cuadro dibujado y cuándo se dibujó (para no redibujar lo mismo).
+    last_key: Option<[u64; 4]>,
+    last_draw: Instant,
+    /// La escena está quieta: el bucle duerme en vez de girar (la CPU baja casi a cero).
+    idle: bool,
+    pub skipped: u64,
 }
+
+/// Con la escena quieta solo se redibuja para animar el agua, a este intervalo.
+const IDLE_REDRAW: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub fn run(session: Session, opts: Options) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| format!("no se pudo abrir el sistema de ventanas: {e}"))?;
@@ -75,6 +84,10 @@ pub fn run(session: Session, opts: Options) -> Result<(), String> {
         fps: 0.0,
         fps_samples: Vec::new(),
         error: None,
+        last_key: None,
+        last_draw: Instant::now(),
+        idle: false,
+        skipped: 0,
     };
     event_loop.run_app(&mut app).map_err(|e| format!("error en el bucle de eventos: {e}"))?;
     if let Some(e) = app.error {
@@ -110,6 +123,7 @@ impl App {
         s.cam.yaw += (k(KeyCode::KeyQ) - k(KeyCode::KeyE)) * 80.0 * dt;
         s.update(dt);
         let Some(gpu) = self.gpu.as_mut() else { return };
+        s.view_h = gpu.config.height as f32;
         s.apply_ops(&mut gpu.renderer, 400_000);
         gpu.renderer.time += dt;
         // Selección bajo el cursor (no durante el recorrido automático).
@@ -124,6 +138,17 @@ impl App {
                 el.exit();
             }
         }
+        // Clave del cuadro: si nada cambió (y no hay recorrido automático), no se dibuja; solo
+        // se redibuja cada IDLE_REDRAW para que el agua siga moviéndose.
+        let key = gpu.renderer.frame_key(&s.cam, s.hour, (gpu.config.width, gpu.config.height));
+        let same = self.last_key == Some(key) && self.tour.is_none() && s.streamer.pending() == 0;
+        self.idle = same;
+        if same && self.last_draw.elapsed() < IDLE_REDRAW {
+            self.skipped += 1;
+            return;
+        }
+        self.last_key = Some(key);
+        self.last_draw = Instant::now();
         if let Err(e) = gpu.renderer.render_surface(&gpu.surface, &gpu.config, &s.cam, s.hour) {
             eprintln!("{e}");
         }
@@ -198,6 +223,10 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // Cualquier entrada saca al bucle del reposo (el resaltado sigue al cursor, etc.).
+        if !matches!(event, WindowEvent::RedrawRequested) {
+            self.idle = false;
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
@@ -264,8 +293,17 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _el: &ActiveEventLoop) {
-        if let Some(gpu) = &self.gpu {
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        let Some(gpu) = &self.gpu else { return };
+        if self.idle && self.keys.is_empty() && !self.middle && self.right.is_none() {
+            // Reposo: se duerme hasta el próximo redibujo del agua (o hasta un evento).
+            let next = self.last_draw + IDLE_REDRAW;
+            el.set_control_flow(ControlFlow::WaitUntil(next));
+            if Instant::now() >= next {
+                gpu.window.request_redraw();
+            }
+        } else {
+            el.set_control_flow(ControlFlow::Poll);
             gpu.window.request_redraw();
         }
     }
