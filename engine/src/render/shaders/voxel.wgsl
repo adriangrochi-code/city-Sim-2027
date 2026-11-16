@@ -24,7 +24,7 @@ struct Globals {
 struct VIn {
     @location(0) qa: u32,
     @location(1) qb: u32,
-    @location(2) smooth: vec2<u32>,
+    @location(2) snorm: vec2<u32>,
     @location(3) slot: u32,
     @builtin(vertex_index) vi: u32,
 };
@@ -114,7 +114,7 @@ fn vs_main(v: VIn) -> VOut {
     o.normal = dirs[c.dir];
     o.ao = f32(c.ao);
     o.voxel = origins[v.slot].w;
-    let sw = (v.smooth[c.k / 2u] >> ((c.k % 2u) * 16u)) & 0xffffu;
+    let sw = (v.snorm[c.k / 2u] >> ((c.k % 2u) * 16u)) & 0xffffu;
     let sx = (f32(sw & 255u) - 128.0) / 127.0;
     let sz = (f32(sw >> 8u) - 128.0) / 127.0;
     o.smooth_n = vec3(sx, sqrt(max(1.0 - sx * sx - sz * sz, 0.0)), sz);

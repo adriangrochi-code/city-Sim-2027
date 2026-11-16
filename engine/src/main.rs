@@ -98,6 +98,17 @@ fn parse_args() -> Args {
             "--msaa" => a.msaa = if next == "1" { 1 } else { 4 },
             // Sin --msaa: 4× en capturas y con GPU; 1× en la ventana si el render es por CPU.
             "--threads" => a.threads = next.parse().unwrap_or(a.threads).max(1),
+            // Dibujo: directo, indirecto (múltiple, descarte en CPU) o gpu (descarte en GPU).
+            "--draw" => {
+                let m = match next.as_str() {
+                    "directo" => 1,
+                    "indirecto" => 2,
+                    "gpu" => 3,
+                    _ => 0,
+                };
+                render::DRAW_OVERRIDE.store(m, std::sync::atomic::Ordering::Relaxed);
+            }
+            "--gpu-cull" => render::DRAW_OVERRIDE.store(if next == "1" { 3 } else { 2 }, std::sync::atomic::Ordering::Relaxed),
             "--window" => {
                 a.window = true;
                 i += 1;

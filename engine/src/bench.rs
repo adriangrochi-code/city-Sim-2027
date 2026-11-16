@@ -60,10 +60,10 @@ pub fn run(o: &Options) -> Result<(), String> {
     let (rss_gpu, _) = memory_mb();
     println!("Memoria: con las ediciones cargadas {rss_store:.0} MB · con el renderer creado {rss_gpu:.0} MB");
     let mut md = String::new();
-    let _ = writeln!(md, "Adaptador: {} · {} hilos · {} niveles · MSAA {}× · {}×{} · {} cuadros por vista", r.adapter_name, o.threads, o.levels, o.msaa, o.size.0, o.size.1, o.frames);
+    let _ = writeln!(md, "Adaptador: {} · dibujo {} · {} hilos · {} niveles · MSAA {}× · {}×{} · {} cuadros por vista", r.adapter_name, r.draw_mode.name(), o.threads, o.levels, o.msaa, o.size.0, o.size.1, o.frames);
     let _ = writeln!(md, "Escena ciudad: armada en {:.2?} · {} vóxeles editados guardados en todos los niveles · ediciones ≈ {:.1} MB\n", t_scene, edit_voxels, edit_bytes as f64 / 1048576.0);
-    let _ = writeln!(md, "| Vista | Generar+mallar (pared) | CPU generación | CPU mallado | Columnas | Triángulos | Vértices | Vértices GPU | Índices GPU | Dibujos (principal / sombras) | CPU por cuadro | Total por cuadro (sombra rehecha) | Total por cuadro (sombra en caché) | RSS |");
-    let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    let _ = writeln!(md, "| Vista | Generar+mallar (pared) | CPU generación | CPU mallado | Columnas | Triángulos | Caras | Geometría en GPU | Megabúfer | Subido | Dibujos (principal / sombras) | CPU por cuadro | Total por cuadro (sombra rehecha) | Total por cuadro (sombra en caché) | GPU pase principal | RSS |");
+    let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     println!("{md}");
     for v in &VIEWS {
         r.clear_columns();
@@ -76,6 +76,7 @@ pub fn run(o: &Options) -> Result<(), String> {
         let ts = Instant::now();
         s.update(center);
         let mut upload = Duration::ZERO;
+        let up0 = r.uploaded_bytes;
         loop {
             let ops = s.poll(usize::MAX);
             let tu = Instant::now();
@@ -113,15 +114,22 @@ pub fn run(o: &Options) -> Result<(), String> {
         let n = o.frames.max(1) as f64;
         // Cuadros con la cámara quieta: el mapa de sombras se reutiliza.
         let mut cached = 0.0;
+        let mut gpu = 0.0;
+        let mut gpu_n = 0;
         for _ in 0..o.frames {
-            cached += r.bench_frame(&cam, v.hour, o.size.0, o.size.1).total_ms;
+            let f = r.bench_frame(&cam, v.hour, o.size.0, o.size.1);
+            cached += f.total_ms;
+            if let Some(g) = f.gpu_ms {
+                gpu += g;
+                gpu_n += 1;
+            }
         }
         let path = format!("{}/bench-{}.png", o.dir, v.slug);
         r.capture(&cam, v.hour, o.size.0, o.size.1, &path)?;
         let (vb, ib) = r.gpu_bytes();
         let (rss, _) = memory_mb();
         let line = format!(
-            "| {} | {:.2} s (subida {:.2} s) | {:.2} s | {:.2} s | {} | {:.2} M | {:.2} M | {:.1} MB | {:.1} MB | {} / {} | {:.1} ms | {:.0} ms | {:.0} ms | {:.0} MB |",
+            "| {} | {:.2} s (subida {:.2} s) | {:.2} s | {:.2} s | {} | {:.2} M | {:.2} M | {:.1} MB | {:.0} MB | {:.1} MB | {} / {} | {:.1} ms | {:.0} ms | {:.0} ms | {} | {:.0} MB |",
             v.name,
             wall.as_secs_f64(),
             upload.as_secs_f64(),
@@ -129,14 +137,16 @@ pub fn run(o: &Options) -> Result<(), String> {
             MESH_NS.load(Ordering::SeqCst) as f64 / 1e9,
             r.column_count(),
             r.triangles() as f64 / 1e6,
-            r.vertex_count() as f64 / 1e6,
-            vb as f64 / 1048576.0,
-            ib as f64 / 1048576.0,
+            r.quad_count() as f64 / 1e6,
+            (vb + ib) as f64 / 1048576.0,
+            r.megabuffer_mb(),
+            (r.uploaded_bytes - up0) as f64 / 1048576.0,
             acc.draws_main,
             acc.draws_shadow,
             acc.cpu_ms / n,
             acc.total_ms / n,
             cached / n,
+            if gpu_n > 0 { format!("{:.0} ms", gpu / gpu_n as f64) } else { "—".into() },
             rss
         );
         println!("{line}");

@@ -37,6 +37,7 @@ impl Buddy {
         1u64 << self.max_order
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn used(&self) -> u64 {
         self.used_units
     }
@@ -112,6 +113,7 @@ impl Buddy {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }

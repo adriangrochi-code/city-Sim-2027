@@ -50,6 +50,7 @@ pub struct Quad {
 /// Límite de la coordenada y de una malla (11 bits).
 pub const MAX_Y: i32 = 2047;
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl Quad {
     pub fn dir(&self) -> usize {
         ((self.a >> 23) & 7) as usize
