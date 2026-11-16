@@ -310,7 +310,8 @@ impl Renderer {
             sun_color: l.sun_color.extend(0.0).into(),
             sky_top: l.sky_top.extend(0.0).into(),
             sky_horizon: l.sky_horizon.extend(0.0).into(),
-            params: Vec4::new(1.0 / 9000.0, l.night, 3.0, l.ambient).into(),
+            // Niebla: más tenue cuanto más se aleja la cámara, para que la vista del mapa no se lave.
+            params: Vec4::new(1.0 / (9000.0f32).max(cam.distance * 7.0), l.night, 3.0, l.ambient).into(),
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
 

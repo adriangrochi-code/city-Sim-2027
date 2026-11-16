@@ -96,7 +96,8 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     var col = albedo * light;
     // Ventanas iluminadas por velas de noche.
     if (v.color.a > 0.5) {
-        let lit = step(0.5, hash3(cell * 1.7));
+        // Toda la ventana se enciende o no (celda de ~2 m × 3 m), no vóxel por vóxel.
+        let lit = step(0.5, hash3(floor(v.world / vec3(2.0, 3.0, 2.0))));
         col += vec3(1.0, 0.55, 0.2) * 1.6 * g.params.y * lit;
     }
     // Niebla de distancia hacia el color del horizonte.

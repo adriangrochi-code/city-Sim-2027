@@ -17,8 +17,6 @@ const N: i32 = CHUNK;
 /// Alturas de una columna de chunks: índice del vóxel más alto de terreno por (x, z).
 pub struct Column {
     pub top: Vec<i32>,
-    pub y0: i32,
-    pub y1: i32,
 }
 
 pub struct Level {
@@ -54,11 +52,17 @@ struct LevelEdits {
 }
 
 fn level_edits(edits: &Edits, lod: u32) -> LevelEdits {
-    let mut vox: HashMap<IVec3, Mat> = HashMap::new();
+    // Al reducir la resolución, cada vóxel grueso toma el material del vóxel fino más alto
+    // que contiene (así desde arriba se ve el techo y no un moteado de materiales).
+    let mut best: HashMap<IVec3, (i32, Mat)> = HashMap::new();
     for (&v, &m) in &edits.voxels {
         let k = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
-        vox.entry(k).or_insert(m);
+        let e = best.entry(k).or_insert((i32::MIN, m));
+        if v.y > e.0 {
+            *e = (v.y, m);
+        }
     }
+    let vox: HashMap<IVec3, Mat> = best.into_iter().map(|(k, (_, m))| (k, m)).collect();
     let mut out = LevelEdits { voxels: HashMap::new(), surface: HashMap::new(), max_y: HashMap::new() };
     for (v, m) in vox {
         let ck = IVec3::new(v.x >> 5, v.y >> 5, v.z >> 5);
@@ -141,7 +145,8 @@ fn gen_column(t: &TerrainGen, le: &LevelEdits, spec: LevelSpec, c: IVec2) -> (IV
             let dx = hs[(lx + 2) + (lz + 1) * p] - hs[lx + (lz + 1) * p];
             let dz = hs[(lx + 1) + (lz + 2) * p] - hs[(lx + 1) + lz * p];
             let slope = (dx * dx + dz * dz).sqrt() / (2.0 * vs);
-            let ty = (h / vs - 0.5).floor() as i32;
+            // Bajo el agua, la cara superior del vóxel no debe asomar sobre el nivel del río.
+            let ty = if h < 0.0 { (h / vs - 1.0).floor() as i32 } else { (h / vs - 0.5).floor() as i32 };
             let x = ((c.x * N + lx as i32) as f32 + 0.5) * vs;
             let z = ((c.y * N + lz as i32) as f32 + 0.5) * vs;
             top[lx + lz * N as usize] = ty;
@@ -199,5 +204,50 @@ fn gen_column(t: &TerrainGen, le: &LevelEdits, spec: LevelSpec, c: IVec2) -> (IV
             chunks.push((key, ch));
         }
     }
-    (c, Column { top, y0, y1 }, chunks)
+    (c, Column { top }, chunks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buildings::Edits;
+
+    #[test]
+    fn cada_columna_tiene_su_superficie_guardada() {
+        let t = TerrainGen::new(1726);
+        let levels = [LevelSpec { lod: 0 }, LevelSpec { lod: 1 }];
+        let w = World::generate(t, &Edits::default(), &levels, Vec2::new(13500.0, 16300.0));
+        for level in &w.levels {
+            for (c, col) in &level.columns {
+                for (i, &top) in col.top.iter().enumerate() {
+                    let v = IVec3::new(c.x * N + (i as i32 % N), top, c.y * N + (i as i32 / N));
+                    let k = IVec3::new(v.x >> 5, v.y >> 5, v.z >> 5);
+                    assert!(level.chunks.contains_key(&k), "falta el chunk de superficie {k:?} (nivel {})", level.spec.lod);
+                    assert_ne!(level.sample(v), Some(AIR));
+                    assert_eq!(level.sample(v + IVec3::Y), Some(AIR));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn los_edificios_se_ven_en_los_niveles_gruesos() {
+        let mut e = Edits::default();
+        let base = IVec3::new(27000, 40, 32600);
+        e.fill(base, base + IVec3::new(8, 10, 8), CAL);
+        e.fill(base + IVec3::new(0, 10, 0), base + IVec3::new(8, 11, 8), AZOTEA);
+        let le = level_edits(&e, 2);
+        // Capa más alta a resolución de 2 m (nivel 2): debe ser azotea, no cal.
+        let top_y = (base.y + 10) >> 2;
+        let mut tops = Vec::new();
+        for (ck, list) in &le.voxels {
+            for &(_, y, _, m) in list {
+                if ck.y * N + y as i32 == top_y {
+                    tops.push(m);
+                }
+            }
+        }
+        assert!(!tops.is_empty());
+        assert!(tops.iter().all(|&m| m == AZOTEA), "desde arriba debe verse la azotea");
+    }
 }

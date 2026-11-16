@@ -31,11 +31,13 @@ impl OrbitCamera {
         Mat4::perspective_infinite_reverse_rh(self.fov_y.to_radians(), aspect, near)
     }
 
+    #[allow(dead_code)] // para el modo con ventana (pendiente)
     pub fn orbit(&mut self, dyaw: f32, dpitch: f32) {
         self.yaw += dyaw;
         self.pitch = (self.pitch + dpitch).clamp(5.0, 89.0);
     }
 
+    #[allow(dead_code)] // para el modo con ventana (pendiente)
     pub fn zoom(&mut self, factor: f32) {
         self.distance = (self.distance * factor).clamp(10.0, 30000.0);
     }

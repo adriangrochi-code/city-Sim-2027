@@ -7,6 +7,7 @@ use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use glam::Vec2;
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub const MAP_SIZE: f32 = 24000.0;
 pub const COAST_Z: f32 = 15600.0;
 pub const BAY_X: f32 = 11600.0;
@@ -130,7 +131,7 @@ impl TerrainGen {
         if h < 1.4 {
             return SAND;
         }
-        if slope > 0.9 || h > 95.0 {
+        if slope > 0.9 || (h > 118.0 && slope > 0.35) {
             return ROCK;
         }
         // Manchas de pastizal seco en las cuchillas.

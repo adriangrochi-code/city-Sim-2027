@@ -66,9 +66,14 @@ fn mesh_world(world: &World) -> Vec<(u32, Mesh)> {
     let mut jobs: Vec<(usize, IVec3)> = Vec::new();
     for (li, level) in world.levels.iter().enumerate() {
         for (&k, ch) in &level.chunks {
-            if !ch.is_full() {
-                jobs.push((li, k));
+            // Un chunk lleno solo se puede saltear si el de arriba también lo está:
+            // si no, su cara superior es la superficie del terreno.
+            // Lo mismo para los vecinos laterales (laderas empinadas, barrancas).
+            let full = |d: IVec3| level.chunks.get(&(k + d)).is_some_and(|a| a.is_full());
+            if ch.is_full() && [IVec3::Y, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z].into_iter().all(full) {
+                continue;
             }
+            jobs.push((li, k));
         }
     }
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);

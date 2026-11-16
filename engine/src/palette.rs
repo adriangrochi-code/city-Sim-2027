@@ -1,5 +1,6 @@
 //! Materiales de los vóxeles y su paleta de colores rioplatense.
 //! Un vóxel es un `u8`: 0 es aire; el resto, un material.
+#![allow(dead_code)] // la paleta está completa aunque no todos los materiales se usen todavía
 
 pub type Mat = u8;
 
