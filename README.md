@@ -75,11 +75,17 @@ En `engine/` está la primera versión del motor propio de vóxeles a la vista, 
 wgpu. Por ahora genera el mapa y una ciudad de prueba y guarda capturas
 ([detalle](docs/sistemas/motor-voxel.md)).
 
-![Ciudad colonial de vóxeles](docs/capturas/motor-voxel-cerca.jpg)
+La estética de las estructuras está definida en [estetica-voxel.md](docs/sistemas/estetica-voxel.md):
+vóxel de 0,5 m, kit modular (zócalo, cuerpo, pretil, vanos, rejas, balcones, techos de teja y paja),
+desgaste por vóxel y detalle fino dibujado por material. Catálogo colonial completo, incluida la
+iglesia matriz en sus 5 fases de obra.
+
+![Iglesia matriz en sus fases de obra, en vóxeles](docs/capturas/voxel-iglesia-fases.jpg)
 
 ```
 cd engine
-cargo run --release -- --shot captura.png
+cargo run --release -- --shot captura.png              # ciudad colonial
+cargo run --release -- --scene catalogo --shot cat.png # catálogo de estructuras
 ```
 
 ### Cómo ejecutarlo

@@ -26,7 +26,8 @@ Un solo crate binario, `motor`, organizado en módulos:
 | `palette` | Materiales (`u8`, 0 = aire) y paleta de colores rioplatense |
 | `terrain` | Geografía del mapa: **puerto exacto** de `scripts/world/terrain_gen.gd` (mismas constantes y fórmulas; ruido FastNoiseLite configurado como el de Godot) |
 | `world` / `world::chunk` | Almacén disperso de chunks por nivel, generación por columnas |
-| `buildings` | Ciudad colonial de prueba (plaza, iglesia, damero, casas de tres niveles) y vegetación, como "ediciones" de vóxeles |
+| `buildings` | Ediciones de vóxeles, generador aleatorio determinista y vegetación |
+| `structures` | Kit modular de estructuras y desgaste por vóxel ([estética](estetica-voxel.md)); `colonial` (catálogo de la época) y `scenes` (escenas `ciudad` y `catalogo`) |
 | `lod` | Anillos de nivel de detalle tipo *clipmap* |
 | `mesher` | Caras visibles + *greedy meshing* + oclusión ambiental por vértice |
 | `camera` | Cámara orbital de constructor de ciudades (Z invertida e infinita) |
@@ -162,3 +163,28 @@ cargo test --release
 `--cam x,z,distancia,giro,inclinación` (metros y grados), `--hour` (0–24), `--size 1600x900`,
 `--levels 8`. Hace falta un driver Vulkan, Metal o DirectX 12. En Linux sin GPU sirve el
 driver por software de Mesa (`mesa-vulkan-drivers`).
+
+## Novedades: estética de estructuras
+
+- **Kit modular** (`structures`): zócalo, cuerpo, coronación, aberturas y elementos sobre un
+  marco de solar; variantes deterministas por semilla y desgaste por vóxel. Detalle en
+  [estetica-voxel.md](estetica-voxel.md).
+- **Catálogo colonial**: rancho, casa de azotea, casa de altos, pulpería, cabildo, iglesia
+  matriz en 5 fases, muralla con portón y garita, muelle, barraca, saladero, estancia,
+  atahona y molino.
+- **Escenas**: `--scene ciudad` (por defecto) y `--scene catalogo`.
+- **Detalle por material en el shader**: el número de material viaja en el alfa del color
+  del vértice; el shader dibuja rejas, tejas, paja, sillería y azulejos por debajo del
+  tamaño del vóxel.
+- **Métricas** (4 núcleos, sin GPU):
+
+| Escena | Vóxeles editados | Generación | Mallado | Triángulos | Memoria máxima |
+|---|---|---|---|---|---|
+| Ciudad | 4,3 M en 1,8 s | 3,4 s | 1,7 s | 1,24 M (antes 0,69 M) | 478 MB |
+| Catálogo | 1,1 M en 0,3 s | 1,3 s | 1,2 s | 0,80 M | 218 MB |
+
+  Los triángulos de la ciudad subieron un 79 %: el desgaste y los detalles cortan las caras
+  que antes el *greedy meshing* unía.
+- **Tests**: 13 en total (4 nuevos: determinismo por semilla, casas dentro del solar, la
+  iglesia crece por fases y termina sin andamios, desgaste determinista).
+
