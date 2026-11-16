@@ -23,8 +23,8 @@
 
 El paso clave: dejar de depender del prototipo y jugar directamente sobre los vóxeles.
 
-1. [ ] Calles curvas, rectas y damero en el motor (grafo de calles, cruces, calzada en vóxeles)
-2. [ ] Solares que siguen la calle, zonificación con pincel y crecimiento con el catálogo de vóxeles (rancho → azotea → altos), con edificios girados a cualquier ángulo
+1. [x] Calles curvas, rectas y damero en el motor (grafo de calles, cruces, calzada en vóxeles)
+2. [x] Solares que siguen la calle, zonificación con pincel y crecimiento con el catálogo de vóxeles (rancho → azotea → altos), con edificios girados a cualquier ángulo
 3. [ ] Interfaz del juego en el motor (barra de herramientas, información, plano colonial)
 4. [ ] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
 5. [ ] Servicios, agua, incendios, puerto, muralla, campo e iglesia

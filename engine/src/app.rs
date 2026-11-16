@@ -6,6 +6,10 @@
 //!   clic izquierdo  colocar        1–9 / Tab  elegir estructura    R  girarla
 //!   F  rellenar terreno            [ / ]  hora del día      P  pausar el día
 //!   F12  captura PNG               Esc  salir
+//!
+//! Modo juego (`motor --juego`, por omisión): 1 plaza · 2 recta · 3 curva · 4 damero ·
+//!   5 zona · 6 quitar zona · 7 demoler · 8 inspeccionar · Tab tipo de calle · R girar la
+//!   plaza · [ ] pincel · , . hora · Espacio pausa · 0 velocidad · clic derecho/Esc cancelar
 
 use crate::render::Renderer;
 use crate::session::{memory_mb, Session};
@@ -66,7 +70,8 @@ const IDLE_REDRAW: std::time::Duration = std::time::Duration::from_millis(100);
 pub fn run(session: Session, opts: Options) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| format!("no se pudo abrir el sistema de ventanas: {e}"))?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let tour = opts.tour_dir.as_ref().map(|d| Tour::new(d, opts.size.0, opts.size.1));
+    let steps = || if session.game.is_some() { crate::tour::city_steps() } else { crate::tour::default_steps() };
+    let tour = opts.tour_dir.as_ref().map(|d| Tour::with_steps(d, opts.size.0, opts.size.1, steps()));
     let mut app = App {
         opts,
         session,
@@ -166,7 +171,40 @@ impl App {
         }
     }
 
+    /// Teclas del modo juego (como en el prototipo).
+    fn game_key(&mut self, code: KeyCode, el: &ActiveEventLoop) -> bool {
+        let s = &mut self.session;
+        let Some(g) = s.game.as_mut() else { return false };
+        let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8];
+        if let Some(n) = digits.iter().position(|c| *c == code) {
+            g.set_tool(n);
+            return true;
+        }
+        match code {
+            KeyCode::Escape => {
+                if !g.cancel() {
+                    el.exit();
+                }
+            }
+            KeyCode::Tab => {
+                g.kind = if g.kind == crate::city::roads::RoadKind::Dirt { crate::city::roads::RoadKind::Stone } else { crate::city::roads::RoadKind::Dirt };
+            }
+            KeyCode::KeyR => g.plaza_angle += 15f32.to_radians(),
+            KeyCode::BracketLeft => g.brush = (g.brush - 10.0).max(10.0),
+            KeyCode::BracketRight => g.brush = (g.brush + 10.0).min(150.0),
+            KeyCode::Space => g.speed = if g.speed > 0.0 { 0.0 } else { 1.0 },
+            KeyCode::Digit0 => g.speed = if g.speed >= 4.0 { 1.0 } else { g.speed * 2.0 }.max(1.0),
+            KeyCode::Comma => s.hour = (s.hour - 0.5).rem_euclid(24.0),
+            KeyCode::Period => s.hour = (s.hour + 0.5).rem_euclid(24.0),
+            _ => return false,
+        }
+        true
+    }
+
     fn key(&mut self, code: KeyCode, el: &ActiveEventLoop) {
+        if self.game_key(code, el) {
+            return;
+        }
         let s = &mut self.session;
         match code {
             KeyCode::Escape => el.exit(),
@@ -270,19 +308,26 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput { state, button, .. } => match (button, state) {
                 (MouseButton::Left, ElementState::Pressed) => {
-                    if let Some(n) = self.session.place() {
+                    if self.session.game.is_some() {
+                        self.session.game_press();
+                    } else if let Some(n) = self.session.place() {
                         println!("Colocada: {} ({n} columnas re-malladas)", self.session.tool_name());
                     }
                 }
+                (MouseButton::Left, ElementState::Released) => self.session.game_release(),
                 (MouseButton::Middle, st) => self.middle = st == ElementState::Pressed,
                 (MouseButton::Right, ElementState::Pressed) => {
                     self.right = Some(self.mouse);
                     self.right_moved = 0.0;
                 }
                 (MouseButton::Right, ElementState::Released) => {
-                    // Un clic derecho sin arrastrar excava.
+                    // Un clic derecho sin arrastrar excava (en el modo juego, cancela el trazado).
                     if self.right_moved < 5.0 {
-                        self.session.dig(3);
+                        if let Some(g) = self.session.game.as_mut() {
+                            g.cancel();
+                        } else {
+                            self.session.dig(3);
+                        }
                     }
                     self.right = None;
                 }

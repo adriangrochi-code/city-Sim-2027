@@ -22,6 +22,44 @@ pub enum Act {
     Fill(f32, f32, i32),
     /// Viaja con la cámara hasta x, z en N cuadros (el mundo se va cargando en el camino).
     Travel(f32, f32, u32),
+    /// Una acción del modo juego (fundar, trazar, zonificar, crecer); devuelve lo que pasó.
+    Game(&'static str, fn(&mut Session) -> String),
+}
+
+/// Recorrido del modo juego: funda la plaza, traza un damero y una calle curva, zonifica,
+/// hace crecer la ciudad y saca capturas (general, de cerca sobre la curva y de noche).
+pub fn city_steps() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use Act::*;
+    let c = d::PLAZA;
+    vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.5),
+        WaitIdle("terreno virgen"),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        WaitIdle("trazado"),
+        Shot("motor-ciudad-trazado"),
+        Game("crecer 60 meses", d::grow),
+        WaitIdle("ciudad crecida"),
+        Game("un mes al ritmo del juego", d::month_realtime),
+        WaitIdle("re-mallado de un mes"),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        WaitIdle("vista general"),
+        Shot("motor-ciudad-general"),
+        Cam([d::CURVE_VIEW.x, d::CURVE_VIEW.y, 110.0, 160.0, 38.0]),
+        WaitIdle("curva de cerca"),
+        Shot("motor-ciudad-curva"),
+        Cam([c.x, c.y, 150.0, 200.0, 32.0]),
+        WaitIdle("plaza de cerca"),
+        Shot("motor-ciudad-plaza"),
+        Cam([c.x + 60.0, c.y + 40.0, 520.0, 215.0, 40.0]),
+        Hour(20.5),
+        WaitIdle("noche"),
+        Shot("motor-ciudad-noche"),
+    ]
 }
 
 pub struct Tour {
@@ -84,9 +122,9 @@ pub fn default_steps() -> Vec<Act> {
 }
 
 impl Tour {
-    pub fn new(dir: &str, width: u32, height: u32) -> Tour {
+    pub fn with_steps(dir: &str, width: u32, height: u32, steps: Vec<Act>) -> Tour {
         let _ = std::fs::create_dir_all(dir);
-        Tour { steps: default_steps(), i: 0, dir: dir.to_string(), width, height, step_start: Instant::now(), travel: None, report: Vec::new() }
+        Tour { steps, i: 0, dir: dir.to_string(), width, height, step_start: Instant::now(), travel: None, report: Vec::new() }
     }
 
     pub fn done(&self) -> bool {
@@ -110,6 +148,14 @@ impl Tour {
                     s.cam.yaw = c[3];
                     s.cam.pitch = c[4];
                     s.update(0.0);
+                    self.next();
+                }
+                Act::Game(label, f) => {
+                    let t0 = Instant::now();
+                    let out = f(s);
+                    let line = format!("{label}: {out} ({:.2?})", t0.elapsed());
+                    println!("{line}");
+                    self.report.push(line);
                     self.next();
                 }
                 Act::Hour(h) => {

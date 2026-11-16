@@ -158,7 +158,9 @@ cd engine
 cargo run --release -- --shot ciudad.png
 cargo run --release -- --shot cerca.png --cam 13470,16190,70,160,24 --hour 9.5
 cargo run --release -- --shot lejos.png --cam 12600,15000,9000,190,42 --hour 16.5
-cargo run --release                                  # ventana interactiva
+cargo run --release                                  # ventana con el juego (ver §13)
+cargo run --release -- --sandbox                     # ventana con el sandbox (escena colonial)
+cargo run --release -- --demo-ciudad salida/         # recorrido del juego sin ventana (§13)
 cargo run --release -- --msaa 1                      # ventana sin MSAA (más rápida sin GPU)
 cargo run --release -- --auto-test salida/           # recorrido automático sin ventana
 cargo run --release -- --window --auto-test salida/  # el mismo recorrido en la ventana
@@ -534,3 +536,146 @@ La ventana bajo xvfb, `--auto-test` y `--shot` siguen funcionando. Hay 29 tests 
 - **Medir con una GPU real**: FPS, tiempo de GPU por pase, y los tres modos de dibujo.
 - *Timestamps* asíncronos en la ventana.
 - Sombras en cascadas y generación del terreno en la GPU (pendientes de la sección 11).
+
+## 13. El juego en el motor: calles y solares
+
+Fase 2, pasos 1 y 2 de la hoja de ruta: el juego del prototipo (fundar, trazar calles,
+zonificar, crecer) ya se juega sobre los vóxeles. `motor` abre directamente el juego; el
+sandbox de antes queda en `motor --sandbox` (o con `--scene ...`).
+
+![Ciudad a los 5 años, en el motor](../capturas/motor-ciudad-general.jpg)
+
+| | |
+|---|---|
+| ![Calle curva con casas giradas](../capturas/motor-ciudad-curva.jpg) | ![Plaza mayor e iglesia](../capturas/motor-ciudad-plaza.jpg) |
+| ![Recién trazado: damero, curva y solares zonificados](../capturas/motor-ciudad-trazado.jpg) | ![De noche](../capturas/motor-ciudad-noche.jpg) |
+
+### Controles del modo juego
+
+| Entrada | Acción |
+|---|---|
+| 1 | Fundar la plaza mayor (obligatorio al empezar; R gira la plaza 15°) |
+| 2 | Calle recta: clic inicio, clic fin; sigue encadenando desde el último punto |
+| 3 | Calle curva: clic inicio, clic fin, el tercer clic da la forma (Bézier cuadrática) |
+| 4 | Damero: dos clics marcan un lado, el tercero lo extiende (cuadras de 84 m) |
+| 5 / 6 | Zonificar / quitar zona con el pincel (mantener apretado); `[` `]` cambian el radio (10–150 m) |
+| 7 | Demoler el tramo de calle bajo el cursor (20 $); los solares que quedan sin frente se van con sus edificios |
+| 8 | Inspeccionar (solar, nivel, valor del suelo, tipo de calle) |
+| Tab | Camino de tierra (6 m, radio mín. 14 m, 2 $/m) ↔ calle empedrada (8 m, radio mín. 22 m, 7 $/m) |
+| Espacio / 0 | Pausa / velocidad ×1, ×2, ×4 |
+| , / . | Hora del día |
+| Esc, clic derecho | Cancela el trazado en curso; Esc sin nada que cancelar sale |
+
+La cámara se maneja igual que en el sandbox. Las vistas previas se dibujan con la capa
+translúcida: verde si se puede construir, rojo si no (con el motivo en el título); solares
+libres en verde claro, zonificados en verde; contorno de la plaza; círculo del pincel;
+tramo a demoler resaltado. El título de la ventana es la línea de estado: fecha (desde
+marzo de 1726), pesos, población, pobladores que esperan casa, solares, herramienta, tipo
+de calle, pincel y el último aviso.
+
+### Arquitectura (`engine/src/city/`)
+
+| Módulo | Qué hace |
+|---|---|
+| `roads.rs` | Grafo de calles (porte de `road_network.gd`): polilíneas, enganche a nodos y tramos a 9 m, cruces automáticos (parte los tramos), radio mínimo, índice espacial por celdas de 40 m, `clearance` (distancia al borde de la calzada más cercana) |
+| `lots.rs` | Solares de 12×24 m a ambos lados de cada tramo, cada uno mirando a su calle (sigue las curvas); misma validación que el prototipo (altura, pendiente, no pisar calzada, sin superponerse, SAT); pincel; crecimiento rancho → azotea → altos con el cupo de pobladores (los altos piden calle empedrada); valor del suelo por distancia a la plaza |
+| `voxelize.rs` | Calzada en vóxeles, plaza y edificios girados (abajo) |
+| `mod.rs` | `City`: dinero, pobladores, meses (llegadas, barco cada 4 meses, impuestos), validaciones con mensajes, fundación, construir/demoler calles, crecimiento con sus ediciones |
+| `game.rs` | Herramientas, clics, vistas previas, línea de estado |
+| `game_demo.rs` | Acciones del recorrido automático |
+
+Todo devuelve `Edits`; `Session::apply_edits` las pasa al streamer, que re-malla solo las
+columnas tocadas (como el sandbox).
+
+**Calzada.** La altura de la calle en un punto es el promedio del terreno en un disco de
+6 m alrededor de ese punto: solo depende del lugar, así que dos calles que se cruzan dan la
+misma altura en el cruce sin coordinarse. Cada columna dentro del ancho se corta o se
+rellena a esa altura (tierra debajo, aire encima) y se pinta: camino de tierra, o empedrado
+con 1 m de vereda de piedra a cada lado (la vereda no se pinta dentro de otra calzada, para
+que los cruces queden limpios). Afuera, 3 m de banquina en rampa al terreno natural.
+Demoler restaura el terreno y vuelve a pintar las calles vecinas que compartían cruce.
+
+**Plaza.** Explanada de 76 m nivelada, de piedra, con el rollo al centro; la iglesia
+(fase 5 del constructor de `colonial.rs`) se construye del otro lado de la calle, mirando a
+la plaza; las cuatro calles que la rodean son empedradas. Plaza e iglesia son obstáculos
+para calles y solares.
+
+**Edificios girados.** Los constructores del catálogo solo saben de ejes cardinales. Para
+cualquier ángulo: se construye el edificio sin girar alrededor del centro del solar, y
+luego cada columna del mundo dentro del rectángulo girado se lleva de vuelta al sistema
+del edificio (rotación inversa) y toma el vóxel más cercano. Si el ángulo está a menos de
+1,5° de uno cardinal se usa exacto (las cuadras del damero quedan nítidas, sin dientes).
+Los vóxeles del constructor por debajo del piso se descartan y los cimientos se rehacen
+por columna desde 4 vóxeles bajo el terreno natural (así la banquina de la calle nunca
+deja el frente colgando). El edificio se apoya en el punto más alto de su planta.
+Mejorar un solar borra (aire) los vóxeles del edificio viejo que el nuevo no ocupa y
+escribe el nuevo; cada solar guarda la lista de sus vóxeles.
+
+Con vóxeles de 0,5 m, el giro se nota en las fachadas como escalones de medio vóxel
+(ver la captura de la curva): se lee bien a distancia de juego; de muy cerca, las paredes
+oblicuas se ven dentadas.
+
+**Cambio en el almacén de ediciones (`store.rs`).** Antes, al reducir a los niveles
+gruesos, ganaba el vóxel más alto entre todas las ediciones acumuladas: al reemplazar una
+casa de altos por otra cosa o al demoler, los niveles lejanos seguían mostrando el piso
+alto. Ahora, dentro de una misma carga lo sólido le gana al aire (para que un muro fino no
+desaparezca de lejos), y una carga nueva reemplaza a la anterior en cada vóxel grueso que
+toca. Prueba: `reemplazar_o_demoler_no_deja_restos_en_los_niveles_gruesos`. El overlay
+admite ahora hasta 196 608 vértices (los solares de una ciudad grande no entraban).
+
+### Prueba automatizada
+
+```
+cd engine
+cargo run --release -- --demo-ciudad salida/            # sin ventana
+xvfb-run -a -s "-screen 0 1280x720x24" \
+  cargo run --release -- --window --demo-ciudad salida/ # en la ventana
+```
+
+Funda la plaza en (13500, 16300), traza un damero empedrado de 5×5 cuadras y un camino de
+tierra curvo hacia el norte de la península, zonifica con un pincel de 480 m, avanza 60
+meses, mide un mes más al ritmo del juego y saca cinco capturas
+(`motor-ciudad-trazado|general|curva|plaza|noche`). Probado en las dos formas.
+
+Pruebas nuevas (`cargo test --release`, 42 en total, todas pasan): cruces que parten tramos,
+enganche, radio mínimo, distancia a la calzada; solares a ambos lados de una recta sin
+superponerse, solares que siguen una curva, una calle nueva quita los solares que pisa;
+edificio girado a 0°, 17°, 33°, 90°, 141° y 225° dentro de su solar con la fachada hacia la
+calle; ángulo casi cardinal igual al constructor; la calle aplana y pinta calzada y vereda;
+fundar-trazar-zonificar-crecer sin ningún vóxel de edificio sobre una calzada; el flujo de
+clics de todas las herramientas; la regla nueva del almacén.
+
+### Métricas (4 núcleos, sin GPU, lavapipe)
+
+| Medida | Valor |
+|---|---|
+| Fundar plaza, iglesia y 4 calles | 66 000 vóxeles, 53 columnas, 0,11 s |
+| Damero 5×5 (79 tramos, 407 solares) | 165 000 vóxeles, 318 columnas, 1,2 s (casi todo es validar y generar solares) |
+| Calle curva (radio mín. 112 m, +50 solares) | 11 600 vóxeles, 14 columnas, 0,1 s |
+| Simulación de un mes (≈450 solares, 20 pasos de crecimiento) | ≈19 ms (sin re-mallar) |
+| 60 meses de golpe | 448 edificios, 2,5 M vóxeles, 650 columnas; 1,2 s de simulación + 1,7 s de encolado; re-mallado 0,27 s |
+| Un edificio nuevo o mejorado | ≈9 000 vóxeles, ≈3 columnas, re-mallado ≈2–5 ms con los hilos de trabajo |
+| Paso de crecimiento al ritmo del juego (0,5 s) | medio 0,8 ms, peor 16 ms |
+| Triángulos con la ciudad crecida | 0,46 M → 0,99 M |
+| Memoria | 137 MB recién trazado → ≈490 MB con la ciudad crecida (pico 780 MB durante el avance de 60 meses) |
+| Ventana bajo xvfb (lavapipe, render por CPU) | ≈7 FPS medio durante el recorrido (no representa una GPU) |
+
+### Problemas conocidos
+
+- **Memoria.** Con la ciudad crecida la memoria residente pasa de ≈140 a ≈490 MB; el pico
+  de 780 MB es del avance de 60 meses (todas las ediciones juntas en un mapa). Cada solar
+  guarda sus vóxeles (`Vec<IVec3>`, ≈100 KB por casa). Falta medir dónde está el resto y
+  aplicar las ediciones en lotes.
+- **Encolar muchas ediciones bloquea el hilo principal** (1,7 s para 2,5 M vóxeles en el
+  avance rápido). Al ritmo del juego no se nota (≤16 ms por paso), pero un avance rápido
+  en la ventana congela un momento.
+- Al zonificar con un pincel grande todo crece con ranchos a la vez y la ciudad queda
+  pareja; en el prototipo pasa lo mismo, falta la variedad por valor del suelo y demanda.
+- Demoler una calle se lleva sin aviso los solares (y casas) que quedan sin frente.
+- Cada cambio de calles revisa todos los solares (O(n)); con miles de solares habrá que
+  usar el índice espacial también ahí.
+- Los puentes no existen: una calle que toca agua se rechaza ("aún no hay puentes").
+- La capa de vistas previas no se oscurece de noche (zonas en verde brillante).
+- Sin interfaz gráfica todavía: la información va en el título de la ventana y en la
+  consola (paso 3 de la fase 2).
+- Las paredes oblicuas de 0,5 m se ven dentadas de cerca; no hay suavizado por subvóxel.

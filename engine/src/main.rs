@@ -2,7 +2,9 @@
 //! niveles de detalle y lo dibuja con wgpu.
 //!
 //! Uso:
-//!   motor                              ventana interactiva (mundo en streaming)
+//!   motor                              ventana con el juego: fundar, trazar calles, zonificar
+//!   motor --sandbox                    ventana con el sandbox de vóxeles (escena colonial)
+//!   motor --demo-ciudad carpeta        recorrido del juego sin pantalla (con --window, en la ventana)
 //!   motor --shot salida.png [...]      una captura sin ventana (todo el mundo de una vez)
 //!   motor --auto-test carpeta          recorrido automático sin pantalla, con capturas
 //!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
@@ -14,6 +16,7 @@
 mod app;
 mod bench;
 mod buildings;
+mod city;
 mod fxhash;
 mod camera;
 mod lod;
@@ -53,6 +56,10 @@ struct Args {
     threads: usize,
     smooth: bool,
     bench: Option<String>,
+    /// Modo juego (ciudad colonial jugable) en vez del sandbox.
+    juego: bool,
+    sandbox: bool,
+    scene_set: bool,
 }
 
 fn parse_args() -> Args {
@@ -72,6 +79,9 @@ fn parse_args() -> Args {
         threads,
         smooth: true,
         bench: None,
+        juego: false,
+        sandbox: false,
+        scene_set: false,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -79,7 +89,23 @@ fn parse_args() -> Args {
         let next = argv.get(i + 1).cloned().unwrap_or_default();
         match argv[i].as_str() {
             "--shot" => a.shot = Some(next),
-            "--scene" => a.scene = next,
+            "--scene" => {
+                a.scene = next;
+                a.scene_set = true;
+            }
+            "--demo-ciudad" => {
+                a.auto_test = Some(next);
+                a.juego = true;
+            }
+            "--juego" | "--sandbox" => {
+                if argv[i] == "--juego" {
+                    a.juego = true;
+                } else {
+                    a.sandbox = true;
+                }
+                i += 1;
+                continue;
+            }
             "--cam" => {
                 a.cam_set = true;
                 for (k, v) in next.split(',').enumerate().take(5) {
@@ -121,14 +147,30 @@ fn parse_args() -> Args {
                 continue;
             }
             "--help" | "-h" => {
-                println!("{}", include_str!("main.rs").lines().skip(3).take(9).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
+                println!("{}", include_str!("main.rs").lines().skip(3).take(12).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
                 std::process::exit(0);
             }
             other => eprintln!("argumento desconocido: {other}"),
         }
         i += 2;
     }
+    // Sin escena ni recorrido pedidos, la ventana abre el juego.
+    if !a.sandbox && !a.scene_set && a.auto_test.is_none() && a.shot.is_none() && a.bench.is_none() {
+        a.juego = true;
+    }
     a
+}
+
+/// Sesión del juego o del sandbox según los argumentos.
+fn new_session(args: &Args) -> session::Session {
+    if args.juego {
+        let p = city::game_demo::PLAZA;
+        let cam = if args.cam_set { args.cam } else { [p.x, p.y, 700.0, 200.0, 45.0] };
+        session::Session::new_game(args.levels, args.threads, cam, args.hour)
+    } else {
+        let cam = if args.cam_set { args.cam } else { session::scene_camera(&args.scene) };
+        session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour)
+    }
 }
 
 /// Malla todos los chunks de todos los niveles en paralelo.
@@ -182,14 +224,14 @@ fn peak_memory_mb() -> Option<f64> {
 
 /// Recorrido automático sin pantalla.
 fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
-    let cam = if args.cam_set { args.cam } else { session::scene_camera(&args.scene) };
     let t0 = std::time::Instant::now();
     let mut r = render::Renderer::new()?;
     r.smooth_terrain = args.smooth;
     println!("Adaptador: {} · listo en {:.2?} · {} hilos de trabajo", r.adapter_name, t0.elapsed(), args.threads);
-    let mut s = session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour);
+    let mut s = new_session(args);
     s.view_h = args.size.1 as f32;
-    let mut tour = tour::Tour::new(dir, args.size.0, args.size.1);
+    let steps = if s.game.is_some() { tour::city_steps() } else { tour::default_steps() };
+    let mut tour = tour::Tour::with_steps(dir, args.size.0, args.size.1, steps);
     let mut first_logged = false;
     loop {
         s.update(1.0 / 30.0);
@@ -226,8 +268,7 @@ fn main() {
         let result = match (&args.auto_test, args.window) {
             (Some(dir), false) => run_headless_tour(&args, &dir.clone()),
             _ => {
-                let cam = if args.cam_set { args.cam } else { session::scene_camera(&args.scene) };
-                let s = session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour);
+                let s = new_session(&args);
                 app::run(s, app::Options { size: args.size, msaa: args.msaa, frames: args.frames, tour_dir: args.auto_test.clone() })
             }
         };

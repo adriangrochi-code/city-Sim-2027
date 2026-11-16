@@ -276,4 +276,28 @@ mod tests {
         // Solo se tocan las columnas cercanas, no todo el mundo.
         assert!(touched[0].len() <= 4 && touched[0].contains(&IVec2::new(0, 0)));
     }
+
+    /// Reemplazar un edificio por uno más bajo (o demolerlo) no deja restos en los niveles
+    /// gruesos: dentro de una carga lo sólido le gana al aire, pero la carga nueva reemplaza.
+    #[test]
+    fn reemplazar_o_demoler_no_deja_restos_en_los_niveles_gruesos() {
+        let mut s = EditStore::new(3);
+        let mut a = Edits::default();
+        a.fill(IVec3::new(0, 0, 0), IVec3::new(8, 8, 8), CAL); // casa de altos
+        s.apply(&a, false);
+        assert_eq!(s.levels[2].get(IVec3::new(1, 1, 1)), Some(CAL));
+        // Se reemplaza: aire arriba, techo más bajo. Un solo vóxel sólido en el grueso basta.
+        let mut b = Edits::default();
+        b.fill(IVec3::new(0, 4, 0), IVec3::new(8, 8, 8), AIR);
+        b.fill(IVec3::new(0, 0, 0), IVec3::new(8, 4, 8), TILE);
+        s.apply(&b, false);
+        assert_eq!(s.levels[2].get(IVec3::new(1, 1, 1)), Some(AIR), "el piso alto se fue también en el nivel grueso");
+        assert_eq!(s.levels[2].get(IVec3::new(1, 0, 1)), Some(TILE));
+        assert_eq!(s.levels[1].get(IVec3::new(2, 2, 2)), Some(AIR));
+        // Demoler: todo aire.
+        let mut c = Edits::default();
+        c.fill(IVec3::new(0, 0, 0), IVec3::new(8, 8, 8), AIR);
+        s.apply(&c, false);
+        assert_eq!(s.levels[2].get(IVec3::new(1, 0, 1)), Some(AIR));
+    }
 }

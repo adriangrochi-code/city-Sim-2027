@@ -197,10 +197,7 @@ fn cells_of(a: Vec2, b: Vec2) -> impl Iterator<Item = IVec2> {
 }
 
 impl RoadNetwork {
-    pub fn width_of(&self, eid: u32) -> f32 {
-        self.edges[&eid].kind.width()
-    }
-
+    #[cfg(test)]
     pub fn degree(&self, nid: u32) -> usize {
         self.node_edges.get(&nid).map_or(0, |v| v.len())
     }

@@ -104,9 +104,17 @@ Ya funciona como aplicación interactiva: ventana con cámara de constructor de 
 se genera en hilos a medida que te movés (primer cuadro en menos de 1 s) y un modo sandbox para
 colocar estructuras del catálogo, excavar y rellenar terreno.
 
+Desde la última versión, **el juego empieza a jugarse sobre los vóxeles**: fundar la plaza, trazar
+calles rectas, curvas y en damero (con calzada de tierra o empedrado en vóxeles), zonificar solares
+que siguen la curva y ver crecer ranchos, casas de azotea y casas de altos girados hacia la calle.
+
+![Calle curva con casas de vóxeles giradas hacia la calle](docs/capturas/motor-ciudad-curva.jpg)
+
 ```
 cd engine
-cargo run --release                                    # ventana interactiva
+cargo run --release                                    # el juego en el motor (modo por omisión)
+cargo run --release -- --sandbox                       # el sandbox de estructuras
+cargo run --release -- --demo-ciudad salida/           # demostración automática con capturas
 cargo run --release -- --msaa 1                        # más rápida sin GPU dedicada
 cargo run --release -- --auto-test salida/             # recorrido automático con capturas
 cargo run --release -- --shot captura.png              # una captura sin ventana

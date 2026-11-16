@@ -228,12 +228,6 @@ impl Lots {
         lot
     }
 
-    /// Quita los solares que se superponen con un rectángulo (al fundar la plaza).
-    pub fn clear_area(&mut self, corners: &[Vec2]) -> Vec<Lot> {
-        let ids: Vec<u32> = self.lots.values().filter(|l| polys_overlap(corners, &self.corners(l, 0.6))).map(|l| l.id).collect();
-        ids.into_iter().map(|id| self.remove(id)).collect()
-    }
-
     /// Pinta la zona con un pincel circular. Devuelve los solares que hay que demoler
     /// (los que tenían edificio y se les quitó la zona).
     pub fn paint(&mut self, center: Vec2, radius: f32, zone: u8) -> (usize, Vec<u32>) {

@@ -2,6 +2,7 @@
 //! cámara, hora del día, herramienta de construcción y selección con el ratón.
 
 use crate::buildings::Edits;
+use crate::city::game::Game;
 use crate::camera::OrbitCamera;
 use crate::lod::BASE_VOXEL;
 use crate::raycast::{raycast, Hit};
@@ -40,6 +41,8 @@ pub struct Session {
     scene_rx: Option<Receiver<EditStore>>,
     /// Alto de la imagen en píxeles (para elegir el nivel de detalle por tamaño en pantalla).
     pub view_h: f32,
+    /// Modo juego: la ciudad colonial (calles, solares, crecimiento). `None` = sandbox.
+    pub game: Option<Game>,
 }
 
 impl Session {
@@ -65,7 +68,41 @@ impl Session {
         });
         let ground = terrain.height(cam[0], cam[1]).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(cam[0], ground, cam[1]), yaw: cam[3], pitch: cam[4], distance: cam[2], fov_y: 50.0 };
-        Session { terrain, streamer, cam, hour, day_paused: true, tool: 2, rot: 0, hit: None, scene_ready: None, started, first_frame: None, seed: 1, scene_rx: Some(rx), view_h: 900.0 }
+        Session { terrain, streamer, cam, hour, day_paused: true, tool: 2, rot: 0, hit: None, scene_ready: None, started, first_frame: None, seed: 1, scene_rx: Some(rx), view_h: 900.0, game: None }
+    }
+
+    /// Sesión del modo juego: terreno virgen y la ciudad por fundar.
+    pub fn new_game(levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
+        let mut s = Session::new("vacia", levels, threads, cam, hour);
+        s.game = Some(Game::default());
+        s.day_paused = false;
+        s
+    }
+
+    /// Aplica ediciones al mundo (re-malla solo las columnas tocadas).
+    pub fn apply_edits(&mut self, e: &Edits) -> usize {
+        if e.voxels.is_empty() && e.surface.is_empty() {
+            return 0;
+        }
+        self.streamer.edit(e).len()
+    }
+
+    /// Clic izquierdo del modo juego donde apunta el ratón.
+    pub fn game_press(&mut self) {
+        let t = self.terrain.clone();
+        let Some(g) = self.game.as_mut() else { return };
+        let Some(h) = g.hover else { return };
+        if let Some(e) = g.press(&t, h) {
+            let t0 = Instant::now();
+            let n = self.apply_edits(&e);
+            println!("{} vóxeles editados, {n} columnas a re-mallar ({:.1?})", e.voxels.len(), t0.elapsed());
+        }
+    }
+
+    pub fn game_release(&mut self) {
+        if let Some(g) = self.game.as_mut() {
+            g.release();
+        }
     }
 
     /// Avanza el estado: la cámara sigue el terreno, el día corre y el mundo se recentra.
@@ -85,6 +122,24 @@ impl Session {
                 println!("Escena lista en {:.2?}: {} columnas a regenerar", self.started.elapsed(), n);
                 self.scene_rx = None;
             }
+        }
+        // Modo juego: el cursor, el pincel de zonas y la simulación (crecimiento de la ciudad).
+        if self.game.is_some() {
+            let t = self.terrain.clone();
+            let hover = self.hit.map(|h| Vec2::new(h.point.x, h.point.z));
+            let g = self.game.as_mut().unwrap();
+            g.hover = hover;
+            let mut batch = Edits::default();
+            if let Some(h) = hover {
+                if let Some(e) = g.paint_at(h) {
+                    batch.voxels.extend(e.voxels);
+                }
+            }
+            if let Some(e) = g.update(&t, dt) {
+                batch.voxels.extend(e.voxels);
+                batch.surface.extend(e.surface);
+            }
+            self.apply_edits(&batch);
         }
         let eye_h = (self.cam.eye().y - self.cam.target.y).max(1.0);
         self.streamer.update_view(Vec2::new(self.cam.target.x, self.cam.target.z), eye_h, self.cam.fov_y, self.view_h);
@@ -159,6 +214,9 @@ impl Session {
 
     /// Resaltado: el vóxel bajo el cursor y el contorno de la estructura a colocar.
     pub fn overlay(&self) -> Vec<OverlayVertex> {
+        if let Some(g) = &self.game {
+            return g.overlay(&self.terrain);
+        }
         let mut out = Vec::new();
         if let Some(h) = self.hit {
             let vs = BASE_VOXEL;
@@ -172,6 +230,9 @@ impl Session {
     }
 
     pub fn title(&self, fps: f32, r: &Renderer) -> String {
+        if let Some(g) = &self.game {
+            return format!("{} · {fps:.0} FPS · {:.2} M triángulos · {} columnas · pendientes {} · {:02}:{:02}", g.status(), r.triangles() as f32 / 1e6, r.column_count(), self.streamer.pending(), self.hour as u32, (self.hour.fract() * 60.0) as u32);
+        }
         format!(
             "Motor de vóxeles · {fps:.0} FPS · {:.2} M triángulos ({:.2} M caras, {:.0} MB) · dibujo {} · {} + {} llamadas · subido {:.1} MB · {} columnas · pendientes {} · {:02}:{:02}{} · herramienta: {} (giro {})",
             r.triangles() as f32 / 1e6,
