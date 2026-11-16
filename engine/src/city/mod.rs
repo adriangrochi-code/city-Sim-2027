@@ -5,6 +5,7 @@
 //! Cada acción devuelve las ediciones de vóxeles que produce; la sesión las aplica al mundo
 //! en streaming, que re-malla solo las columnas tocadas.
 
+pub mod economy;
 pub mod game;
 pub mod game_demo;
 pub mod lots;
@@ -34,6 +35,8 @@ pub struct City {
     pub pool: i32,
     pub month: u32,
     pub plaza: Option<(Vec2, f32)>,
+    /// Recursos, impuestos, presupuesto, opinión y ordenanzas.
+    pub economy: economy::Economy,
     rng: Rng,
     month_acc: f32,
     growth_acc: f32,
@@ -41,7 +44,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, rng: Rng::new(1726), month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), rng: Rng::new(1726), month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -289,18 +292,54 @@ impl City {
         news
     }
 
+    /// Lo que la ciudad le pasa a la economía este mes. Mientras no existan en el motor las
+    /// estancias, hornos y canteras del prototipo, el entorno rural produce según la población.
+    pub fn month_input(&self) -> economy::MonthInput {
+        use economy::Res;
+        let pop = self.population();
+        let mut houses = [0; 3];
+        for l in self.lots.lots.values() {
+            if (1..=3).contains(&l.level) {
+                houses[l.level as usize - 1] += 1;
+            }
+        }
+        let mut production = [0.0f32; 6];
+        production[Res::Pan as usize] = 300.0 + pop as f32 * 1.05; // chacras privadas del ejido
+        production[Res::Carne as usize] = 400.0 + pop as f32 * 0.9;
+        production[Res::Ladrillos as usize] = 60.0;
+        production[Res::Cueros as usize] = 80.0 + pop as f32 * 0.05;
+        production[Res::Sebo as usize] = 40.0;
+        let mut construction = [0.0f32; 6];
+        construction[Res::Ladrillos as usize] = houses[1] as f32 * 0.4 + houses[2] as f32 * 0.8;
+        economy::MonthInput {
+            pop,
+            houses,
+            production,
+            construction,
+            ships: if self.month % 4 == 0 { 1 } else { 0 },
+            water_ratio: 0.6,
+            upkeep_roads: (self.net.total_length() * 0.01) as i64,
+            world_hides: 1.0,
+            ..Default::default()
+        }
+    }
+
     fn month_tick(&mut self) -> Vec<String> {
         let mut news = Vec::new();
         self.month += 1;
         let pop = self.population();
-        let mut arrivals = 4 + (pop as f32 * 0.03) as i32;
+        let factor = self.economy.arrivals_factor();
+        let mut arrivals = ((4.0 + pop as f32 * 0.03) * factor) as i32;
         if self.month % 4 == 0 {
-            let ship = 20 + self.rng.range(0, 25) + (pop as f32 * 0.02) as i32;
+            let ship = ((20 + self.rng.range(0, 25)) as f32 * self.economy.ship_factor()) as i32 + (pop as f32 * 0.02) as i32;
             arrivals += ship;
             news.push(format!("Llega un barco con {ship} pobladores"));
         }
         self.pool = (self.pool + arrivals).min(600);
-        self.money += (pop as f32 * 1.2) as i64 - (self.net.total_length() * 0.01) as i64;
+        let input = self.month_input();
+        let report = self.economy.month(&input);
+        self.money += report.balance();
+        news.extend(report.news);
         self.lots.age_lots();
         news
     }

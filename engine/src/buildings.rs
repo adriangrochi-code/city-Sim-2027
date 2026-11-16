@@ -37,6 +37,7 @@ impl Edits {
 }
 
 /// Generador pseudoaleatorio simple y determinista.
+#[derive(Clone, Debug)]
 pub struct Rng(u64);
 impl Rng {
     pub fn new(seed: u64) -> Self {
