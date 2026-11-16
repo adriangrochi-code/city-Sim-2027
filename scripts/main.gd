@@ -19,27 +19,33 @@ const Port = preload("res://scripts/city/port.gd")
 const Wall = preload("res://scripts/city/wall.gd")
 const Church = preload("res://scripts/city/church.gd")
 const Epidemics = preload("res://scripts/city/epidemics.gd")
+const Policies = preload("res://scripts/city/policies.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
-enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER, PORT, WALL, FIELD }
+enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER, PORT, WALL, FIELD, UPGRADE, POLICY }
 const TOOL_DEFS := [
-	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o la iglesia para ver su información. F sigue al vecino elegido · G financia la iglesia matriz · O objetivos de la época · F5 guardar · F9 cargar."},
+	{"key": "1", "name": "Ver", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o la iglesia para ver su información. F sigue al vecino elegido · G financia la iglesia matriz · O objetivos de la época · F5 guardar · F9 cargar."},
 	{"key": "2", "name": "Plaza", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
 	{"key": "3", "name": "Recta", "hint": "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar."},
 	{"key": "4", "name": "Curva", "hint": "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija."},
 	{"key": "5", "name": "Damero", "hint": "Clic en una esquina, clic en la otra punta del primer lado y mueve el ratón para extender las manzanas (cuadras de 84 m). Tercer clic para trazar."},
-	{"key": "6", "name": "Zona mixta", "hint": "Pinta con el ratón los solares junto a las calles. Ahí se instalan los pobladores. [ y ] cambian el tamaño del pincel."},
-	{"key": "7", "name": "Quitar zona", "hint": "Pinta para quitar la zona (derriba lo construido)."},
+	{"key": "6", "name": "Zona", "hint": "Pinta con el ratón los solares junto a las calles. Ahí se instalan los pobladores. [ y ] cambian el tamaño del pincel."},
+	{"key": "7", "name": "Sin zona", "hint": "Pinta para quitar la zona (derriba lo construido)."},
 	{"key": "8", "name": "Demoler", "hint": "Haz clic sobre un tramo de calle o un pozo, aljibe o puesto para demolerlo."},
 	{"key": "9", "name": "Parcelas", "hint": "Compra parcelas contiguas a las tuyas (mercedes de tierras). Se desbloquean más con la población."},
 	{"key": "0", "name": "Servicios", "hint": "Pozos, aljibes, puesto de aguadores o de serenos, y lazareto para la cuarentena de los barcos con fiebre (R gira). Las casas de azotea necesitan agua y las de altos, buena agua; con agua cerca se apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
 	{"key": "P", "name": "Puerto", "hint": "Haz clic en la costa, junto a una calle, para construir el muelle con su barraca. Los barcos fondean en el río y las lanchas descargan pobladores y mercancías; las carretas traen cueros para embarcar."},
-	{"key": "C", "name": "Campo", "hint": "Estancias, saladeros, horno de ladrillos (las casas y la iglesia los necesitan) y atahona (pan para la ciudad). Las carretas llevan el ganado al saladero y los cueros salados al puerto. El saladero huele mal y contamina los pozos cercanos."},
 	{"key": "M", "name": "Muralla", "hint": "Clic en el inicio y clic en el final de cada tramo; sigue encadenando y Esc para terminar. Donde cruza una calle se abre un portón con aduana: las carretas se detienen a ser revisadas y pagan."},
+	{"key": "C", "name": "Campo", "hint": "Estancias, saladeros, horno de ladrillos (las casas y la iglesia los necesitan) y atahona (pan para la ciudad). Las carretas llevan el ganado al saladero y los cueros salados al puerto. El saladero huele mal y contamina los pozos cercanos."},
+	{"key": "U", "name": "Mejorar calle", "hint": "Haz clic en un tramo de calle para mejorarlo sin demolerlo: empedrarlo (pesos y piedra de la cantera) o agregarle faroles (sebo cada mes)."},
+	{"key": "K", "name": "Ordenanzas", "hint": "Las ordenanzas del cabildo: precio del pan, pósito de granos, comercio, agua en la sequía, incendios, limpieza… Cada una conforma a unos sectores y molesta a otros."},
 ]
 const WATER_TYPES := [Services.Type.WELL, Services.Type.CISTERN, Services.Type.WATER_CARRIERS, Services.Type.WATCH, Services.Type.LAZARETO]
-const FIELD_TYPES := [Services.Type.ESTANCIA, Services.Type.SALADERO, Services.Type.HORNO, Services.Type.ATAHONA]
+const FIELD_TYPES := [Services.Type.ESTANCIA, Services.Type.SALADERO, Services.Type.HORNO, Services.Type.ATAHONA, Services.Type.CANTERA]
+const STONE_PER_M := 0.5
+const PAVE_PESOS_PER_M := 4.0
+const LAMPS_PESOS_PER_M := 2.0
 const SAVE_PATH := "user://partida.txt"
 static var pending_load := {}
 const WINDS := [["pampero", Vector2(0.7, -0.7)], ["sudestada", Vector2(-0.7, -0.7)], ["viento norte", Vector2(0.0, 1.0)], ["viento del este", Vector2(-1.0, 0.0)], ["brisa del río", Vector2(0.0, -1.0)]]
@@ -70,6 +76,8 @@ var wall: Wall
 var church: Church
 var epidemics: Epidemics
 var bricks := 200
+var stone := 150
+var policies := Policies.new()
 var _bread_warned := 0
 var _demo_no_lazareto := false
 var church_c := Vector2.ZERO
@@ -158,6 +166,7 @@ func _ready() -> void:
 	epidemics.setup(lots, services, gen)
 	epidemics.event.connect(hud_toast)
 	port.sick_ship.connect(_on_sick_ship)
+	policies.event.connect(hud_toast)
 	lots.sick_check = epidemics.is_sick
 	day.night_materials.append(services.lantern_mat)
 	rig = CameraRig.new()
@@ -248,13 +257,21 @@ func _month_tick() -> void:
 					agents.spawn(Agents.Kind.CART, net.nodes[entry], church_c, -1, "lleva ladrillos y cal a la obra de la matriz", rng.randi() % 100000, Agents.TEMPERS[1])
 	_check_transition(pop)
 	arrivals = int(arrivals * epidemics.attraction())
-	if pop > services.bread_capacity():
-		arrivals = int(arrivals * 0.3)
-		if month - _bread_warned >= 6:
-			_bread_warned = month
-			hud.toast("Falta pan: los pobladores no se quedan. Construye una atahona (herramienta Campo)")
+	var built := lots.count_built()
+	var with_water := 0
+	for lid in lots.lots:
+		if lots.lots[lid]["level"] > 0 and float(lots.lots[lid]["water"]) >= 0.5:
+			with_water += 1
+	money -= policies.month_tick(pop, services.bread_capacity(), services.of_type(Services.Type.ESTANCIA).size(), not epidemics.infected.is_empty(),
+		float(with_water) / maxf(built, 1.0), port.year_stats["ships"], port.mult("price"))
+	_apply_policies()
+	arrivals = int(arrivals * policies.arrivals_factor())
+	if policies.bread_price > 1.6 and month - _bread_warned >= 6:
+		_bread_warned = month
+		hud.toast("El pan está caro: llega menos gente. Más atahonas, el pósito o el precio fijo del pan (Ordenanzas)")
 	pool = mini(pool + arrivals + epidemics.month_tick(), 600)
 	bricks = mini(bricks + services.bricks_per_month(), 3000)
+	stone = mini(stone + services.stone_per_month(), 3000)
 	money += wall.take_duty() - wall.upkeep() - (Port.PIER_UPKEEP if port.has_pier else 0)
 	money += int(pop * 1.2) - int(net.total_length() * 0.01) - services.upkeep()
 	services.update_water()
@@ -310,7 +327,7 @@ func _refresh_hud() -> void:
 		"money": "%s pesos" % Hud.fmt(money),
 		"pop": "Población: %s" % Hud.fmt(pop),
 		"pool": "Esperan casa: %d" % pool,
-		"stage": "%s · Ladrillos %d · Pan %s%s" % [_stage_name, bricks, "ok" if lots.population() <= services.bread_capacity() else "falta", " · FIEBRE" if not epidemics.infected.is_empty() else ""],
+		"stage": "%s · Ladrillos %d · Piedra %d · Pan %.1f%s%s" % [_stage_name, bricks, stone, policies.bread_price, " · SEQUÍA" if policies.in_drought() else "", " · FIEBRE" if not epidemics.infected.is_empty() else ""],
 		"parcels": "Parcelas %d/%d" % [parcels.owned.size(), parcels.max_owned],
 		"wind": "Viento: %s%s" % [fires.wind_name, (" · %d incendios" % fires.burning.size()) if fires.burning.size() > 0 else ""],
 		"era": "Época %d: %s" % [era, "colonial" if era == 1 else "Ciudad Nueva"],
@@ -319,6 +336,12 @@ func _refresh_hud() -> void:
 	if agents.selected_id != -1:
 		hud.show_info(agents.describe(agents.selected_id))
 	elif not _inspected.is_empty() and tool == Tool.INSPECT:
+		hud.show_info(_inspected_text())
+		hud.set_actions(_actions())
+	elif tool == Tool.POLICY:
+		hud.show_info(policies.describe(money))
+		hud.set_actions(policies.actions(money))
+	elif tool == Tool.UPGRADE and not _inspected.is_empty():
 		hud.show_info(_inspected_text())
 		hud.set_actions(_actions())
 	elif tool == Tool.PORT:
@@ -344,6 +367,9 @@ func _select_tool(t: int) -> void:
 	if t != Tool.INSPECT:
 		hud.show_info("")
 		_inspected = []
+	if t == Tool.POLICY:
+		hud.show_info(policies.describe(money))
+		hud.set_actions(policies.actions(money))
 	terrain.set_overlay(t == Tool.PARCELS)
 	if t == Tool.STRAIGHT or t == Tool.CURVE or t == Tool.GRID:
 		hud.set_options("Tipo de calle (Tab):", ["Camino de tierra", "Calle empedrada"], road_type)
@@ -403,6 +429,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_select_tool(Tool.PORT)
 		elif k == KEY_M:
 			_select_tool(Tool.WALL)
+		elif k == KEY_U:
+			_select_tool(Tool.UPGRADE)
+		elif k == KEY_K:
+			_select_tool(Tool.POLICY)
 		elif k == KEY_C:
 			_select_tool(Tool.FIELD)
 		elif k == KEY_G:
@@ -494,6 +524,11 @@ func _on_click() -> void:
 			build_pier(_hover)
 		Tool.FIELD:
 			place_service(field_type, _hover, service_angle)
+		Tool.UPGRADE:
+			var ue := net.nearest_edge(_hover, 10.0)
+			_inspected = ["road", ue["edge"]] if ue["edge"] != -1 else []
+			hud.show_info(_inspected_text() if not _inspected.is_empty() else "")
+			hud.set_actions(_actions())
 		Tool.WALL:
 			if _stage == 0:
 				_p0 = _wall_snap(_hover)
@@ -755,6 +790,10 @@ func _building_at(p: Vector2) -> Array:
 
 func _inspected_text() -> String:
 	match _inspected[0]:
+		"road":
+			if net.edges.has(_inspected[1]):
+				var ed: Dictionary = net.edges[_inspected[1]]
+				return "%s%s\nLargo del tramo: %d m\n%s\nPiedra disponible: %d" % [RoadNetwork.NAMES[ed["type"]], " con faroles" if ed.get("lamps", false) else "", int(ed["len"]), agents.lane_info(_inspected[1]), stone]
 		"church":
 			return church.describe()
 		"port":
@@ -766,9 +805,27 @@ func _inspected_text() -> String:
 
 
 func _actions() -> Array:
+	if tool == Tool.POLICY:
+		return policies.actions(money)
 	if _inspected.is_empty():
 		return []
 	match _inspected[0]:
+		"road":
+			if not net.edges.has(_inspected[1]):
+				return []
+			var ed: Dictionary = net.edges[_inspected[1]]
+			var L: float = ed["len"]
+			var out := []
+			if ed["type"] == RoadNetwork.Type.DIRT:
+				var pc := int(L * PAVE_PESOS_PER_M)
+				var sc := int(L * STONE_PER_M)
+				out.append(["Empedrar el tramo (%s pesos, %d de piedra)" % [Hud.fmt(pc), sc], money >= pc and stone >= sc, "pave", null])
+			if not ed.get("lamps", false):
+				var lc := int(L * LAMPS_PESOS_PER_M)
+				out.append(["Poner faroles (%s pesos, sebo cada mes)" % Hud.fmt(lc), money >= lc, "lamps", null])
+			else:
+				out.append(["Quitar los faroles", true, "unlamps", null])
+			return out
 		"church":
 			if church.finished() or church.building:
 				return []
@@ -788,6 +845,26 @@ func _on_action(i: int) -> void:
 		return
 	var kind: String = acts[i][2]
 	match kind:
+		"policy":
+			money -= Policies.TOGGLE_COST
+			policies.toggle(acts[i][3])
+			_apply_policies()
+		"pave":
+			var eid: int = _inspected[1]
+			var L: float = net.edges[eid]["len"]
+			money -= int(L * PAVE_PESOS_PER_M)
+			stone -= int(L * STONE_PER_M)
+			net.edges[eid]["type"] = RoadNetwork.Type.STONE
+			roads.refresh_edge(eid)
+			agents.router.rebuild(net)
+			hud.toast("Calle empedrada sin demoler: las casas de altos ya pueden crecer acá")
+		"lamps", "unlamps":
+			var eid2: int = _inspected[1]
+			if kind == "lamps":
+				money -= int(float(net.edges[eid2]["len"]) * LAMPS_PESOS_PER_M)
+			net.edges[eid2]["lamps"] = kind == "lamps"
+			services.rebuild_lamps()
+			hud.toast("Faroles colocados en la calle" if kind == "lamps" else "Faroles retirados")
 		"church":
 			fund_church()
 		"port_module":
@@ -810,6 +887,20 @@ func _on_action(i: int) -> void:
 			trees.mark_dirty()
 			hud.toast("Modernizado en el mismo lugar")
 	_refresh_hud()
+
+
+## Traslada las ordenanzas activas a cada sistema.
+func _apply_policies() -> void:
+	services.water_factor = policies.water_factor()
+	services.private_cisterns = policies.is_on("aljibe_obligatorio")
+	services.watch_free = policies.is_on("faroles_vecinos")
+	services.trip_bonus = policies.countryside_bonus()
+	lots.extra_l3_bricks = 10 if policies.is_on("aljibe_obligatorio") else 0
+	port.policy_ship = policies.ship_factor()
+	port.policy_duty = policies.duty_factor()
+	port.policy_no_export = policies.export_blocked()
+	fires.thatch_ban_center = lots.plaza_center if policies.is_on("sin_paja") else Vector2(INF, INF)
+	epidemics.spread_mult = 0.6 if policies.is_on("limpieza") else 1.0
 
 
 func fund_church() -> void:
@@ -874,6 +965,7 @@ func save_game() -> void:
 		"port": [port.has_pier, port.land_point, port.hides, port.year_stats, port.total_exported, port.active_event, port.event_months, port.modules],
 		"wall": [wall.segments, wall.monuments, wall.carts_inspected],
 		"bricks": bricks, "infected": epidemics.infected, "quarantine": epidemics.quarantine,
+		"stone": stone, "policies": policies.save_data(),
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
@@ -949,6 +1041,9 @@ func _apply_save(d: Dictionary) -> void:
 	wall.update_gates()
 	lots.restore(d["lots"])
 	bricks = d.get("bricks", 200)
+	stone = d.get("stone", 150)
+	policies.load_data(d.get("policies", {}))
+	_apply_policies()
 	epidemics.infected = d.get("infected", {})
 	epidemics.quarantine = d.get("quarantine", [])
 	epidemics._refresh_markers()
@@ -1336,6 +1431,22 @@ func _handle_args() -> void:
 			if not args.has("cam"):
 				rig.look_at_point(Vector3(fc.x, gen.height(fc.x, fc.y), fc.y), 110.0)
 				rig.pitch = deg_to_rad(-26.0)
+	if args.has("policies"):
+		for pid in (args["policies"] as String).split(","):
+			policies.toggle(pid)
+		_apply_policies()
+	if args.has("pave"):
+		# Empedrar el camino curvo de salida y ponerle faroles (prueba de mejora de calles).
+		for eid in net.edges.keys():
+			if net.edges[eid]["type"] == RoadNetwork.Type.DIRT:
+				_inspected = ["road", eid]
+				stone = 100000
+				for kind in ["pave", "lamps"]:
+					var acts := _actions()
+					for ai in acts.size():
+						if acts[ai][2] == kind:
+							_on_action(ai)
+		_inspected = []
 	if args.has("sick-ship"):
 		_on_sick_ship(30, port.land_point if port.has_pier else lots.plaza_center)
 	if args.has("simulate"):
@@ -1399,6 +1510,7 @@ func print_stats() -> void:
 			water[2 if w >= 0.85 else (1 if w >= 0.5 else 0)] += 1
 	print("Elección pendiente: %s" % hud.choice_open())
 	print("Época %d · iglesia fase %d%s · campo: %d estancias, %d saladeros · pozos contaminados: %d" % [era, church.phase if church else -1, " (en obra)" if church and church.building else "", services.of_type(Services.Type.ESTANCIA).size(), services.of_type(Services.Type.SALADERO).size(), services.of_type(Services.Type.WELL).filter(func(w): return services.contaminated(services.items[w]["c"])).size()])
+	print("Gobierno: pan %.2f · carne %.2f · pósito %d · sequía %d · opinión %s · ordenanzas %s · piedra %d (+%d/mes) · faroles de calle %d" % [policies.bread_price, policies.meat_price, policies.posito, policies.drought_months, policies.opinion, policies.active.keys(), stone, services.stone_per_month(), services.street_lamp_count()])
 	print("Ladrillos: %d (+%d/mes) · pan para %d · epidemias: brotes %d, víctimas %d, en cuarentena total %d, casas con fiebre %d" % [bricks, services.bricks_per_month(), services.bread_capacity(), epidemics.outbreaks_total, epidemics.deaths_total, epidemics.quarantined_total, epidemics.infected.size()])
 	print("Puerto: muelle %s · cueros en barraca %d · año: %s · acontecimiento: %s" % [port.has_pier, port.hides, port.year_stats, port.active_event.get("name", "ninguno")])
 	print("Muralla: %d m · portones %d · carretas revisadas %d · faroles %d" % [int(wall.total_length()), wall.gates.size(), wall.carts_inspected, services.lamps.size()])
@@ -1465,7 +1577,7 @@ func build_demo() -> void:
 	# Campo: una estancia al final del camino y un saladero cerca del agua.
 	var placed_e := false
 	var placed_s := false
-	var extra := {Services.Type.HORNO: false, Services.Type.ATAHONA: false, Services.Type.LAZARETO: _demo_no_lazareto}
+	var extra := {Services.Type.HORNO: false, Services.Type.ATAHONA: false, Services.Type.LAZARETO: _demo_no_lazareto, Services.Type.CANTERA: false}
 	for eid in net.edges.keys():
 		var e: Dictionary = net.edges[eid]
 		var d := 10.0

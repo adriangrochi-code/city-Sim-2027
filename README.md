@@ -72,6 +72,12 @@ Qué incluye:
   terminada y 300 cueros exportados, llega la gran decisión: derribar la muralla, conservar los
   portones como monumento o conservar también un tramo. Con eso empieza la época 2.
 - **Guardar y cargar partida** (F5 / F9).
+- **Gobernar la ciudad (tecla K, Ordenanzas)** ([detalle](docs/sistemas/politicas-y-recursos.md)):
+  mercado de pan y carne con precios, pósito de granos, sequías, opinión de vecinos, comerciantes
+  y hacendados, y 9 ordenanzas del cabildo (precio fijo del pan, libre comercio, turnos de agua,
+  prohibir la paja cerca de la plaza, limpieza de calles…), cada una con costos y bandos.
+- **Mejorar calles sin demoler (tecla U):** empedrar un camino de tierra con piedra de la cantera
+  o ponerle faroles (con su costo mensual de sebo).
 - **Epidemias y lazareto:** algunos barcos traen fiebre; con lazareto hacen cuarentena, sin él la
   fiebre se propaga de casa en casa (más rápido donde el agua es mala).
 - **Ladrillos y pan:** el horno de ladrillos abastece las casas de azotea, las de altos y la

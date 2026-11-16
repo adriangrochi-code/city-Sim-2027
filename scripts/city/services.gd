@@ -9,7 +9,7 @@ const RoadNetwork = preload("res://scripts/roads/road_network.gd")
 const Lots = preload("res://scripts/city/lots.gd")
 const BuildingGen = preload("res://scripts/city/building_gen.gd")
 
-enum Type { WELL, CISTERN, WATER_CARRIERS, WATCH, ESTANCIA, SALADERO, LAZARETO, HORNO, ATAHONA }
+enum Type { WELL, CISTERN, WATER_CARRIERS, WATCH, ESTANCIA, SALADERO, LAZARETO, HORNO, ATAHONA, CANTERA }
 const INFO := {
 	Type.WELL: {"name": "Pozo de balde", "cost": 400, "upkeep": 4, "cap": 60, "quality": 0.7, "radius": 110.0, "size": Vector2(5, 5),
 		"desc": "Agua de pozo para unas 60 personas cercanas. Calidad regular."},
@@ -29,8 +29,12 @@ const INFO := {
 		"desc": "Cuece ladrillos con barro del arroyo o la costa (a menos de 300 m). Las casas de azotea, las de altos y la iglesia los necesitan. Echa humo: lejos de la plaza."},
 	Type.ATAHONA: {"name": "Atahona", "cost": 1500, "upkeep": 10, "cap": 0, "quality": 0.0, "radius": 0.0, "size": Vector2(16, 16),
 		"desc": "Molino movido por mulas: muele el trigo de las chacras y da pan para unas 1.500 personas. Sin pan, los pobladores no se quedan."},
+	Type.CANTERA: {"name": "Cantera de piedra", "cost": 1800, "upkeep": 10, "cap": 0, "quality": 0.0, "radius": 0.0, "size": Vector2(28, 22),
+		"desc": "Saca piedra para empedrar las calles. Ruidosa y polvorienta: a más de 300 m de la plaza."},
 }
 const CONTAMINATION := 300.0
+const STONE_PER_QUARRY := 60
+const LAMP_UPKEEP := 0.5   # sebo por farol de calle y por mes
 const BRICKS_PER_KILN := 40
 const BREAD_PER_MILL := 1500
 
@@ -63,6 +67,9 @@ const MODULES := {
 	Type.ATAHONA: [
 		{"id": "piedra2", "name": "Segunda piedra de moler", "cost": 1200, "bread": 1500},
 	],
+	Type.CANTERA: [
+		{"id": "frente2", "name": "Segundo frente de cantera", "cost": 1200, "stone": 60},
+	],
 	Type.SALADERO: [
 		{"id": "galpon", "name": "Galpón de salazón nuevo", "cost": 2000, "trips": 2},
 		{"id": "graseria", "name": "Grasería (sebo y velas)", "cost": 2500, "trips": 2, "upkeep": 10},
@@ -81,6 +88,11 @@ var lamps := PackedVector3Array()
 var _next := 1
 var _lamp_mm: MultiMesh
 var lantern_mat: ShaderMaterial
+# Efectos de las ordenanzas (los fija main cada mes).
+var water_factor := 1.0
+var private_cisterns := false
+var watch_free := false
+var trip_bonus := 0
 
 
 func setup(g: TerrainGen, p: Parcels, n: RoadNetwork, l: Lots) -> void:
@@ -131,6 +143,8 @@ func problem(type: int, c: Vector2, angle: float) -> String:
 			return "El lazareto va lejos de la ciudad (a más de 400 m de la plaza)"
 		if not _near_coast(c, 150.0):
 			return "El lazareto va junto a la costa (a menos de 150 m)"
+	if type == Type.CANTERA and lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 300.0:
+		return "La cantera es ruidosa: a más de 300 m de la plaza"
 	if type == Type.HORNO:
 		if lots.plaza_center.x != INF and c.distance_to(lots.plaza_center) < 250.0:
 			return "El horno echa humo: a más de 250 m de la plaza"
@@ -204,7 +218,26 @@ func save_data() -> Array:
 func upkeep() -> int:
 	var total := 0
 	for id in items:
+		if watch_free and items[id]["type"] == Type.WATCH:
+			continue
 		total += int(INFO[items[id]["type"]]["upkeep"]) + int(module_sum(id, "upkeep"))
+	if not watch_free:
+		total += int(street_lamp_count() * LAMP_UPKEEP)
+	return total
+
+
+func street_lamp_count() -> int:
+	var n := 0
+	for eid in net.edges:
+		if net.edges[eid].get("lamps", false):
+			n += int(float(net.edges[eid]["len"]) / 30.0) + 1
+	return n
+
+
+func stone_per_month() -> int:
+	var total := 0
+	for id in of_type(Type.CANTERA):
+		total += STONE_PER_QUARRY + int(module_sum(id, "stone"))
 	return total
 
 
@@ -220,7 +253,7 @@ func module_sum(id: int, key: String) -> float:
 
 
 func cap_of(id: int) -> int:
-	return int(INFO[items[id]["type"]]["cap"]) + int(module_sum(id, "cap"))
+	return int((int(INFO[items[id]["type"]]["cap"]) + int(module_sum(id, "cap"))) * water_factor)
 
 
 func radius_of(id: int) -> float:
@@ -354,6 +387,11 @@ func update_water() -> void:
 			lot["water"] = quality
 			lot["water_src"] = sid
 		it["served"] = used
+	# Ordenanza: las casas de altos tienen su propio aljibe.
+	if private_cisterns:
+		for id in lots.lots:
+			if lots.lots[id]["level"] == 3:
+				lots.lots[id]["water"] = maxf(float(lots.lots[id]["water"]), 1.0)
 
 
 ## Fuente de agua más cercana que alcanza para apagar un fuego en `p` (o -1).
@@ -434,6 +472,20 @@ func lit_at(p: Vector2) -> bool:
 func rebuild_lamps() -> void:
 	var out := PackedVector3Array()
 	var dirs := []
+	for eid in net.edges:
+		var e2: Dictionary = net.edges[eid]
+		if not e2.get("lamps", false):
+			continue
+		var w2: float = RoadNetwork.WIDTH[e2["type"]]
+		var s2 := 6.0
+		var side2 := 1.0
+		while s2 < float(e2["len"]) - 2.0:
+			var pt2: Array = net.edge_point(eid, s2)
+			var tan2: Vector2 = pt2[1]
+			var q2: Vector2 = (pt2[0] as Vector2) + Vector2(-tan2.y, tan2.x) * side2 * (w2 * 0.5 + 0.7)
+			out.append(Vector3(q2.x, gen.height(q2.x, q2.y), q2.y))
+			s2 += 30.0
+			side2 = -side2
 	for id in items:
 		var it: Dictionary = items[id]
 		if it["type"] != Type.WATCH:
@@ -482,8 +534,10 @@ func describe(id: int) -> String:
 	var info: Dictionary = INFO[it["type"]]
 	if it["type"] == Type.WATCH:
 		return "%s\n%s\nFaroles a su cargo: %d · serenos: %d%s" % [info["name"], info["desc"], lamps.size(), 2 + int(module_sum(id, "serenos")), _modules_text(id)]
-	if it["type"] == Type.LAZARETO or it["type"] == Type.HORNO or it["type"] == Type.ATAHONA:
+	if it["type"] == Type.LAZARETO or it["type"] == Type.HORNO or it["type"] == Type.ATAHONA or it["type"] == Type.CANTERA:
 		var extra := ""
+		if it["type"] == Type.CANTERA:
+			extra = "\nPiedra por mes: %d" % (STONE_PER_QUARRY + int(module_sum(id, "stone")))
 		if it["type"] == Type.HORNO:
 			extra = "\nLadrillos por mes: %d" % (BRICKS_PER_KILN + int(module_sum(id, "bricks")))
 		elif it["type"] == Type.ATAHONA:
@@ -597,6 +651,14 @@ func _mesh(type: int, modules: Array) -> ArrayMesh:
 			BuildingGen.box(st, Vector3(0, 0.1, 4.0), Vector3(1.8, 0.8, 1.8), Color(0.62, 0.60, 0.56))
 			BuildingGen.box(st, Vector3(0, 0.9, 4.0), Vector3(0.25, 0.25, 7.0), Color(0.40, 0.29, 0.19))
 			BuildingGen.box(st, Vector3(0, 0.0, 7.2), Vector3(0.6, 1.3, 1.5), Color(0.40, 0.30, 0.22))
+		Type.CANTERA:
+			var rock := Color(0.58, 0.56, 0.52)
+			BuildingGen.box(st, Vector3(-6.0, -1.0, -4.0), Vector3(14.0, 6.0, 10.0), rock.darkened(0.1))
+			BuildingGen.box(st, Vector3(-8.0, 5.0, -6.0), Vector3(8.0, 2.5, 6.0), rock.darkened(0.2))
+			for k in 6:
+				BuildingGen.box(st, Vector3(3.0 + (k % 3) * 2.4, 0.0, 2.0 + (k / 3) * 2.4), Vector3(1.6, 0.9, 1.6), rock)
+			BuildingGen.box(st, Vector3(7.0, 0.4, -5.0), Vector3(1.6, 0.6, 3.0), wood)
+			BuildingGen.box(st, Vector3(7.0, 0.0, -5.0), Vector3(1.9, 1.0, 0.15), wood.darkened(0.3))
 		Type.WATER_CARRIERS:
 			BuildingGen.box(st, Vector3(0, -0.8, 0), Vector3(14.0, 1.0, 18.0), Color(0.55, 0.48, 0.36))
 			BuildingGen.box(st, Vector3(0, -0.5, -4.0), Vector3(10.0, 3.6, 7.0), Color(0.62, 0.50, 0.36))
@@ -665,6 +727,8 @@ func _module_geometry(st: SurfaceTool, modules: Array, stone: Color, wood: Color
 			"piedra2":
 				BuildingGen.box(st, Vector3(5.5, 0.1, -3.0), Vector3(1.8, 0.8, 1.8), Color(0.62, 0.60, 0.56))
 				BuildingGen.box(st, Vector3(5.5, 0.9, -3.0), Vector3(0.25, 0.25, 6.0), Color(0.40, 0.29, 0.19))
+			"frente2":
+				BuildingGen.box(st, Vector3(6.0, -1.0, -6.0), Vector3(8.0, 4.0, 6.0), Color(0.50, 0.48, 0.45))
 			"galpon":
 				BuildingGen.box(st, Vector3(0, -0.6, -20.0), Vector3(30.0, 4.0, 4.0), Color(0.66, 0.40, 0.30))
 				BuildingGen.gable(st, Vector3(0, 3.4, -20.0), 15.3, 2.4, 1.4, tile, Color(0.66, 0.40, 0.30), 15.0, 2.0)

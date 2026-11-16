@@ -30,6 +30,14 @@ func _make_mat(kind: int, col: Color) -> ShaderMaterial:
 	return m
 
 
+## Vuelve a dibujar un tramo (por ejemplo, al empedrarlo).
+func refresh_edge(eid: int) -> void:
+	if _edge_meshes.has(eid):
+		(_edge_meshes[eid] as Node).queue_free()
+		_edge_meshes.erase(eid)
+	rebuild()
+
+
 func rebuild() -> void:
 	for eid in _edge_meshes.keys():
 		if not net.edges.has(eid):

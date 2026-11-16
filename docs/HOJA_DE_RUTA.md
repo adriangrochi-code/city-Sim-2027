@@ -19,6 +19,16 @@
 - [x] Cadenas de producción: horno de ladrillos (las casas de azotea y la iglesia los necesitan) y atahona (harina para la ciudad)
 - [ ] Probar la versión de Windows en un equipo real y medir FPS con GPU real
 
+## Fase 1b: gobernar la ciudad (prototipo)
+
+- [x] Recursos con mercado (pan y carne con precio), pósito de granos y sequías
+- [x] Opinión de tres sectores (vecinos, comerciantes, hacendados) con consecuencias
+- [x] Ordenanzas del cabildo (9 en la época colonial) — ver `docs/sistemas/politicas-y-recursos.md`
+- [x] Mejorar calles sin demoler (empedrar con piedra de cantera, poner faroles con costo mensual)
+- [ ] Mapa por defecto con la geografía real (Montevideo a escala ciudad; Uruguay a escala país)
+- [ ] Alcantarillas y saneamiento por épocas (diseñado)
+- [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (diseñado; la versión colonial ya existe)
+
 ## Fase 2: el juego sobre el motor de vóxeles
 
 El paso clave: dejar de depender del prototipo y jugar directamente sobre los vóxeles.

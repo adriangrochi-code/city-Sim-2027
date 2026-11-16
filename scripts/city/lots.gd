@@ -29,6 +29,7 @@ var nuisances: Array = []    # saladeros: su olor baja el valor del suelo
 const BRICKS := [0, 0, 8, 15]  # ladrillos para llegar a cada nivel
 var bricks_available := 0       # lo fija main antes de cada paso de crecimiento
 var bricks_used := 0
+var extra_l3_bricks := 0        # ordenanza: aljibe obligatorio en casas de altos
 var sick_check: Callable        # func(id) -> bool: las casas con fiebre no crecen
 const ROOF_H := [0.0, 5.0, 5.6, 12.5]
 var _next := 1
@@ -342,7 +343,7 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 			continue
 		var ok := false
 		var water: float = lot["water"]
-		if BRICKS[lvl + 1] > bricks_available - bricks_used:
+		if BRICKS[lvl + 1] + (extra_l3_bricks if lvl == 2 else 0) > bricks_available - bricks_used:
 			continue
 		if sick_check.is_valid() and sick_check.call(lot["id"]):
 			continue
@@ -355,7 +356,7 @@ func grow_step(pool: int, rng: RandomNumberGenerator) -> int:
 		if ok:
 			_set_level(lot, lvl + 1)
 			used += need
-			bricks_used += BRICKS[lvl + 1]
+			bricks_used += BRICKS[lvl + 1] + (extra_l3_bricks if lvl == 2 else 0)
 	if used > 0:
 		_overlay_dirty = true
 		lots_changed.emit()

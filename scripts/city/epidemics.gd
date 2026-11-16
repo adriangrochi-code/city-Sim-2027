@@ -18,6 +18,7 @@ var services: Services
 var gen: TerrainGen
 var infected := {}        # id de solar -> meses que lleva enfermo
 var quarantine: Array = [] # [meses que faltan, personas]
+var spread_mult := 1.0   # ordenanza de limpieza
 var deaths_total := 0
 var outbreaks_total := 0
 var quarantined_total := 0
@@ -90,7 +91,7 @@ func step() -> void:
 				continue
 			var w: float = other["water"]
 			var factor := 1.6 if w < 0.5 else (1.0 if w < 0.85 else 0.45)
-			if _rng.randf() < 0.012 * factor:
+			if _rng.randf() < 0.012 * factor * spread_mult:
 				new_cases.append(oid)
 	for id in new_cases:
 		infected[id] = 0

@@ -317,6 +317,9 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
   completos y los lejanos de forma agregada. Así los mapas pueden ser mucho más grandes.
 
 ### 4.7 Economía y política
+> Recursos, mercado, opinión por sectores y ordenanzas en
+> [sistemas/politicas-y-recursos.md](sistemas/politicas-y-recursos.md).
+
 - Presupuesto con impuestos por zona y riqueza, mantenimiento y préstamos.
 - **El puerto** es el motor económico de las primeras épocas: exporta cueros y tasajo de los
   **saladeros**, después carne de los **frigoríficos** y lana del campo.

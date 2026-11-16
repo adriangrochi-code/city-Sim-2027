@@ -21,6 +21,7 @@ var gen: TerrainGen
 var spawn_helpers: Callable    # func(from: Vector2, to: Vector2, n: int)
 var wind := Vector2(0.7, -0.7)   # pampero: del sudoeste
 var wind_name := "pampero"
+var thatch_ban_center := Vector2(INF, INF)   # ordenanza: sin paja cerca de la plaza
 var burning := {}   # id de solar -> {"i": intensidad, "full": pasos, "fx": Node3D, "fought": bool}
 var smoking := []   # [Node3D, pasos restantes]
 var destroyed_total := 0
@@ -47,7 +48,10 @@ func step() -> void:
 	for id in lots.lots:
 		var lot: Dictionary = lots.lots[id]
 		var lvl: int = lot["level"]
-		if lvl > 0 and not burning.has(id) and _rng.randf() < IGNITE[lvl]:
+		var p_ign: float = IGNITE[lvl]
+		if lvl == 1 and thatch_ban_center.x != INF and (lot["c"] as Vector2).distance_to(thatch_ban_center) < 400.0:
+			p_ign *= 0.3
+		if lvl > 0 and not burning.has(id) and _rng.randf() < p_ign:
 			ignite(id)
 	var lost := []
 	for id in burning.keys():

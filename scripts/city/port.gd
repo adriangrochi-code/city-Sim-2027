@@ -47,6 +47,10 @@ const MODULES := [
 ]
 
 var modules: Array = []
+# Efectos de las ordenanzas (los fija main cada mes).
+var policy_ship := 1.0
+var policy_duty := 1.0
+var policy_no_export := false
 var gen: TerrainGen
 var parcels: Parcels
 var net: RoadNetwork
@@ -190,7 +194,7 @@ func month_tick(pop: int) -> int:
 		event.emit(active_event["news"])
 	# Barcos.
 	var beach_people := 0
-	_ship_timer -= mult("ships")
+	_ship_timer -= mult("ships") * policy_ship
 	if _ship_timer <= 0.0 and mult("ships") > 0.0:
 		_ship_timer = 3.0 + _rng.randf() * 1.5
 		var people := int((20 + _rng.randi_range(0, 25) + pop * 0.02) * mult("people"))
@@ -398,9 +402,9 @@ func flush_ships() -> void:
 func _finish_unloading(sh: Dictionary) -> void:
 	var people: int = sh["people"]
 	var bales := 20 + _rng.randi_range(0, 30)
-	var exported := mini(hides, 400)
+	var exported := 0 if policy_no_export else mini(hides, 400)
 	hides -= exported
-	var duty := int((DUTY_PER_SHIP + exported * DUTY_PER_HIDE * mult("price")) * (1.0 + (0.25 if modules.has("barraca2") else 0.0)))
+	var duty := int((DUTY_PER_SHIP + exported * DUTY_PER_HIDE * mult("price")) * (1.0 + (0.25 if modules.has("barraca2") else 0.0)) * policy_duty)
 	year_stats["people"] += people
 	year_stats["imported"] += bales
 	year_stats["exported"] += exported

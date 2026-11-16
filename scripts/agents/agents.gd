@@ -237,10 +237,10 @@ func _build_schedule() -> void:
 	# El campo: arreos de las estancias al saladero y cueros del saladero al puerto.
 	if services != null:
 		for sid in services.of_type(Services.Type.ESTANCIA):
-			for k in 3 + int(services.module_sum(sid, "trips")):
+			for k in maxi(1, 3 + int(services.module_sum(sid, "trips")) + services.trip_bonus):
 				_schedule.append([(6.0 + _rng.randf() * 8.0) / 24.0, -3000 - int(sid), "arreo"])
 		for sid in services.of_type(Services.Type.SALADERO):
-			for k in 3 + int(services.module_sum(sid, "trips")):
+			for k in maxi(1, 3 + int(services.module_sum(sid, "trips")) + services.trip_bonus):
 				_schedule.append([(8.0 + _rng.randf() * 8.0) / 24.0, -5000 - int(sid), "cueros"])
 	# Carretas que traen cueros y alimentos del campo durante el día.
 	var carts := mini(4 + int(lots.population() / 200.0), 30)
