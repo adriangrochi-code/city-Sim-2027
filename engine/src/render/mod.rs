@@ -1197,8 +1197,20 @@ impl Renderer {
         (dm, ds)
     }
 
-    /// Dibuja un cuadro en la ventana.
-    pub fn render_surface(&mut self, surface: &wgpu::Surface<'static>, config: &wgpu::SurfaceConfiguration, cam: &OrbitCamera, hour: f32) -> Result<(), String> {
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.format
+    }
+
+    /// Dibuja un cuadro en la ventana; `ui` pinta la interfaz encima de la escena.
+    pub fn render_surface(&mut self, surface: &wgpu::Surface<'static>, config: &wgpu::SurfaceConfiguration, cam: &OrbitCamera, hour: f32, ui: Option<UiHook>) -> Result<(), String> {
         let frame = match surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
@@ -1215,6 +1227,9 @@ impl Renderer {
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
         let draws = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, None);
+        if let Some(ui) = ui {
+            ui(&self.device, &self.queue, &mut enc, &view, (w, h));
+        }
         self.last_draws = draws;
         self.upload_frame = self.uploaded_bytes - self.upload_mark;
         self.upload_mark = self.uploaded_bytes;
@@ -1227,6 +1242,11 @@ impl Renderer {
 
     /// Dibuja la escena y la guarda como imagen (PNG o JPG según la extensión).
     pub fn capture(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, path: &str) -> Result<(), String> {
+        self.capture_with(cam, hour, width, height, path, None)
+    }
+
+    /// Como `capture`, con la interfaz pintada encima.
+    pub fn capture_with(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, path: &str, ui: Option<UiHook>) -> Result<(), String> {
         let v = self.write_globals(cam, hour, width as f32 / height as f32);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let targets = self.make_targets(width, height);
@@ -1243,6 +1263,9 @@ impl Renderer {
         let resolve_v = resolve.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
         self.encode(&mut enc, &targets, &resolve_v, &v, None);
+        if let Some(ui) = ui {
+            ui(&self.device, &self.queue, &mut enc, &resolve_v, (width, height));
+        }
         let row = (width * 4).div_ceil(256) * 256;
         let out = self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * height) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
         enc.copy_texture_to_buffer(
@@ -1269,6 +1292,9 @@ impl Renderer {
         img.save(path).map_err(|e| format!("no se pudo guardar {path}: {e}"))
     }
 }
+
+/// Dibuja la interfaz encima de la escena: (dispositivo, cola, codificador, vista, tamaño).
+pub type UiHook<'a> = &'a mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &mut wgpu::CommandEncoder, &wgpu::TextureView, (u32, u32));
 
 /// Caja translúcida (12 triángulos) entre dos esquinas, en metros.
 pub fn overlay_box(out: &mut Vec<OverlayVertex>, a: Vec3, b: Vec3, color: [f32; 4]) {

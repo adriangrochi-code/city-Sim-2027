@@ -48,6 +48,29 @@ pub struct Game {
     pub speed: f32,
     pub message: String,
     message_at: Instant,
+    /// Sube con cada aviso nuevo (la interfaz lo usa para mostrar la gaceta).
+    pub message_seq: u64,
+    /// Punto inspeccionado con la herramienta Inspeccionar (la interfaz muestra su ficha).
+    pub inspected: Option<Vec2>,
+}
+
+/// Ficha de lo inspeccionado para el panel de información.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Inspect {
+    pub title: String,
+    pub lines: Vec<String>,
+    /// "¿Por qué no crece?" (vacío si no aplica).
+    pub why: Vec<String>,
+}
+
+/// Nombre de la etapa de la ciudad según su población (como en el prototipo).
+pub fn stage_name(pop: i32) -> &'static str {
+    match pop {
+        p if p >= 4000 => "Plaza fuerte",
+        p if p >= 1000 => "Ciudad",
+        p if p >= 200 => "Villa",
+        _ => "Fundación",
+    }
 }
 
 impl Default for Game {
@@ -66,6 +89,8 @@ impl Default for Game {
             speed: 1.0,
             message: "Funda la ciudad: elige el sitio de la plaza mayor (clic)".into(),
             message_at: Instant::now(),
+            message_seq: 1,
+            inspected: None,
         }
     }
 }
@@ -74,6 +99,7 @@ impl Game {
     pub fn say(&mut self, m: impl Into<String>) {
         self.message = m.into();
         self.message_at = Instant::now();
+        self.message_seq += 1;
         println!("{}", self.message);
     }
 
@@ -193,8 +219,7 @@ impl Game {
                 self.report(r)
             }
             Tool::Inspect => {
-                let msg = self.describe(p);
-                self.say(msg);
+                self.inspected = Some(p);
                 None
             }
         }
@@ -232,6 +257,113 @@ impl Game {
             return format!("{} · tramo de {} m", ed.kind.name(), ed.len() as i32);
         }
         format!("Terreno en ({:.0}, {:.0})", p.x, p.y)
+    }
+
+    /// Ficha del punto inspeccionado: solar (nivel, habitantes, valor del suelo y por qué no
+    /// crece), calle (tipo y largo) o terreno.
+    pub fn inspect_info(&self) -> Option<Inspect> {
+        let p = self.inspected?;
+        if let Some(id) = self.city.lots.lot_at(p) {
+            let l = &self.city.lots.lots[&id];
+            let front = self.city.lots.frontage(l, &self.city.net);
+            let value = self.city.lots.land_value(l);
+            let mut i = Inspect { title: capitalize(LEVEL_NAMES[l.level as usize]), ..Default::default() };
+            i.lines.push(format!("Zona: {}", if l.zone > 0 { "mixta (vivienda, tienda y taller)" } else { "sin zonificar" }));
+            i.lines.push(format!("Habitantes: {}", CAP[l.level as usize]));
+            i.lines.push(format!("Valor del suelo: {} %", (value * 100.0) as i32));
+            i.lines.push(format!("Calle: {}", front.map_or("—", |k| k.name())));
+            if l.level > 0 {
+                i.lines.push(format!("Antigüedad: {} meses", l.age));
+            }
+            if l.zone == 0 {
+                i.why.push("Sin zonificar: pinta la zona mixta (5).".into());
+            } else if l.level >= 3 {
+                i.why.push("Ya es casa de altos: el máximo de esta época.".into());
+            } else {
+                let need = CAP[l.level as usize + 1] - CAP[l.level as usize];
+                if self.city.pool < need {
+                    i.why.push("Faltan pobladores: esperan barcos con más familias.".into());
+                }
+                match l.level {
+                    1 => {
+                        if l.age < 4 {
+                            i.why.push("El rancho es muy reciente.".into());
+                        }
+                        if value <= 0.2 {
+                            i.why.push("Está lejos de la plaza mayor.".into());
+                        }
+                    }
+                    2 => {
+                        if l.age < 8 {
+                            i.why.push("La casa es muy reciente.".into());
+                        }
+                        if value <= 0.45 {
+                            i.why.push("Para una casa de altos debe estar cerca de la plaza.".into());
+                        }
+                        if front != Some(RoadKind::Stone) {
+                            i.why.push("Necesita una calle empedrada.".into());
+                        }
+                    }
+                    _ => {}
+                }
+                if i.why.is_empty() {
+                    i.why.push("Nada le falta: crecerá con el tiempo.".into());
+                }
+            }
+            return Some(i);
+        }
+        if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
+            let ed = &self.city.net.edges[&e.edge];
+            return Some(Inspect { title: ed.kind.name().into(), lines: vec![format!("Largo del tramo: {} m", ed.len() as i32)], why: vec![] });
+        }
+        Some(Inspect { title: "Terreno".into(), lines: vec![format!("Posición: {:.0}, {:.0}", p.x, p.y)], why: vec![] })
+    }
+
+    /// Pista de la herramienta para la interfaz: (ayuda con el costo en vivo, motivo de error).
+    pub fn hint(&self, t: &TerrainGen) -> (String, Option<String>) {
+        let help = match self.tool {
+            Tool::Plaza => "Elige el sitio de la plaza mayor (terreno firme y llano). R la gira.",
+            Tool::Straight => "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar.",
+            Tool::Curve => "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija.",
+            Tool::Grid => "Clic en una esquina, clic en la punta del primer lado y extiende las manzanas (cuadras de 84 m).",
+            Tool::Zone => "Pinta los solares junto a las calles; ahí se instalan los pobladores.",
+            Tool::Dezone => "Pinta para quitar la zona (derriba lo construido).",
+            Tool::Demolish => "Clic sobre un tramo de calle para demolerlo.",
+            Tool::Inspect => "Clic en un solar, una calle o el terreno para ver su información.",
+        };
+        let mut help = help.to_string();
+        let Some(h) = self.hover else { return (help, None) };
+        let road = |pts: &[Vec2]| -> (i64, Option<String>) {
+            let cost = City::road_cost(pts, self.kind);
+            let err = self.city.road_problem(t, pts, self.kind).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {cost} pesos")));
+            (cost, err)
+        };
+        let (cost, err) = match self.tool {
+            Tool::Plaza => (None, self.city.plaza_problem(t, h, self.plaza_angle)),
+            Tool::Straight | Tool::Curve if self.stage == 1 => {
+                let (c, e) = road(&line(self.p0, self.snap(h)));
+                (Some(c), e)
+            }
+            Tool::Curve if self.stage == 2 => {
+                let (c, e) = road(&self.curve_points(h));
+                (Some(c), e)
+            }
+            Tool::Grid if self.stage == 2 => {
+                let lines = grid_lines(self.p0, self.p1, h);
+                let cost: i64 = lines.iter().map(|l| City::road_cost(l, self.kind)).sum();
+                let err = lines.iter().find_map(|l| self.city.road_problem(t, l, self.kind)).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {cost} pesos")));
+                (Some(cost), err)
+            }
+            Tool::Zone | Tool::Dezone => {
+                help = format!("{help} Pincel: {} m ([ y ] lo cambian).", self.brush as i32);
+                (None, None)
+            }
+            _ => (None, None),
+        };
+        if let Some(c) = cost {
+            help = format!("{help}\n{} · costo: {c} pesos", self.kind.name());
+        }
+        (help, err)
     }
 
     /// Avanza la simulación. Devuelve ediciones si algo creció.
@@ -413,4 +545,10 @@ mod tests {
         assert!(g.press(&t, corner + Vec2::new(0.0, -60.0)).is_some(), "{}", g.message);
         assert_eq!(g.city.net.edges.len(), n - 1);
     }
+}
+
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + c.as_str())
 }

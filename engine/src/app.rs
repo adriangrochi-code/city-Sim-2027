@@ -15,6 +15,7 @@ use crate::render::Renderer;
 use crate::session::{memory_mb, Session};
 use crate::sandbox::CATALOG;
 use crate::tour::Tour;
+use crate::ui::{self, paint::UiPainter, GameUi};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,6 +38,8 @@ struct Gpu {
     renderer: Renderer,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    egui: egui_winit::State,
+    painter: UiPainter,
 }
 
 struct App {
@@ -62,6 +65,11 @@ struct App {
     /// La escena está quieta: el bucle duerme en vez de girar (la CPU baja casi a cero).
     idle: bool,
     pub skipped: u64,
+    ui: GameUi,
+    /// La interfaz pidió redibujar (animación, avisos, cursor sobre un botón…).
+    ui_repaint: bool,
+    /// Milisegundos de CPU de la interfaz por cuadro (egui + teselado + subida).
+    ui_ms: Vec<f64>,
 }
 
 /// Con la escena quieta solo se redibuja para animar el agua, a este intervalo.
@@ -93,6 +101,9 @@ pub fn run(session: Session, opts: Options) -> Result<(), String> {
         last_draw: Instant::now(),
         idle: false,
         skipped: 0,
+        ui: GameUi::default(),
+        ui_repaint: true,
+        ui_ms: Vec::new(),
     };
     event_loop.run_app(&mut app).map_err(|e| format!("error en el bucle de eventos: {e}"))?;
     if let Some(e) = app.error {
@@ -105,6 +116,11 @@ pub fn run(session: Session, opts: Options) -> Result<(), String> {
         app.frames,
         app.session.first_frame.unwrap_or_default()
     );
+    if !app.ui_ms.is_empty() {
+        let mut v = app.ui_ms.clone();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!("Interfaz: {:.2} ms de CPU por cuadro de media (mediana {:.2}, peor {:.2}) en {} cuadros", v.iter().sum::<f64>() / v.len() as f64, v[v.len() / 2], v[v.len() - 1], v.len());
+    }
     if let Some(t) = &app.tour {
         for l in &t.report {
             println!("  {l}");
@@ -146,7 +162,7 @@ impl App {
         // Clave del cuadro: si nada cambió (y no hay recorrido automático), no se dibuja; solo
         // se redibuja cada IDLE_REDRAW para que el agua siga moviéndose.
         let key = gpu.renderer.frame_key(&s.cam, s.hour, (gpu.config.width, gpu.config.height));
-        let same = self.last_key == Some(key) && self.tour.is_none() && s.streamer.pending() == 0;
+        let same = self.last_key == Some(key) && self.tour.is_none() && s.streamer.pending() == 0 && !self.ui_repaint;
         self.idle = same;
         if same && self.last_draw.elapsed() < IDLE_REDRAW {
             self.skipped += 1;
@@ -154,8 +170,45 @@ impl App {
         }
         self.last_key = Some(key);
         self.last_draw = Instant::now();
-        if let Err(e) = gpu.renderer.render_surface(&gpu.surface, &gpu.config, &s.cam, s.hour) {
+        // Interfaz del juego (solo en el modo juego): se arma, se aplican sus acciones y se
+        // pinta encima de la escena en la misma entrega.
+        let t_ui = Instant::now();
+        let mut ui_out = None;
+        if let Some(g) = s.game.as_mut() {
+            self.ui.time += dt as f64;
+            self.ui.sync_news(g);
+            let raw = gpu.egui.take_egui_input(&gpu.window);
+            let ctx = gpu.egui.egui_ctx().clone();
+            let terrain = s.terrain.clone();
+            let hour = s.hour;
+            let mut acts = Vec::new();
+            let ui_state = &mut self.ui;
+            let full = ctx.run(raw, |ctx| {
+                acts = ui_state.draw(ctx, g, &terrain, hour, "");
+            });
+            let delta = ui::apply(&acts, g, &mut self.ui.list);
+            s.hour = (s.hour + delta).rem_euclid(24.0);
+            let repaint = full.viewport_output.get(&egui::ViewportId::ROOT).is_some_and(|v| v.repaint_delay < std::time::Duration::from_millis(500));
+            self.ui_repaint = repaint || !self.ui.toasts().is_empty() || !acts.is_empty();
+            gpu.egui.handle_platform_output(&gpu.window, full.platform_output.clone());
+            ui_out = Some((ctx, full));
+        }
+        let Gpu { renderer, surface, config, painter, .. } = gpu;
+        let mut cpu_ui = t_ui.elapsed().as_secs_f64() * 1000.0;
+        let mut hook = |d: &wgpu::Device, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, size: (u32, u32)| {
+            if let Some((ctx, full)) = ui_out.take() {
+                let t0 = Instant::now();
+                painter.paint(d, q, enc, view, size, &ctx, full);
+                cpu_ui += t0.elapsed().as_secs_f64() * 1000.0;
+            }
+        };
+        let has_ui = s.game.is_some();
+        if let Err(e) = renderer.render_surface(surface, config, &s.cam, s.hour, has_ui.then_some(&mut hook as crate::render::UiHook)) {
             eprintln!("{e}");
+        }
+        drop(hook);
+        if has_ui {
+            self.ui_ms.push(cpu_ui);
         }
         self.frames += 1;
         self.fps_frames += 1;
@@ -251,7 +304,12 @@ impl ApplicationHandler for App {
         match Renderer::for_window(window.clone(), self.opts.msaa) {
             Ok((renderer, surface, config)) => {
                 println!("Ventana {}×{} · adaptador: {} · formato {:?}", config.width, config.height, renderer.adapter_name, config.format);
-                self.gpu = Some(Gpu { window, renderer, surface, config });
+                let ctx = egui::Context::default();
+                ui::theme::install(&ctx);
+                let max_tex = renderer.device().limits().max_texture_dimension_2d as usize;
+                let egui = egui_winit::State::new(ctx, egui::ViewportId::ROOT, &window, Some(window.scale_factor() as f32), None, Some(max_tex));
+                let painter = UiPainter::new(renderer.device(), renderer.format());
+                self.gpu = Some(Gpu { window, renderer, surface, config, egui, painter });
             }
             Err(e) => {
                 self.error = Some(e);
@@ -264,7 +322,17 @@ impl ApplicationHandler for App {
         // Cualquier entrada saca al bucle del reposo (el resaltado sigue al cursor, etc.).
         if !matches!(event, WindowEvent::RedrawRequested) {
             self.idle = false;
+            self.ui_repaint = true;
         }
+        // La interfaz ve el evento primero; si el cursor está sobre un panel, el mundo no.
+        let (ui_pointer, ui_keys) = match (self.gpu.as_mut(), self.session.game.is_some()) {
+            (Some(gpu), true) => {
+                let _ = gpu.egui.on_window_event(&gpu.window, &event);
+                let ctx = gpu.egui.egui_ctx();
+                (ctx.is_pointer_over_area() || ctx.wants_pointer_input(), ctx.wants_keyboard_input())
+            }
+            _ => (false, false),
+        };
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
@@ -274,7 +342,7 @@ impl ApplicationHandler for App {
                     gpu.renderer.configure(&gpu.surface, &gpu.config);
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => {
+            WindowEvent::KeyboardInput { event, .. } if !ui_keys => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if event.state == ElementState::Pressed {
                         if !event.repeat {
@@ -299,7 +367,7 @@ impl ApplicationHandler for App {
                     s.cam.pan(-dx * k, dy * k);
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::MouseWheel { delta, .. } if !ui_pointer => {
                 let y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
@@ -307,6 +375,7 @@ impl ApplicationHandler for App {
                 self.session.cam.zoom(0.88f32.powf(y));
             }
             WindowEvent::MouseInput { state, button, .. } => match (button, state) {
+                (MouseButton::Left, ElementState::Pressed) if ui_pointer => {}
                 (MouseButton::Left, ElementState::Pressed) => {
                     if self.session.game.is_some() {
                         self.session.game_press();
@@ -316,6 +385,7 @@ impl ApplicationHandler for App {
                 }
                 (MouseButton::Left, ElementState::Released) => self.session.game_release(),
                 (MouseButton::Middle, st) => self.middle = st == ElementState::Pressed,
+                (MouseButton::Right, ElementState::Pressed) | (MouseButton::Middle, ElementState::Pressed) if ui_pointer => {}
                 (MouseButton::Right, ElementState::Pressed) => {
                     self.right = Some(self.mouse);
                     self.right_moved = 0.0;

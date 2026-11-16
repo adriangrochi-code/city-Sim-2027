@@ -1,0 +1,32 @@
+{
+  "nombre": "Montevideo (geografía real)",
+  "fuente": "AWS Terrain Tiles (terrarium), zoom 13",
+  "atribucion": "Datos de elevación: Terrain Tiles de Mapzen/Tilezen en AWS, que incluyen SRTM (NASA), GMTED2010 (USGS), ETOPO1 (NOAA) y otras fuentes. Ver docs/sistemas/mapa-real.md.",
+  "origen_noroeste": {
+    "lat": -34.778,
+    "lon": -56.325
+  },
+  "metros_por_grado": {
+    "lon": 91414.50908000776,
+    "lat": 110938.50054572585
+  },
+  "tamano_m": 24000.0,
+  "paso_m": 20.0,
+  "muestras": 1201,
+  "contexto": {
+    "desde_m": -6000.0,
+    "paso_m": 100.0,
+    "muestras": 361
+  },
+  "codificacion": "uint16 little-endian; metros = valor / 200 - 50; filas de norte a sur",
+  "fundacion": {
+    "x": 11057.7,
+    "z": 14108.9,
+    "desnivel_m": 3.24
+  },
+  "cerro": {
+    "x": 5923.7,
+    "z": 12269.8,
+    "altura_m": 133.7
+  }
+}

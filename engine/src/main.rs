@@ -31,6 +31,7 @@ mod stream;
 mod structures;
 mod terrain;
 mod tour;
+mod ui;
 mod world;
 
 use camera::OrbitCamera;
