@@ -300,6 +300,8 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
   físicamente de su edificio y recorren la ciudad. Si las calles están colapsadas, llegan tarde.
 - **Edificios modulares**: el hospital se amplía con pabellones; el puerto, con muelles y
   grúas; la usina, con generadores. Se crece por piezas en lugar de reconstruir.
+  Se modernizan en el mismo lugar en lugar de demolerse (detalle en
+  [sistemas/edificios-ampliables.md](sistemas/edificios-ampliables.md)).
 
 ### 4.6 Vecinos (simulación por agentes)
 > Detalle del comportamiento y la conducción realista en

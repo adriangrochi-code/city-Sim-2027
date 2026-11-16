@@ -63,6 +63,11 @@ Qué incluye:
   terminada y 300 cueros exportados, llega la gran decisión: derribar la muralla, conservar los
   portones como monumento o conservar también un tramo. Con eso empieza la época 2.
 - **Guardar y cargar partida** (F5 / F9).
+- **Ampliar y modernizar edificios** ([detalle](docs/sistemas/edificios-ampliables.md)): al
+  inspeccionar un pozo, aljibe, puesto, estancia, saladero, el puerto o la iglesia aparecen
+  botones para agregar módulos (segunda cisterna, más serenos, galpón nuevo, muelle más largo,
+  grúa…) o modernizarlo en el lugar (pozo → aljibe). Los módulos se ven en el modelo y cambian
+  la simulación.
 
 ![La gran decisión: cómo abrir la ciudad](docs/capturas/prototipo1-nuevo-orden.jpg)
 

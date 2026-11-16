@@ -38,6 +38,14 @@ const EVENTS := [
 		"news": "Gaceta: llegan noticias de fiebres en los barcos. Los recién llegados harán cuarentena."},
 ]
 
+## Ampliaciones del puerto: se crece por piezas, sin reconstruir.
+const MODULES := [
+	{"id": "alargar", "name": "Alargar el muelle", "cost": 2500, "boats": 1},
+	{"id": "grua", "name": "Grúa de madera para la carga", "cost": 1800, "boats": 1, "needs": "alargar"},
+	{"id": "barraca2", "name": "Segunda barraca de cueros", "cost": 2200, "duty": 0.25},
+]
+
+var modules: Array = []
 var gen: TerrainGen
 var parcels: Parcels
 var net: RoadNetwork
@@ -206,12 +214,87 @@ func take_arrivals() -> Array:
 	return out
 
 
+func actions(money: int) -> Array:
+	var out := []
+	if not has_pier:
+		return out
+	for m in MODULES:
+		if modules.has(m["id"]):
+			continue
+		var needs: String = m.get("needs", "")
+		if needs != "" and not modules.has(needs):
+			continue
+		out.append(["Ampliar: %s (%d pesos)" % [m["name"], m["cost"]], money >= int(m["cost"]), "port_module", m["id"]])
+	return out
+
+
+func module_cost(mid: String) -> int:
+	for m in MODULES:
+		if m["id"] == mid:
+			return m["cost"]
+	return 0
+
+
+## Agrega una ampliación: más lanchas (descarga más rápida) o más aduana, y se ve en el puerto.
+func add_module(mid: String) -> void:
+	modules.append(mid)
+	var s := Vector2(sea_dir.y, -sea_dir.x)
+	var basis := Basis(Vector3(s.x, 0, s.y), Vector3.UP, Vector3(sea_dir.x, 0, sea_dir.y))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var wood := Color(0.42, 0.31, 0.21)
+	var origin := Vector3(pier_end.x, 0.0, pier_end.y)
+	match mid:
+		"alargar":
+			BuildingGen.box(st, Vector3(0, 1.6, 15.0), Vector3(6.0, 0.35, 30.0), wood)
+			for z in [4.0, 12.0, 20.0, 28.0]:
+				for x in [-2.6, 2.6]:
+					BuildingGen.box(st, Vector3(x, -6.0, z), Vector3(0.4, 7.7, 0.4), wood.darkened(0.35))
+			pier_end += sea_dir * 30.0
+		"grua":
+			BuildingGen.box(st, Vector3(2.0, 1.9, -4.0), Vector3(0.6, 9.0, 0.6), wood)
+			BuildingGen.box(st, Vector3(2.0, 10.6, -1.0), Vector3(0.4, 0.4, 7.0), wood)
+			BuildingGen.box(st, Vector3(2.0, 7.5, 2.4), Vector3(0.1, 3.0, 0.1), Color(0.2, 0.2, 0.2))
+		"barraca2":
+			var brick := Color(0.66, 0.40, 0.30)
+			origin = Vector3(land_point.x, 0.0, land_point.y) - Vector3(sea_dir.x, 0, sea_dir.y) * 16.0 + Vector3(s.x, 0, s.y) * 22.0
+			lots.clear_area(Lots.corners_of(Vector2(origin.x, origin.z), sea_dir, 18.0, 14.0))
+			lots.obstacles.append({"c": Vector2(origin.x, origin.z), "f": sea_dir, "w": 18.0, "d": 14.0})
+			origin.y = gen.height(origin.x, origin.z)
+			BuildingGen.box(st, Vector3(0, -1.0, 0), Vector3(16.0, 6.0, 12.0), brick)
+			BuildingGen.gable(st, Vector3(0, 5.0, 0), 8.6, 6.6, 2.6, BuildingGen.TILE_ROOF, brick, 8.0, 6.0)
+			BuildingGen.box(st, Vector3(0, 0, 6.05), Vector3(4.0, 3.6, 0.12), wood)
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = BuildingGen.material()
+	mi.transform = Transform3D(basis, origin)
+	add_child(mi)
+	for m in MODULES:
+		if m["id"] == mid and int(m.get("boats", 0)) > 0:
+			var boat := _make_boat()
+			add_child(boat)
+			_boats.append({"node": boat, "t": 0.0, "dir": 1.0, "busy": false})
+	event.emit("Puerto ampliado: %s" % mid_name(mid).to_lower())
+
+
+func mid_name(mid: String) -> String:
+	for m in MODULES:
+		if m["id"] == mid:
+			return m["name"]
+	return mid
+
+
 func describe() -> String:
 	var txt := "Puerto\n"
 	if not has_pier:
 		txt += "Sin muelle: los barcos desembarcan en la playa y llega menos gente.\nConstruye el muelle en la costa, junto a una calle.\n"
 	else:
-		txt += "Cueros en la barraca: %d\nBarcos en el fondeadero: %d\n" % [hides, _ships.size()]
+		txt += "Cueros en la barraca: %d\nBarcos en el fondeadero: %d · lanchas: %d\n" % [hides, _ships.size(), _boats.size()]
+		if not modules.is_empty():
+			var names := []
+			for mid in modules:
+				names.append(mid_name(mid))
+			txt += "Ampliaciones: %s\n" % ", ".join(names)
 	txt += "\nEste año:\n· Barcos: %d\n· Pobladores llegados: %d\n· Cueros exportados: %d\n· Fardos de mercancía importados: %d\n· Aduana: %d pesos\n" % [
 		year_stats["ships"], year_stats["people"], year_stats["exported"], year_stats["imported"], year_stats["duty"]]
 	if not active_event.is_empty():
@@ -283,7 +366,8 @@ func _tick(dt: float) -> void:
 				b["t"] = 0.0
 				b["dir"] = 1.0
 				_ships[unloading]["trips"] = int(_ships[unloading]["trips"]) + 1
-		var side := Vector2(sea_dir.y, -sea_dir.x) * (6.0 if _boats.find(b) == 0 else -6.0)
+		var bi := _boats.find(b)
+		var side := Vector2(sea_dir.y, -sea_dir.x) * ((float(bi) - (_boats.size() - 1) * 0.5) * 7.0)
 		var p := pier_end.lerp(anchorage - sea_dir * 25.0, float(b["t"])) + side
 		node.position = Vector3(p.x, 0.1, p.y)
 		var dir := sea_dir * float(b["dir"])
@@ -304,7 +388,7 @@ func _finish_unloading(sh: Dictionary) -> void:
 	var bales := 20 + _rng.randi_range(0, 30)
 	var exported := mini(hides, 400)
 	hides -= exported
-	var duty := DUTY_PER_SHIP + int(exported * DUTY_PER_HIDE * mult("price"))
+	var duty := int((DUTY_PER_SHIP + exported * DUTY_PER_HIDE * mult("price")) * (1.0 + (0.25 if modules.has("barraca2") else 0.0)))
 	year_stats["people"] += people
 	year_stats["imported"] += bales
 	year_stats["exported"] += exported

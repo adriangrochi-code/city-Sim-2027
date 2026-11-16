@@ -25,6 +25,37 @@ const INFO := {
 		"desc": "Carnea el ganado y sala los cueros y el tasajo para embarcar. Necesita agua cerca. Huele mal: baja el valor del suelo y contamina los pozos cercanos."},
 }
 const CONTAMINATION := 300.0
+
+## Ampliaciones: los edificios crecen por piezas en lugar de demolerse y reconstruirse.
+## Cada módulo suma capacidad, alcance o viajes, y se ve en el modelo.
+const MODULES := {
+	Type.WELL: [
+		{"id": "brocal", "name": "Brocal de piedra con techito", "cost": 300, "cap": 25},
+	],
+	Type.CISTERN: [
+		{"id": "cisterna2", "name": "Segunda cisterna", "cost": 900, "cap": 120},
+		{"id": "cisterna3", "name": "Tercera cisterna", "cost": 1100, "cap": 120, "needs": "cisterna2"},
+		{"id": "canaletas", "name": "Canaletas desde las azoteas vecinas", "cost": 600, "radius": 50.0},
+	],
+	Type.WATER_CARRIERS: [
+		{"id": "carros", "name": "Más carros y mulas", "cost": 1200, "cap": 200, "carts": 3, "upkeep": 10},
+		{"id": "noria", "name": "Noria en el arroyo", "cost": 1800, "cap": 250, "radius": 300.0},
+	],
+	Type.WATCH: [
+		{"id": "serenos", "name": "Más serenos", "cost": 600, "serenos": 2, "radius": 90.0, "upkeep": 10},
+		{"id": "faroles", "name": "Faroles de vidrio en las esquinas", "cost": 800, "radius": 80.0},
+	],
+	Type.ESTANCIA: [
+		{"id": "corral2", "name": "Segundo corral", "cost": 1200, "trips": 2},
+		{"id": "puesto", "name": "Puesto de peones con mangrullo", "cost": 900, "trips": 2},
+	],
+	Type.SALADERO: [
+		{"id": "galpon", "name": "Galpón de salazón nuevo", "cost": 2000, "trips": 2},
+		{"id": "graseria", "name": "Grasería (sebo y velas)", "cost": 2500, "trips": 2, "upkeep": 10},
+	],
+}
+## Modernización: el edificio pasa a su versión mejor sin cambiar de lugar.
+const MODERNIZE := {Type.WELL: Type.CISTERN}
 const FIRE_REACH := {Type.WELL: 140.0, Type.CISTERN: 180.0, Type.WATER_CARRIERS: 450.0}
 
 var gen: TerrainGen
@@ -102,7 +133,7 @@ func place(type: int, c: Vector2, angle: float) -> int:
 	lots.clear_area(corners(type, c, f))
 	lots.obstacles.append({"c": c, "f": f, "w": size.x, "d": size.y})
 	var mi := MeshInstance3D.new()
-	mi.mesh = _mesh(type)
+	mi.mesh = _mesh(type, [])
 	mi.material_override = BuildingGen.material()
 	var base := INF
 	for p in corners(type, c, f):
@@ -110,7 +141,7 @@ func place(type: int, c: Vector2, angle: float) -> int:
 	var s := Lots.side_of(f)
 	mi.transform = Transform3D(Basis(Vector3(s.x, 0, s.y), Vector3.UP, Vector3(f.x, 0, f.y)), Vector3(c.x, base, c.y))
 	add_child(mi)
-	items[id] = {"id": id, "type": type, "c": c, "f": f, "node": mi, "served": 0, "stock": 0}
+	items[id] = {"id": id, "type": type, "c": c, "f": f, "node": mi, "served": 0, "stock": 0, "modules": []}
 	_update_nuisances()
 	if type == Type.WATCH:
 		rebuild_lamps()
@@ -142,15 +173,125 @@ func save_data() -> Array:
 	var out := []
 	for id in items:
 		var it: Dictionary = items[id]
-		out.append([it["type"], it["c"], atan2((it["f"] as Vector2).x, (it["f"] as Vector2).y), it["stock"]])
+		out.append([it["type"], it["c"], atan2((it["f"] as Vector2).x, (it["f"] as Vector2).y), it["stock"], it["modules"]])
 	return out
 
 
 func upkeep() -> int:
 	var total := 0
 	for id in items:
-		total += int(INFO[items[id]["type"]]["upkeep"])
+		total += int(INFO[items[id]["type"]]["upkeep"]) + int(module_sum(id, "upkeep"))
 	return total
+
+
+# --- Ampliar y modernizar ------------------------------------------------------------
+
+func module_sum(id: int, key: String) -> float:
+	var it: Dictionary = items[id]
+	var total := 0.0
+	for m in MODULES.get(it["type"], []):
+		if (it["modules"] as Array).has(m["id"]):
+			total += float(m.get(key, 0.0))
+	return total
+
+
+func cap_of(id: int) -> int:
+	return int(INFO[items[id]["type"]]["cap"]) + int(module_sum(id, "cap"))
+
+
+func radius_of(id: int) -> float:
+	return float(INFO[items[id]["type"]]["radius"]) + module_sum(id, "radius")
+
+
+## Acciones disponibles al inspeccionar: [texto, se puede, acción, argumento].
+func actions_for(id: int, money: int) -> Array:
+	var it: Dictionary = items[id]
+	var out := []
+	for m in MODULES.get(it["type"], []):
+		if (it["modules"] as Array).has(m["id"]):
+			continue
+		var needs: String = m.get("needs", "")
+		if needs != "" and not (it["modules"] as Array).has(needs):
+			continue
+		out.append(["Ampliar: %s (%s pesos)" % [m["name"], _fmt(m["cost"])], money >= int(m["cost"]), "module", m["id"]])
+	if MODERNIZE.has(it["type"]):
+		var to: int = MODERNIZE[it["type"]]
+		var cost := modernize_cost(id)
+		var err := _modernize_problem(id)
+		out.append(["Modernizar a %s (%s pesos)%s" % [String(INFO[to]["name"]).to_lower(), _fmt(cost), (" · " + err) if err != "" else ""], money >= cost and err == "", "modernize", to])
+	return out
+
+
+func module_cost(id: int, mid: String) -> int:
+	for m in MODULES.get(items[id]["type"], []):
+		if m["id"] == mid:
+			return m["cost"]
+	return 0
+
+
+func add_module(id: int, mid: String) -> void:
+	(items[id]["modules"] as Array).append(mid)
+	_rebuild_mesh(id)
+	if items[id]["type"] == Type.WATCH:
+		rebuild_lamps()
+
+
+func modernize_cost(id: int) -> int:
+	var to: int = MODERNIZE[items[id]["type"]]
+	return maxi(200, int(INFO[to]["cost"]) - int(INFO[items[id]["type"]]["cost"]) / 2)
+
+
+func _modernize_problem(id: int) -> String:
+	var it: Dictionary = items[id]
+	var to: int = MODERNIZE[it["type"]]
+	var cs := corners(to, it["c"], it["f"])
+	for p in cs:
+		if net.clearance(p, 20.0) < 0.5:
+			return "no hay lugar (choca con una calle)"
+	for ob in lots.obstacles:
+		if (ob["c"] as Vector2).distance_to(it["c"]) < 0.01:
+			continue
+		if Lots.polys_overlap(cs, Lots.corners_of(ob["c"], ob["f"], ob["w"], ob["d"])):
+			return "no hay lugar"
+	return ""
+
+
+## Convierte el edificio en su versión moderna en el mismo lugar (por ejemplo, pozo → aljibe).
+func modernize(id: int) -> void:
+	var it: Dictionary = items[id]
+	var to: int = MODERNIZE[it["type"]]
+	var size: Vector2 = INFO[to]["size"]
+	lots.clear_area(corners(to, it["c"], it["f"]))
+	for ob in lots.obstacles:
+		if (ob["c"] as Vector2).distance_to(it["c"]) < 0.01:
+			ob["w"] = size.x
+			ob["d"] = size.y
+	it["type"] = to
+	it["modules"] = []
+	_rebuild_mesh(id)
+
+
+func _rebuild_mesh(id: int) -> void:
+	var it: Dictionary = items[id]
+	var mi: MeshInstance3D = it["node"]
+	mi.mesh = _mesh(it["type"], it["modules"])
+	var base := INF
+	for p in corners(it["type"], it["c"], it["f"]):
+		base = minf(base, gen.height(p.x, p.y))
+	mi.position.y = base
+
+
+static func _fmt(n: int) -> String:
+	var t := str(n)
+	return t.substr(0, t.length() - 3) + "." + t.substr(t.length() - 3) if t.length() > 3 else t
+
+
+func _modules_text(id: int) -> String:
+	var names := []
+	for m in MODULES.get(items[id]["type"], []):
+		if (items[id]["modules"] as Array).has(m["id"]):
+			names.append(m["name"])
+	return ("\nAmpliaciones: " + ", ".join(names)) if not names.is_empty() else ""
 
 
 ## Reparte el agua: primero las mejores fuentes, cada una hasta su capacidad, a los solares
@@ -166,7 +307,7 @@ func update_water() -> void:
 		var info: Dictionary = INFO[it["type"]]
 		if int(info["cap"]) <= 0:
 			continue
-		var radius: float = info["radius"]
+		var radius: float = radius_of(sid)
 		var cands := []
 		for id in lots.lots:
 			var lot: Dictionary = lots.lots[id]
@@ -183,7 +324,7 @@ func update_water() -> void:
 		for cnd in cands:
 			var lot: Dictionary = lots.lots[cnd[1]]
 			var need: int = Lots.CAP[lot["level"]]
-			if used + need > int(info["cap"]):
+			if used + need > cap_of(sid):
 				break
 			used += need
 			lot["water"] = quality
@@ -244,7 +385,7 @@ func _update_nuisances() -> void:
 func lit_at(p: Vector2) -> bool:
 	for id in items:
 		var it: Dictionary = items[id]
-		if it["type"] == Type.WATCH and (it["c"] as Vector2).distance_to(p) <= float(INFO[Type.WATCH]["radius"]):
+		if it["type"] == Type.WATCH and (it["c"] as Vector2).distance_to(p) <= radius_of(id):
 			return true
 	return false
 
@@ -258,7 +399,7 @@ func rebuild_lamps() -> void:
 		if it["type"] != Type.WATCH:
 			continue
 		var c: Vector2 = it["c"]
-		var r: float = INFO[Type.WATCH]["radius"]
+		var r: float = radius_of(id)
 		for eid in net.edges:
 			var e: Dictionary = net.edges[eid]
 			var L: float = e["len"]
@@ -300,19 +441,19 @@ func describe(id: int) -> String:
 	var it: Dictionary = items[id]
 	var info: Dictionary = INFO[it["type"]]
 	if it["type"] == Type.WATCH:
-		return "%s\n%s\nFaroles a su cargo: %d\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], lamps.size(), info["upkeep"]]
+		return "%s\n%s\nFaroles a su cargo: %d · serenos: %d%s" % [info["name"], info["desc"], lamps.size(), 2 + int(module_sum(id, "serenos")), _modules_text(id)]
 	if it["type"] == Type.ESTANCIA:
-		return "%s\n%s" % [info["name"], info["desc"]]
+		return "%s\n%s\nCarretas de ganado por día: %d%s" % [info["name"], info["desc"], 3 + int(module_sum(id, "trips")), _modules_text(id)]
 	if it["type"] == Type.SALADERO:
-		return "%s\n%s\nGanado esperando faena: %d\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], it["stock"], info["upkeep"]]
+		return "%s\n%s\nGanado esperando faena: %d · carretas de cueros por día: %d%s" % [info["name"], info["desc"], it["stock"], 3 + int(module_sum(id, "trips")), _modules_text(id)]
 	if it["type"] == Type.WELL and contaminated(it["c"]):
 		return "%s\n¡Agua contaminada por el saladero!\nAbastece a %d personas con agua mala" % [info["name"], it["served"]]
-	return "%s\n%s\nAbastece a %d de %d personas\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], it["served"], info["cap"], info["upkeep"]]
+	return "%s\n%s\nAbastece a %d de %d personas · alcance %d m%s\nMantenimiento: %d pesos al mes" % [info["name"], info["desc"], it["served"], cap_of(id), int(radius_of(id)), _modules_text(id), int(info["upkeep"]) + int(module_sum(id, "upkeep"))]
 
 
 # --- Mallas ------------------------------------------------------------------------
 
-func _mesh(type: int) -> ArrayMesh:
+func _mesh(type: int, modules: Array) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var stone := Color(0.64, 0.61, 0.56)
@@ -391,4 +532,62 @@ func _mesh(type: int) -> ArrayMesh:
 			for x in [2.6, 4.4]:
 				BuildingGen.box(st, Vector3(x, 0.1, 6.5), Vector3(0.12, 1.4, 1.4), wood.darkened(0.3))
 			BuildingGen.box(st, Vector3(3.5, 1.0, 6.5), Vector3(1.2, 1.2, 1.6), wood.lightened(0.1))
+	_module_geometry(st, modules, stone, wood, cal)
 	return st.commit()
+
+
+## Lo que se agrega al modelo con cada ampliación.
+func _module_geometry(st: SurfaceTool, modules: Array, stone: Color, wood: Color, cal: Color) -> void:
+	var tile: Color = BuildingGen.TILE_ROOF
+	for mid in modules:
+		match mid:
+			"brocal":
+				for x in [-1.3, 1.3]:
+					for z in [-1.3, 1.3]:
+						BuildingGen.box(st, Vector3(x, 0.1, z), Vector3(0.2, 2.6, 0.2), wood)
+				BuildingGen.gable(st, Vector3(0, 2.7, 0), 1.8, 1.8, 0.9, tile, wood, 1.5, 1.5)
+			"cisterna2", "cisterna3":
+				var x := 3.0 if mid == "cisterna2" else -3.0
+				BuildingGen.box(st, Vector3(x, 0.2, -3.0), Vector3(2.2, 1.0, 2.2), cal)
+				BuildingGen.box(st, Vector3(x, 1.2, -3.0), Vector3(2.4, 0.15, 2.4), stone)
+				BuildingGen.box(st, Vector3(x, 1.35, -3.0), Vector3(1.6, 1.4, 0.1), Color(0.12, 0.12, 0.12))
+			"canaletas":
+				for k in 4:
+					var xf := Transform3D(Basis(Vector3.UP, PI * 0.5 * k), Vector3.ZERO)
+					BuildingGen.box(st, Vector3(0, 0.25, 3.0), Vector3(0.4, 0.2, 4.0), stone.darkened(0.2), xf)
+			"carros":
+				for k in 3:
+					BuildingGen.box(st, Vector3(-4.0 + k * 2.6, 0.4, 6.5), Vector3(1.4, 1.1, 2.4), wood.lightened(0.1))
+					BuildingGen.box(st, Vector3(-4.0 + k * 2.6, 0.0, 8.0), Vector3(0.5, 1.4, 1.4), Color(0.40, 0.30, 0.22))
+			"noria":
+				BuildingGen.box(st, Vector3(-6.5, 0.0, -1.0), Vector3(0.4, 6.0, 6.0), wood.darkened(0.2))
+				BuildingGen.box(st, Vector3(-6.5, 2.6, -1.0), Vector3(1.4, 0.8, 0.8), wood)
+			"serenos":
+				BuildingGen.box(st, Vector3(-2.0, -0.5, -2.5), Vector3(2.4, 3.0, 2.4), cal)
+				BuildingGen.gable(st, Vector3(-2.0, 2.5, -2.5), 1.5, 1.5, 0.8, tile, cal, 1.2, 1.2)
+			"faroles":
+				for x in [-2.6, 2.6]:
+					BuildingGen.box(st, Vector3(x, 0, 3.6), Vector3(0.15, 3.4, 0.15), Color(0.12, 0.11, 0.10))
+					BuildingGen.box(st, Vector3(x, 3.4, 3.6), Vector3(0.45, 0.55, 0.45), Color(0.95, 0.75, 0.4, 0.0))
+			"corral2":
+				for side in 4:
+					var xf := Transform3D(Basis(Vector3.UP, PI * 0.5 * side), Vector3(-14.0, 0, -12.0))
+					for k in 7:
+						BuildingGen.box(st, Vector3(-6.0 + k * 2.0, 0, 7.0), Vector3(0.25, 1.7, 0.25), wood, xf)
+					BuildingGen.box(st, Vector3(0, 1.1, 7.0), Vector3(14.0, 0.15, 0.15), wood, xf)
+				for k in 6:
+					BuildingGen.box(st, Vector3(-17.0 + (k % 3) * 3.0, 0.5, -15.0 + (k / 3) * 5.0), Vector3(0.7, 0.8, 1.7), Color(0.45, 0.30, 0.20))
+			"puesto":
+				BuildingGen.box(st, Vector3(20.0, -0.5, 20.0), Vector3(6.0, 3.2, 5.0), BuildingGen.ADOBE[0])
+				BuildingGen.gable(st, Vector3(20.0, 2.7, 20.0), 3.3, 2.8, 1.6, BuildingGen.THATCH[0], BuildingGen.ADOBE[0], 3.0, 2.5)
+				for x in [24.5, 26.5]:
+					for z in [17.5, 19.5]:
+						BuildingGen.box(st, Vector3(x, 0, z), Vector3(0.25, 8.0, 0.25), wood)
+				BuildingGen.box(st, Vector3(25.5, 8.0, 18.5), Vector3(2.6, 0.2, 2.6), wood)
+			"galpon":
+				BuildingGen.box(st, Vector3(0, -0.6, -20.0), Vector3(30.0, 4.0, 4.0), Color(0.66, 0.40, 0.30))
+				BuildingGen.gable(st, Vector3(0, 3.4, -20.0), 15.3, 2.4, 1.4, tile, Color(0.66, 0.40, 0.30), 15.0, 2.0)
+			"graseria":
+				BuildingGen.box(st, Vector3(-15.0, -0.5, 18.0), Vector3(5.0, 4.0, 6.0), Color(0.55, 0.36, 0.28))
+				BuildingGen.box(st, Vector3(-15.0, 3.5, 19.5), Vector3(1.2, 7.0, 1.2), Color(0.45, 0.30, 0.24))
+				BuildingGen.box(st, Vector3(-12.0, 0.0, 18.0), Vector3(1.8, 1.6, 1.8), Color(0.25, 0.22, 0.20))

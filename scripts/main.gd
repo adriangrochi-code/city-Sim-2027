@@ -102,6 +102,7 @@ var _tris := PackedVector3Array()
 var _cols := PackedColorArray()
 var _dyn_hint := ""
 var _follow := false
+var _inspected: Array = []   # ["service", id] | ["port"] | ["church"]
 
 
 func _ready() -> void:
@@ -169,6 +170,7 @@ func _ready() -> void:
 	hud.tool_selected.connect(_select_tool)
 	hud.option_selected.connect(_on_option)
 	hud.choice_made.connect(_on_open_city)
+	hud.action_pressed.connect(_on_action)
 	hud.speed_selected.connect(_select_speed)
 	parcels.changed.connect(terrain.refresh)
 	_select_road_type(RoadNetwork.Type.DIRT)
@@ -290,6 +292,9 @@ func _refresh_hud() -> void:
 	})
 	if agents.selected_id != -1:
 		hud.show_info(agents.describe(agents.selected_id))
+	elif not _inspected.is_empty() and tool == Tool.INSPECT:
+		hud.show_info(_inspected_text())
+		hud.set_actions(_actions())
 	elif tool == Tool.PORT:
 		hud.show_info(port.describe())
 	elif tool == Tool.WALL:
@@ -312,6 +317,7 @@ func _select_tool(t: int) -> void:
 	lots.set_overlay_mode("water" if t == Tool.WATER else "zone")
 	if t != Tool.INSPECT:
 		hud.show_info("")
+		_inspected = []
 	terrain.set_overlay(t == Tool.PARCELS)
 	if t == Tool.STRAIGHT or t == Tool.CURVE or t == Tool.GRID:
 		hud.set_options("Tipo de calle (Tab):", ["Camino de tierra", "Calle empedrada"], road_type)
@@ -414,10 +420,13 @@ func _on_click() -> void:
 			var aid := agents.pick(_hover, 7.0)
 			agents.selected_id = aid
 			_follow = false
+			_inspected = []
 			if aid != -1:
 				hud.show_info(agents.describe(aid))
 			else:
+				_inspected = _building_at(_hover)
 				hud.show_info(_describe(_hover))
+				hud.set_actions(_actions())
 		Tool.PLAZA:
 			found_plaza(_hover, plaza_angle)
 		Tool.STRAIGHT:
@@ -702,6 +711,81 @@ func place_service(type: int, c: Vector2, angle: float) -> bool:
 	return true
 
 
+# --- Ampliar y modernizar edificios ----------------------------------------------------
+
+## ¿Qué edificio ampliable hay en este punto?
+func _building_at(p: Vector2) -> Array:
+	if church != null and Geometry2D.is_point_in_polygon(p, Lots.corners_of(church_c, _plaza_frame(plaza_angle)[0], 18.0, 34.0)):
+		return ["church"]
+	var sid := services.at(p)
+	if sid != -1:
+		return ["service", sid]
+	if port.has_pier:
+		var near_pier := Geometry2D.get_closest_point_to_segment(p, port.land_point, port.pier_end).distance_to(p) < 8.0
+		if near_pier or p.distance_to(port.land_point - port.sea_dir * 16.0) < 14.0:
+			return ["port"]
+	return []
+
+
+func _inspected_text() -> String:
+	match _inspected[0]:
+		"church":
+			return church.describe()
+		"port":
+			return port.describe()
+		"service":
+			if services.items.has(_inspected[1]):
+				return services.describe(_inspected[1])
+	return ""
+
+
+func _actions() -> Array:
+	if _inspected.is_empty():
+		return []
+	match _inspected[0]:
+		"church":
+			if church.finished() or church.building:
+				return []
+			var ph: Dictionary = Church.PHASES[church.phase + 1]
+			return [["Financiar la fase «%s» (%s pesos)" % [ph["name"], Hud.fmt(ph["cost"])], church.next_problem(lots.population(), money) == "", "church", null]]
+		"port":
+			return port.actions(money)
+		"service":
+			if services.items.has(_inspected[1]):
+				return services.actions_for(_inspected[1], money)
+	return []
+
+
+func _on_action(i: int) -> void:
+	var acts := _actions()
+	if i >= acts.size() or not acts[i][1]:
+		return
+	var kind: String = acts[i][2]
+	match kind:
+		"church":
+			fund_church()
+		"port_module":
+			var cost := port.module_cost(acts[i][3])
+			money -= cost
+			port.add_module(acts[i][3])
+		"module":
+			var sid: int = _inspected[1]
+			money -= services.module_cost(sid, acts[i][3])
+			services.add_module(sid, acts[i][3])
+			services.update_water()
+			lots.refresh_overlay()
+			hud.toast("Ampliado: el edificio crece sin demolerlo")
+		"modernize":
+			var sid2: int = _inspected[1]
+			money -= services.modernize_cost(sid2)
+			services.modernize(sid2)
+			services.update_water()
+			lots.refresh_overlay()
+			trees.mark_dirty()
+			hud.toast("Modernizado en el mismo lugar")
+	_refresh_hud()
+
+
 func fund_church() -> void:
 	if church == null:
 		hud.toast("Primero funda la plaza mayor")
@@ -760,7 +844,7 @@ func save_game() -> void:
 		"church": [church.phase, church.building, church.months_left] if church != null else [],
 		"net": [net.nodes, net.node_edges, net.edges, net._next_node, net._next_edge],
 		"lots": lots.save_data(), "services": services.save_data(),
-		"port": [port.has_pier, port.land_point, port.hides, port.year_stats, port.total_exported, port.active_event, port.event_months],
+		"port": [port.has_pier, port.land_point, port.hides, port.year_stats, port.total_exported, port.active_event, port.event_months, port.modules],
 		"wall": [wall.segments, wall.monuments, wall.carts_inspected],
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -812,14 +896,17 @@ func _apply_save(d: Dictionary) -> void:
 		if not ch.is_empty():
 			church.set_state(ch[0], ch[1], ch[2])
 	for sv in d["services"]:
-		services.place(sv[0], sv[1], sv[2])
-	for sid in services.items:
-		for sv in d["services"]:
-			if (sv[1] as Vector2).distance_to(services.items[sid]["c"]) < 0.01:
-				services.items[sid]["stock"] = sv[3]
+		var nid := services.place(sv[0], sv[1], sv[2])
+		services.items[nid]["stock"] = sv[3]
+		if sv.size() > 4:
+			for mid in sv[4]:
+				services.add_module(nid, mid)
 	var pt: Array = d["port"]
 	if pt[0]:
 		port.build_pier(pt[1])
+		if pt.size() > 7:
+			for mid in pt[7]:
+				port.add_module(mid)
 	port.hides = pt[2]
 	port.year_stats = pt[3]
 	port.total_exported = pt[4]
@@ -1174,6 +1261,18 @@ func _handle_args() -> void:
 	if args.has("time"):
 		day.time = float(args["time"])
 		day.apply()
+	if args.has("inspect"):
+		match args["inspect"]:
+			"port":
+				_inspected = ["port"]
+			"church":
+				_inspected = ["church"]
+			_:
+				var tp := int(args["inspect"])
+				var ids := services.of_type(tp)
+				if not ids.is_empty():
+					_inspected = ["service", ids[ids.size() - 1]]
+		_select_tool(Tool.INSPECT)
 	if args.has("choose"):
 		if hud.choice_open():
 			hud._choice.queue_free()
@@ -1221,6 +1320,10 @@ func _handle_args() -> void:
 			fp = wall.gates[0]["pos"]
 		elif args["focus"] == "monument" and not wall.monuments.is_empty():
 			fp = wall.monuments[0]["pos"]
+		elif args["focus"] == "service":
+			var ids := services.of_type(int(args.get("inspect", "1")))
+			if not ids.is_empty():
+				fp = services.items[ids[ids.size() - 1]]["c"]
 		elif args["focus"] == "church" and church != null:
 			fp = church_c
 		elif args["focus"] == "estancia" and not services.of_type(Services.Type.ESTANCIA).is_empty():
@@ -1332,6 +1435,22 @@ func build_demo() -> void:
 					placed_s = place_service(Services.Type.SALADERO, ps, plaza_angle)
 			d += 20.0
 	print("demo campo: estancia=", placed_e, " saladero=", placed_s)
+	# Ampliaciones de ejemplo: los edificios crecen sin demolerse.
+	var done_types := {}
+	for sid in services.items.keys():
+		var tp: int = services.items[sid]["type"]
+		if done_types.has(tp):
+			continue
+		done_types[tp] = true
+		if Services.MODERNIZE.has(tp) and services._modernize_problem(sid) == "":
+			services.modernize(sid)
+			continue
+		for m in Services.MODULES.get(tp, []):
+			if m.get("needs", "") == "" or (services.items[sid]["modules"] as Array).has(m["needs"]):
+				services.add_module(sid, m["id"])
+	if port.has_pier:
+		for m in Port.MODULES:
+			port.add_module(m["id"])
 	lots.paint(c, 420.0, 1)
 	lots.paint(exit - f * 400.0, 200.0, 1)
 	_select_tool(Tool.INSPECT)

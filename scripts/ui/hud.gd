@@ -4,6 +4,7 @@ extends CanvasLayer
 signal tool_selected(tool: int)
 signal option_selected(index: int)
 signal choice_made(index: int)
+signal action_pressed(index: int)
 signal speed_selected(speed: int)
 
 const PAPER := Color(0.91, 0.87, 0.77, 0.95)
@@ -19,6 +20,8 @@ var _opt_label: Label
 var _speed_buttons: Array[Button] = []
 var _hint: Label
 var _info: Label
+var _actions: VBoxContainer
+var _actions_key := ""
 var _info_panel: PanelContainer
 var _toast: Label
 var _toast_tween: Tween
@@ -112,10 +115,14 @@ func setup(tool_defs: Array) -> void:
 	_info_panel.offset_left = -12
 	_info_panel.visible = false
 	root.add_child(_info_panel)
+	var info_box := VBoxContainer.new()
+	_info_panel.add_child(info_box)
 	_info = Label.new()
-	_info.custom_minimum_size = Vector2(300, 0)
+	_info.custom_minimum_size = Vector2(340, 0)
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_info_panel.add_child(_info)
+	info_box.add_child(_info)
+	_actions = VBoxContainer.new()
+	info_box.add_child(_actions)
 
 	# Aviso flotante (gaceta).
 	_toast = Label.new()
@@ -265,6 +272,26 @@ func set_hint(text: String) -> void:
 func show_info(text: String) -> void:
 	_info.text = text
 	_info_panel.visible = text != ""
+	if text == "":
+		set_actions([])
+
+
+## Botones de acción del elemento inspeccionado: [[texto, habilitado], ...].
+func set_actions(actions: Array) -> void:
+	var key := str(actions)
+	if key == _actions_key:
+		return
+	_actions_key = key
+	for c in _actions.get_children():
+		c.queue_free()
+	for i in actions.size():
+		var b := Button.new()
+		b.text = actions[i][0]
+		b.disabled = not actions[i][1]
+		b.focus_mode = Control.FOCUS_NONE
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.pressed.connect(func(): action_pressed.emit(i))
+		_actions.add_child(b)
 
 
 func toast(text: String) -> void:

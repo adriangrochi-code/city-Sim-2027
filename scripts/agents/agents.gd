@@ -218,13 +218,13 @@ func _build_schedule() -> void:
 			var it: Dictionary = services.items[sid]
 			if it["type"] != Services.Type.WATER_CARRIERS:
 				continue
-			for k in mini(12, 2 + int(it["served"]) / 40):
+			for k in mini(16, 2 + int(it["served"]) / 40 + int(services.module_sum(sid, "carts"))):
 				_schedule.append([(7.0 + _rng.randf() * 9.0) / 24.0, -2 - int(sid), "reparte agua"])
 	# Serenos: hacen la ronda toda la noche. Tertulias en las calles iluminadas.
 	if services != null:
 		for sid in services.items:
 			if services.items[sid]["type"] == Services.Type.WATCH:
-				for k in 2:
+				for k in 2 + int(services.module_sum(sid, "serenos")):
 					_schedule.append([(19.3 + _rng.randf() * 0.6) / 24.0, -1000 - int(sid), "ronda"])
 		for id in residents:
 			var r: Dictionary = residents[id]
@@ -237,10 +237,10 @@ func _build_schedule() -> void:
 	# El campo: arreos de las estancias al saladero y cueros del saladero al puerto.
 	if services != null:
 		for sid in services.of_type(Services.Type.ESTANCIA):
-			for k in 3:
+			for k in 3 + int(services.module_sum(sid, "trips")):
 				_schedule.append([(6.0 + _rng.randf() * 8.0) / 24.0, -3000 - int(sid), "arreo"])
 		for sid in services.of_type(Services.Type.SALADERO):
-			for k in 3:
+			for k in 3 + int(services.module_sum(sid, "trips")):
 				_schedule.append([(8.0 + _rng.randf() * 8.0) / 24.0, -5000 - int(sid), "cueros"])
 	# Carretas que traen cueros y alimentos del campo durante el día.
 	var carts := mini(4 + int(lots.population() / 200.0), 30)
