@@ -343,7 +343,7 @@ Duración objetivo de la época: **entre 4 y 8 horas** de juego.
 
 ## 14. Alcance del primer prototipo
 
-> **Estado:** en desarrollo. Hechos los puntos 1, 2, 3, 4 (agua e incendios), 6 (vecinos y carretas; falta el portón) y 7 (sin serenos todavía). Pendiente: 5 (puerto).
+> **Estado:** los 7 puntos del recorte están hechos en el prototipo de Godot, además de la muralla con portones y aduana y los acontecimientos lejanos. Pendiente: la decisión final de la muralla, la iglesia matriz por fases, el campo (estancias, saladeros) y guardar partida.
 
 Un recorte mínimo para validar lo esencial de esta época:
 1. Mapa grande con península, bahía, arroyos y cuchillas; parcela inicial más la compra de

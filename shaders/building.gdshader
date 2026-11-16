@@ -4,6 +4,7 @@ render_mode diffuse_burley;
 // Edificios con color por vértice. Alfa 0 = ventana: de noche algunas se iluminan con
 // luz de vela que titila.
 uniform float night_factor = 0.0;
+uniform float lit_ratio = 0.55;   // proporción de ventanas encendidas de noche (1 = faroles)
 
 varying vec3 wpos;
 
@@ -22,7 +23,7 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(0.9, 0.35, is_win);
 	vec2 cell = floor(wpos.xz * 0.7) + floor(wpos.y * 0.4) * 13.0;
-	float lit = step(0.45, hash(cell));
+	float lit = step(1.0 - lit_ratio, hash(cell));
 	float flicker = 0.8 + 0.2 * sin(TIME * (5.0 + 3.0 * hash(cell + 3.1)) + hash(cell) * 40.0);
 	EMISSION = vec3(1.0, 0.58, 0.22) * 2.2 * night_factor * lit * flicker * is_win;
 }

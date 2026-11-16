@@ -15,21 +15,25 @@ const CameraRig = preload("res://scripts/camera_rig.gd")
 const Agents = preload("res://scripts/agents/agents.gd")
 const Services = preload("res://scripts/city/services.gd")
 const Fires = preload("res://scripts/city/fires.gd")
+const Port = preload("res://scripts/city/port.gd")
+const Wall = preload("res://scripts/city/wall.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
-enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER }
+enum Tool { INSPECT, PLAZA, STRAIGHT, CURVE, GRID, ZONE, DEZONE, BULLDOZE, PARCELS, WATER, PORT, WALL }
 const TOOL_DEFS := [
 	{"key": "1", "name": "Inspeccionar", "hint": "Haz clic en un vecino, una carreta, un solar, una calle o el terreno para ver su información. F sigue al vecino elegido."},
-	{"key": "2", "name": "Plaza mayor", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
-	{"key": "3", "name": "Calle recta", "hint": "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar."},
-	{"key": "4", "name": "Calle curva", "hint": "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija."},
+	{"key": "2", "name": "Plaza", "hint": "Elige el sitio de la plaza mayor (terreno firme y llano). R gira la plaza. Se crean la iglesia matriz y las calles que la rodean."},
+	{"key": "3", "name": "Recta", "hint": "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar."},
+	{"key": "4", "name": "Curva", "hint": "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija."},
 	{"key": "5", "name": "Damero", "hint": "Clic en una esquina, clic en la otra punta del primer lado y mueve el ratón para extender las manzanas (cuadras de 84 m). Tercer clic para trazar."},
 	{"key": "6", "name": "Zona mixta", "hint": "Pinta con el ratón los solares junto a las calles. Ahí se instalan los pobladores. [ y ] cambian el tamaño del pincel."},
 	{"key": "7", "name": "Quitar zona", "hint": "Pinta para quitar la zona (derriba lo construido)."},
 	{"key": "8", "name": "Demoler", "hint": "Haz clic sobre un tramo de calle o un pozo, aljibe o puesto para demolerlo."},
 	{"key": "9", "name": "Parcelas", "hint": "Compra parcelas contiguas a las tuyas (mercedes de tierras). Se desbloquean más con la población."},
-	{"key": "0", "name": "Agua", "hint": "Construye pozos, aljibes o un puesto de aguadores junto a una calle (R gira). Las casas de azotea necesitan agua y las de altos, buena agua. Con agua cerca, los vecinos apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
+	{"key": "0", "name": "Servicios", "hint": "Pozos, aljibes, puesto de aguadores o de serenos, junto a una calle (R gira). Las casas de azotea necesitan agua y las de altos, buena agua; con agua cerca se apagan los incendios. Azul: buena agua · celeste: regular · rojo: sin agua."},
+	{"key": "P", "name": "Puerto", "hint": "Haz clic en la costa, junto a una calle, para construir el muelle con su barraca. Los barcos fondean en el río y las lanchas descargan pobladores y mercancías; las carretas traen cueros para embarcar."},
+	{"key": "M", "name": "Muralla", "hint": "Clic en el inicio y clic en el final de cada tramo; sigue encadenando y Esc para terminar. Donde cruza una calle se abre un portón con aduana: las carretas se detienen a ser revisadas y pagan."},
 ]
 const WINDS := [["pampero", Vector2(0.7, -0.7)], ["sudestada", Vector2(-0.7, -0.7)], ["viento norte", Vector2(0.0, 1.0)], ["viento del este", Vector2(-1.0, 0.0)], ["brisa del río", Vector2(0.0, -1.0)]]
 const SPEEDS := [0.0, 1.0, 2.0, 4.0]
@@ -54,6 +58,8 @@ var services: Services
 var fires: Fires
 var service_type := Services.Type.WELL
 var service_angle := 0.0
+var port: Port
+var wall: Wall
 var rig: CameraRig
 var hud: Hud
 
@@ -119,6 +125,16 @@ func _ready() -> void:
 	add_child(fires)
 	fires.setup(lots, services, gen, _send_bucket_brigade)
 	fires.event.connect(hud_toast)
+	port = Port.new()
+	add_child(port)
+	port.setup(gen, parcels, net, lots)
+	port.event.connect(hud_toast)
+	wall = Wall.new()
+	add_child(wall)
+	wall.setup(gen, parcels, net, lots)
+	agents.port = port
+	agents.wall = wall
+	day.night_materials.append(services.lantern_mat)
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.gen = gen
@@ -162,6 +178,10 @@ func _process(delta: float) -> void:
 	var mult: float = SPEEDS[speed]
 	day.speed = mult
 	agents.speed_mult = mult
+	port.time_scale = mult
+	var arrived := port.take_arrivals()
+	pool += int(arrived[0])
+	money += int(arrived[1])
 	if _follow:
 		var ap = agents.position_of(agents.selected_id)
 		if ap == null:
@@ -186,12 +206,9 @@ func _process(delta: float) -> void:
 func _month_tick() -> void:
 	month += 1
 	var pop := lots.population()
-	var arrivals := 4 + int(pop * 0.03)
-	if month % 4 == 0:
-		var ship := 20 + rng.randi_range(0, 25) + int(pop * 0.02)
-		arrivals += ship
-		hud.toast("Llega un barco con %d pobladores" % ship)
+	var arrivals := 4 + int(pop * 0.03) + port.month_tick(pop)
 	pool = mini(pool + arrivals, 600)
+	money += wall.take_duty() - wall.upkeep() - (Port.PIER_UPKEEP if port.has_pier else 0)
 	money += int(pop * 1.2) - int(net.total_length() * 0.01) - services.upkeep()
 	services.update_water()
 	lots.refresh_overlay()
@@ -245,6 +262,10 @@ func _refresh_hud() -> void:
 	})
 	if agents.selected_id != -1:
 		hud.show_info(agents.describe(agents.selected_id))
+	elif tool == Tool.PORT:
+		hud.show_info(port.describe())
+	elif tool == Tool.WALL:
+		hud.show_info("Muralla: %d m · Portones: %d\nCarretas revisadas: %d\nMantenimiento: %d pesos al mes" % [int(wall.total_length()), wall.gates.size(), wall.carts_inspected, wall.upkeep()])
 	var base: String = TOOL_DEFS[tool]["hint"]
 	hud.set_hint(base + ("\n" + _dyn_hint if _dyn_hint != "" else ""))
 
@@ -312,6 +333,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_select_tool(k - KEY_1)
 		elif k == KEY_0:
 			_select_tool(Tool.WATER)
+		elif k == KEY_P:
+			_select_tool(Tool.PORT)
+		elif k == KEY_M:
+			_select_tool(Tool.WALL)
 		elif k == KEY_ESCAPE:
 			if _stage > 0:
 				_stage = 0
@@ -384,6 +409,16 @@ func _on_click() -> void:
 			_painting = true
 		Tool.WATER:
 			place_service(service_type, _hover, service_angle)
+		Tool.PORT:
+			build_pier(_hover)
+		Tool.WALL:
+			if _stage == 0:
+				_p0 = _wall_snap(_hover)
+				_stage = 1
+			else:
+				var end := _wall_snap(_hover)
+				if build_wall(_p0, end):
+					_p0 = end
 		Tool.BULLDOZE:
 			var sid := services.at(_hover)
 			if sid != -1:
@@ -616,6 +651,44 @@ func place_service(type: int, c: Vector2, angle: float) -> bool:
 	return true
 
 
+func build_pier(p: Vector2) -> bool:
+	var err := port.pier_problem(p)
+	if err != "":
+		hud.toast(err)
+		return false
+	if Port.PIER_COST > money:
+		hud.toast("El muelle cuesta %s pesos" % Hud.fmt(Port.PIER_COST))
+		return false
+	money -= Port.PIER_COST
+	port.build_pier(p)
+	trees.mark_dirty()
+	hud.toast("¡Muelle construido! Los barcos ya pueden descargar con lanchas")
+	return true
+
+
+func build_wall(a: Vector2, b: Vector2) -> bool:
+	var err := wall.problem(a, b)
+	if err != "":
+		hud.toast(err)
+		return false
+	var cost := wall.cost(a, b)
+	if cost > money:
+		hud.toast("Fondos insuficientes: este tramo cuesta %s pesos" % Hud.fmt(cost))
+		return false
+	money -= cost
+	wall.add_segment(a, b)
+	trees.mark_dirty()
+	return true
+
+
+func _wall_snap(p: Vector2) -> Vector2:
+	for sg in wall.segments:
+		for q in sg:
+			if (q as Vector2).distance_to(p) < 10.0:
+				return q
+	return p
+
+
 func _buy_parcel(t: Vector2i) -> void:
 	var err := parcels.buy_problem(t)
 	if err != "":
@@ -773,6 +846,21 @@ func _update_preview() -> void:
 					var it: Dictionary = services.items[sid]
 					_circle(it["c"], Services.INFO[it["type"]]["radius"], Color(0.4, 0.7, 1.0, 0.35))
 				_dyn_hint = "%s · %s" % [Services.INFO[service_type]["desc"], services.problem(service_type, _hover, service_angle)]
+			Tool.PORT:
+				var err := port.pier_problem(_hover)
+				_marker(_hover)
+				if err == "":
+					var sea := port._find_sea(_hover)
+					var d: Vector2 = sea[0]
+					_ribbon(PackedVector2Array([_hover, _hover + d * (float(sea[1]) + 25.0)]), 6.0, _ok_col(money >= Port.PIER_COST))
+				_dyn_hint = "Costo: %s pesos%s" % [Hud.fmt(Port.PIER_COST), (" · " + err) if err != "" else ""]
+			Tool.WALL:
+				_marker(_wall_snap(_hover))
+				if _stage == 1:
+					var end := _wall_snap(_hover)
+					var err := wall.problem(_p0, end)
+					_ribbon(PackedVector2Array([_p0, end]), Wall.THICK, _ok_col(err == "" and wall.cost(_p0, end) <= money))
+					_dyn_hint = "Largo: %d m · Costo: %s pesos%s" % [int(_p0.distance_to(end)), Hud.fmt(wall.cost(_p0, end)), (" · " + err) if err != "" else ""]
 			Tool.BULLDOZE:
 				var bs := services.at(_hover)
 				if bs != -1:
@@ -907,6 +995,19 @@ func _handle_args() -> void:
 		rig.look_at_point(Vector3(x, gen.height(x, z), z), float(v[2]))
 		rig.yaw = deg_to_rad(float(v[3]))
 		rig.pitch = deg_to_rad(float(v[4]))
+	if args.has("focus"):
+		var fp := Vector2.INF
+		if args["focus"] == "port" and port.has_pier:
+			fp = port.pier_end.lerp(port.anchorage, 0.4)
+			port._spawn_ship(40)
+			for i in 400:
+				port._tick(0.05)
+		elif args["focus"] == "gate" and not wall.gates.is_empty():
+			fp = wall.gates[0]["pos"]
+		if fp != Vector2.INF:
+			rig.look_at_point(Vector3(fp.x, maxf(gen.height(fp.x, fp.y), 0.0), fp.y), float(args.get("dist", "160")))
+			rig.yaw = deg_to_rad(float(args.get("yaw", "30")))
+			rig.pitch = deg_to_rad(float(args.get("pitch", "-30")))
 	if args.has("shot") or args.has("quit"):
 		var frames := int(args.get("frames", "30"))
 		for i in frames:
@@ -926,6 +1027,8 @@ func print_stats() -> void:
 		if lot["level"] > 0:
 			var w: float = lot["water"]
 			water[2 if w >= 0.85 else (1 if w >= 0.5 else 0)] += 1
+	print("Puerto: muelle %s · cueros en barraca %d · año: %s · acontecimiento: %s" % [port.has_pier, port.hides, port.year_stats, port.active_event.get("name", "ninguno")])
+	print("Muralla: %d m · portones %d · carretas revisadas %d · faroles %d" % [int(wall.total_length()), wall.gates.size(), wall.carts_inspected, services.lamps.size()])
 	print("Agua: buena %d · regular %d · sin agua %d · fuentes %d · incendios activos %d, apagados %d, casas quemadas %d" % [water[2], water[1], water[0], services.items.size(), fires.burning.size(), fires.put_out_total, fires.destroyed_total])
 	print("Calles: %d tramos, %d nodos, %.0f m · Solares: %d (zonificados %d, edificados %d) · Población: %d · Pesos: %d · Esperando: %d" % [
 		net.edges.size(), net.nodes.size(), net.total_length(), lots.lots.size(), lots.count_zoned(),
@@ -953,6 +1056,39 @@ func build_demo() -> void:
 			var corner := c + s * (BLOCK * (i * 0.5)) + f * (BLOCK * (j * 0.5)) + (s * signf(i) + f * signf(j)) * 13.0
 			place_service(Services.Type.CISTERN, corner, plaza_angle)
 			place_service(Services.Type.WELL, corner + s * (BLOCK * signf(i)) - (s * signf(i)) * 18.0, plaza_angle)
+	# Puerto: busca una bajada practicable a la costa (oeste, este o la punta) y pone el muelle.
+	for dir in [-s, s, f]:
+		var from: Vector2 = c + dir * (BLOCK * (0.5 + k))
+		var shore := from
+		while gen.height(shore.x + dir.x * 10.0, shore.y + dir.y * 10.0) > 1.5 and shore.distance_to(from) < 600.0:
+			shore += dir * 10.0
+		var done := false
+		for back in [0.0, 10.0, 20.0, 30.0]:
+			var q: Vector2 = shore - dir * back
+			if road_problem(RoadNetwork.line(from, q), RoadNetwork.Type.DIRT) == "":
+				road_type = RoadNetwork.Type.DIRT
+				build_road(RoadNetwork.line(from, q))
+				if build_pier(q):
+					done = true
+					break
+		if done:
+			break
+	# Muralla de costa a costa cruzando la península al norte de la ciudad.
+	var mid := c - f * (BLOCK * (0.5 + k) + 45.0)
+	var ends := []
+	for sgn in [-1.0, 1.0]:
+		var q := mid
+		while gen.height(q.x + s.x * sgn * 10.0, q.y + s.y * sgn * 10.0) > 1.5 and q.distance_to(mid) < 900.0:
+			q += s * sgn * 10.0
+		ends.append(q)
+	build_wall(ends[0], mid)
+	build_wall(mid, ends[1])
+	# Serenos cerca de la plaza.
+	for off in [Vector2(1.5, 0.5), Vector2(-1.5, -0.5), Vector2(0.5, 1.5), Vector2(-0.5, -1.5)]:
+		var pos: Vector2 = c + s * (BLOCK * off.x) + f * (BLOCK * off.y) + (s + f) * 11.0
+		if services.problem(Services.Type.WATCH, pos, plaza_angle) == "":
+			place_service(Services.Type.WATCH, pos, plaza_angle)
+			break
 	lots.paint(c, 420.0, 1)
 	lots.paint(exit - f * 400.0, 200.0, 1)
 	_select_tool(Tool.INSPECT)
@@ -966,6 +1102,7 @@ func simulate(seconds: float) -> void:
 	for i in n:
 		day.advance(dt / day.day_length)
 		agents.tick(dt)
+		port._tick(dt)
 		if i % 5 == 4:
 			fires.step()
 	print("Costo medio por paso de 0,1 s: %.2f ms" % ((Time.get_ticks_usec() - t0) / 1000.0 / maxf(n, 1)))
@@ -985,5 +1122,9 @@ func fast_forward(months: int) -> void:
 	services.update_water()
 	for m in months:
 		_month_tick()
+		port.flush_ships()
+		var arrived := port.take_arrivals()
+		pool += int(arrived[0])
+		money += int(arrived[1])
 		for g in int(MONTH_SECONDS / 0.5):
 			_growth_tick()

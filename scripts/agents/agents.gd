@@ -14,6 +14,8 @@ const Lots = preload("res://scripts/city/lots.gd")
 const DayNight = preload("res://scripts/world/day_night.gd")
 const Router = preload("res://scripts/agents/router.gd")
 const Services = preload("res://scripts/city/services.gd")
+const Port = preload("res://scripts/city/port.gd")
+const Wall = preload("res://scripts/city/wall.gd")
 const AgentMeshes = preload("res://scripts/agents/agent_meshes.gd")
 
 enum Kind { WALK, RIDER, CART, WATER }
@@ -47,6 +49,8 @@ var lots: Lots
 var day: DayNight
 var router := Router.new()
 var services: Services
+var port: Port
+var wall: Wall
 var speed_mult := 1.0
 var residents := {}
 var agents: Array = []
@@ -216,6 +220,20 @@ func _build_schedule() -> void:
 				continue
 			for k in mini(12, 2 + int(it["served"]) / 40):
 				_schedule.append([(7.0 + _rng.randf() * 9.0) / 24.0, -2 - int(sid), "reparte agua"])
+	# Serenos: hacen la ronda toda la noche. Tertulias en las calles iluminadas.
+	if services != null:
+		for sid in services.items:
+			if services.items[sid]["type"] == Services.Type.WATCH:
+				for k in 2:
+					_schedule.append([(19.3 + _rng.randf() * 0.6) / 24.0, -1000 - int(sid), "ronda"])
+		for id in residents:
+			var r: Dictionary = residents[id]
+			if not lots.lots.has(r["home"]) or _rng.randf() > 0.1:
+				continue
+			if services.lit_at(lots.front_point(lots.lots[r["home"]])):
+				var t := 19.5 + _rng.randf() * 1.5
+				_schedule.append([t / 24.0, id, "a la tertulia en la pulpería"])
+				_schedule.append([minf(t + 1.0 + _rng.randf() * 1.5, 23.9) / 24.0, id, "vuelve de la tertulia"])
 	# Carretas que traen cueros y alimentos del campo durante el día.
 	var carts := 4 + int(lots.population() / 70.0)
 	for k in carts:
@@ -237,6 +255,8 @@ func _spawn_scheduled() -> void:
 		_sched_i += 1
 		if item[1] == -1:
 			_spawn_cart()
+		elif int(item[1]) <= -1000:
+			_start_round(-1000 - int(item[1]))
 		elif item[1] <= -2:
 			_spawn_water_cart(-2 - int(item[1]))
 		elif residents.has(item[1]):
@@ -276,6 +296,24 @@ func _spawn_resident_trip(r: Dictionary, purpose: String) -> void:
 	elif purpose == "de vuelta del mercado":
 		a = _plaza_point()
 		b = home
+	elif purpose == "a la tertulia en la pulpería":
+		var near := lots._nearby(home)
+		var cands := []
+		for lid in near:
+			if lid != r["home"] and lots.lots[lid]["level"] > 0:
+				cands.append(lid)
+		if cands.is_empty():
+			return
+		var dest: int = cands[_rng.randi() % cands.size()]
+		r["tertulia"] = dest
+		a = home
+		b = lots.front_point(lots.lots[dest])
+	elif purpose == "vuelve de la tertulia":
+		if not r.has("tertulia") or not lots.lots.has(r["tertulia"]):
+			return
+		a = lots.front_point(lots.lots[r["tertulia"]])
+		b = home
+		r.erase("tertulia")
 	elif purpose == "a buscar agua" or purpose == "de vuelta con el agua":
 		var src: int = lots.lots[r["home"]]["water_src"]
 		if services == null or not services.items.has(src):
@@ -306,7 +344,12 @@ func _spawn_cart() -> void:
 		return
 	var from: Vector2 = net.nodes[entry]
 	var temper: Dictionary = TEMPERS[_rng.randi() % TEMPERS.size()]
-	var id := spawn(Kind.CART, from, _plaza_point(), -1, "trae cueros y trigo del campo", _rng.randi() % 100000, temper)
+	var to := _plaza_point()
+	var why := "trae cueros y trigo del campo al mercado"
+	if port != null and port.has_pier:
+		to = port.land_point
+		why = "trae cueros del campo a la barraca del puerto"
+	var id := spawn(Kind.CART, from, to, -1, why, _rng.randi() % 100000, temper)
 	if id != -1:
 		by_id[id]["carter"] = "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
 
@@ -326,6 +369,34 @@ func _spawn_water_cart(sid: int) -> void:
 	if id != -1:
 		by_id[id]["carter"] = "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
 		by_id[id]["depot"] = depot
+
+
+func _start_round(sid: int, from := Vector2.INF, sereno := "") -> void:
+	if services == null or not services.items.has(sid) or services.lamps.is_empty():
+		return
+	var start: Vector2 = services.items[sid]["c"] if from == Vector2.INF else from
+	var lamp: Vector3 = services.lamps[_rng.randi() % services.lamps.size()]
+	var id := spawn(Kind.WALK, start, Vector2(lamp.x, lamp.z), -1, "hace la ronda y enciende los faroles", _rng.randi() % 100000, TEMPERS[0])
+	if id != -1:
+		by_id[id]["watch"] = sid
+		by_id[id]["sereno"] = sereno if sereno != "" else "%s %s" % [FIRST[_rng.randi() % 12], LAST[_rng.randi() % LAST.size()]]
+		by_id[id]["col"] = Color(0.25, 0.22, 0.35)
+
+
+## Al llegar a un farol, el sereno sigue la ronda mientras sea de noche; al amanecer vuelve.
+func _next_round(ag: Dictionary) -> void:
+	var sid: int = ag["watch"]
+	if not services.items.has(sid):
+		return
+	var here: Vector2 = Vector2(ag["vis"].x, ag["vis"].z) if ag["vis"] != Vector3.INF else services.items[sid]["c"]
+	var name: String = ag.get("sereno", "un sereno")
+	var h := day.hour()
+	if h >= 19.0 or h < 5.5:
+		var cont := func():
+			_start_round(sid, here, name)
+		_pending.append([sim_time + 5.0, cont])
+	else:
+		spawn(Kind.WALK, here, services.items[sid]["c"], -1, "vuelve al puesto al amanecer", _rng.randi() % 100000, TEMPERS[0])
 
 
 ## Entrada desde el campo: el extremo de calle más alejado de la plaza.
@@ -595,6 +666,27 @@ func _drive(ag: Dictionary, lanes: Dictionary, dt: float) -> void:
 			gap = stop_end
 			lead_v = 0.0
 
+	# Aduana: las carretas se detienen en el portón a ser revisadas.
+	if wall != null and ag["kind"] == Kind.CART and not wall.gates.is_empty():
+		var g := wall.gate_ahead(leg[0], leg[1], s, net.edges[leg[0]]["len"])
+		if not g.is_empty() and not (ag.get("insp", {}) as Dictionary).has(g[0]):
+			var dist := float(g[1]) - s
+			if dist < APPROACH:
+				# El punto de parada es el propio portón (se descuenta la distancia mínima).
+				var stop_g := dist + float(p["s0"]) - 1.5
+				if stop_g < gap:
+					gap = stop_g
+					lead_v = 0.0
+				if dist < 4.0 and v < 0.3:
+					ag["state"] = "revisado en la aduana del portón"
+					ag["insp_t"] = float(ag.get("insp_t", 0.0)) + dt
+					if float(ag["insp_t"]) >= Wall.INSPECT_SECONDS:
+						if not ag.has("insp"):
+							ag["insp"] = {}
+						ag["insp"][g[0]] = true
+						ag["insp_t"] = 0.0
+						wall.inspected()
+
 	# Velocidad deseada: tipo de calle, curvas y giros.
 	var v0: float = p["v0"]
 	if net.edges[leg[0]]["type"] == RoadNetwork.Type.DIRT:
@@ -620,7 +712,7 @@ func _drive(ag: Dictionary, lanes: Dictionary, dt: float) -> void:
 	ag["s"] = s + ds
 	if ag["v"] < 0.1:
 		ag["wait"] = float(ag["wait"]) + dt
-		if ag["state"] == "en marcha":
+		if ag["state"] == "en marcha" or ag["state"] == "adelantando":
 			ag["state"] = "esperando en la fila"
 
 
@@ -719,11 +811,15 @@ func _arrive(ag: Dictionary) -> void:
 			if nid != -1:
 				by_id[nid]["carter"] = carter2
 		_pending.append([sim_time + 30.0 + _rng.randf() * 60.0, back2])
+	elif ag.has("watch"):
+		_next_round(ag)
 	elif ag["kind"] == Kind.CART and String(ag["purpose"]).begins_with("trae"):
-		# La carreta descarga en el mercado y vuelve al campo más tarde.
+		if port != null and String(ag["purpose"]).contains("barraca"):
+			port.deliver_hides(12 + _rng.randi() % 10)
+		# La carreta descarga y vuelve al campo más tarde.
 		var entry := _entry_node()
 		if entry != -1:
-			var at: Vector2 = _plaza_point()
+			var at: Vector2 = port.land_point if (port != null and String(ag["purpose"]).contains("barraca")) else _plaza_point()
 			var dest: Vector2 = net.nodes[entry]
 			var temper: Dictionary = ag["temper"]
 			var carter: String = ag.get("carter", "un carretero")
@@ -845,6 +941,9 @@ func describe(id: int) -> String:
 		txt += "Carro de aguatero\nAguatero: %s\n" % ag.get("carter", "—")
 	elif String(ag["purpose"]).contains("baldes"):
 		txt += "Vecino voluntario\n"
+	elif ag.has("watch"):
+		var hh := int(day.hour())
+		txt += "Sereno %s\nCanta: «¡Las %d han dado y sereno!»\n" % [ag.get("sereno", ""), hh if hh <= 12 else hh - 12]
 	txt += "Va %s, %s\n" % [ag["purpose"], KIND_NAMES[ag["kind"]]]
 	txt += "Estado: %s\n" % ag["state"]
 	txt += "Velocidad: %.1f km/h\n" % (float(ag["v"]) * 3.6)

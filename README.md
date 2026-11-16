@@ -41,14 +41,41 @@ Qué incluye:
   favor del viento (pampero, sudestada…). Con agua cerca, los vecinos forman una cadena de
   baldes; si no, la casa se quema y quedan ruinas unos meses.
 
-Pendiente para los siguientes pasos: puerto y flujos, muralla con portones y serenos con faroles.
+- **Puerto (tecla P):** muelle con barraca en la costa; barcos de vela que fondean y lanchas que
+  descargan pobladores y mercancías; las carretas traen cueros para embarcar; panel con los
+  flujos del año. Sin muelle, los barcos desembarcan en la playa y llega menos gente.
+- **Acontecimientos lejanos** (ficticios, con guiños históricos): guerra entre las Coronas del
+  Norte, Reglamento de Comercio Libre, fiebre del cuero, bloqueo del río… cambian los flujos del
+  puerto y se anuncian por la gaceta.
+- **Muralla (tecla M):** se traza por tramos; donde cruza una calle se abre un portón con aduana.
+  Las carretas se detienen a ser revisadas y pagan, y se forman colas en la entrada.
+- **Serenos y faroles:** el puesto de serenos ilumina las calles cercanas; los serenos hacen la
+  ronda toda la noche cantando la hora, y en las calles iluminadas los vecinos salen a la tertulia.
+
+![Carretas haciendo fila en el portón de la muralla](docs/capturas/prototipo1-porton.jpg)
+
+Pendiente: la decisión final de la muralla (paso a la época 2), la iglesia matriz como obra por
+fases, estancias y saladeros en el campo, y guardar/cargar partida.
+
+## Motor de vóxeles (Rust)
+
+En `engine/` está la primera versión del motor propio de vóxeles a la vista, escrito en Rust con
+wgpu. Por ahora genera el mapa y una ciudad de prueba y guarda capturas
+([detalle](docs/sistemas/motor-voxel.md)).
+
+![Ciudad colonial de vóxeles](docs/capturas/motor-voxel-cerca.jpg)
+
+```
+cd engine
+cargo run --release -- --shot captura.png
+```
 
 ### Cómo ejecutarlo
 1. Instala [Godot 4.3](https://godotengine.org/download) o superior.
 2. Abre `project.godot` desde Godot y pulsa F5.
 
 Controles: WASD mover · Q/E girar · rueda zoom · botón central orbitar · botón derecho arrastrar ·
-1–9 y 0 herramientas · Tab tipo de calle o de servicio · R girar la plaza · [ ] tamaño del pincel · Espacio pausa ·
+1–9, 0, P y M herramientas · Tab tipo de calle o de servicio · R girar la plaza · [ ] tamaño del pincel · Espacio pausa ·
 Esc cancelar.
 
 Modo demostración (ciudad ya trazada y 5 años simulados):
