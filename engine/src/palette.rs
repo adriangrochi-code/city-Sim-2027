@@ -30,7 +30,29 @@ pub const CAL_OCRE: Mat = 22;
 pub const CAL_ROSA: Mat = 23;
 pub const LEAF_DARK: Mat = 24;
 pub const GARDEN: Mat = 25;
-pub const COUNT: usize = 26;
+// Variantes de desgaste y materiales de las estructuras (ver docs/sistemas/estetica-voxel.md).
+pub const CAL_SUCIA: Mat = 26;
+pub const OCRE_SUCIA: Mat = 27;
+pub const ROSA_SUCIA: Mat = 28;
+pub const ZOCALO: Mat = 29;
+pub const TILE_DARK: Mat = 30;
+pub const TILE_LIGHT: Mat = 31;
+pub const THATCH_DARK: Mat = 32;
+pub const ADOBE_DARK: Mat = 33;
+pub const WOOD_DARK: Mat = 34;
+pub const REJA: Mat = 35;
+pub const STONE: Mat = 36;
+pub const STONE_DARK: Mat = 37;
+pub const HIDE: Mat = 38;
+pub const SCAFFOLD: Mat = 39;
+pub const FENCE: Mat = 40;
+pub const DOME: Mat = 41;
+pub const BRICK_DARK: Mat = 42;
+pub const SACK: Mat = 43;
+pub const LEAF_OMBU: Mat = 44;
+pub const CAL_AZUL: Mat = 45;
+pub const AZUL_SUCIA: Mat = 46;
+pub const COUNT: usize = 47;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -60,11 +82,32 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [222, 182, 168], // cal rosa viejo
     [52, 78, 36],    // hojas oscuras (monte)
     [90, 110, 52],   // huerta
+    [214, 208, 192], // cal manchada
+    [204, 184, 140], // cal ocre manchada
+    [200, 164, 152], // cal rosa manchada
+    [150, 146, 134], // zócalo (revoque húmedo)
+    [128, 64, 46],   // teja oscura
+    [184, 108, 76],  // teja clara
+    [168, 138, 80],  // paja vieja
+    [126, 96, 66],   // adobe húmedo
+    [72, 52, 36],    // madera oscura
+    [30, 28, 27],    // ventana con reja
+    [156, 150, 138], // sillería de piedra
+    [128, 122, 112], // sillería oscura
+    [150, 104, 64],  // cuero tendido
+    [176, 146, 104], // madera de andamio
+    [104, 92, 76],   // palo a pique
+    [196, 172, 120], // cúpula (azulejo ocre)
+    [130, 70, 50],   // ladrillo oscuro
+    [196, 180, 140], // bolsas de harina
+    [86, 120, 52],   // hojas de ombú
+    [196, 210, 216], // cal celeste
+    [176, 188, 192], // cal celeste manchada
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)
 pub fn is_window(m: Mat) -> bool {
-    m == WINDOW
+    m == WINDOW || m == REJA
 }
 
 pub fn color(m: Mat) -> [u8; 3] {

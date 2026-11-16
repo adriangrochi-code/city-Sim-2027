@@ -11,6 +11,7 @@ mod lod;
 mod mesher;
 mod palette;
 mod render;
+mod structures;
 mod terrain;
 mod world;
 
@@ -28,17 +29,21 @@ struct Args {
     hour: f32,
     size: (u32, u32),
     levels: u32,
+    scene: String,
+    cam_set: bool,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { shot: None, cam: [13500.0, 16300.0, 420.0, 200.0, 38.0], hour: 10.5, size: (1600, 900), levels: 8 };
+    let mut a = Args { shot: None, cam: [13500.0, 16300.0, 420.0, 200.0, 38.0], hour: 10.5, size: (1600, 900), levels: 8, scene: "ciudad".into(), cam_set: false };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < argv.len() {
         let next = argv.get(i + 1).cloned().unwrap_or_default();
         match argv[i].as_str() {
             "--shot" => a.shot = Some(next),
+            "--scene" => a.scene = next,
             "--cam" => {
+                a.cam_set = true;
                 for (k, v) in next.split(',').enumerate().take(5) {
                     a.cam[k] = v.parse().unwrap_or(a.cam[k]);
                 }
@@ -51,7 +56,7 @@ fn parse_args() -> Args {
             }
             "--levels" => a.levels = next.parse().unwrap_or(8),
             "--help" | "-h" => {
-                println!("motor --shot salida.png [--cam x,z,distancia,giro,inclinación] [--hour 10.5] [--size 1600x900] [--levels 8]");
+                println!("motor --shot salida.png [--scene ciudad|catalogo] [--cam x,z,distancia,giro,inclinación] [--hour 10.5] [--size 1600x900] [--levels 8]");
                 std::process::exit(0);
             }
             other => eprintln!("argumento desconocido: {other}"),
@@ -100,15 +105,34 @@ fn mesh_world(world: &World) -> Vec<(u32, Mesh)> {
     })
 }
 
+/// Memoria máxima del proceso (Linux), en MB.
+fn peak_memory_mb() -> Option<f64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmHWM:"))?;
+    let kb: f64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb / 1024.0)
+}
+
 fn main() {
-    let args = parse_args();
+    let mut args = parse_args();
     let plaza = Vec2::new(13500.0, 16300.0);
-    let focus = Vec2::new(args.cam[0], args.cam[1]);
 
     let t0 = Instant::now();
     let terrain = TerrainGen::new(1726);
-    let mut edits = buildings::colonial_city(&terrain, plaza, 3, 7);
-    buildings::vegetation(&terrain, &mut edits, plaza, 1800.0, 300.0, 11);
+    let scene = match args.scene.as_str() {
+        "catalogo" => structures::scenes::catalogo(&terrain),
+        "ciudad" => structures::scenes::ciudad(&terrain, plaza, 3, 7),
+        other => {
+            eprintln!("escena desconocida: {other} (use ciudad o catalogo)");
+            std::process::exit(2);
+        }
+    };
+    if !args.cam_set {
+        args.cam = scene.cam;
+    }
+    let focus = Vec2::new(args.cam[0], args.cam[1]);
+    let edits = scene.edits;
+    let _ = scene.center;
     let t_city = t0.elapsed();
 
     let levels: Vec<LevelSpec> = (0..args.levels).map(|lod| LevelSpec { lod }).collect();
@@ -121,13 +145,16 @@ fn main() {
     let t_mesh = t2.elapsed();
 
     let tris: usize = meshes.iter().map(|(_, m)| m.triangles()).sum();
-    println!("Ciudad y vegetación: {} vóxeles editados en {:.2?}", edits.voxels.len(), t_city);
+    println!("Escena «{}»: {} vóxeles editados en {:.2?}", args.scene, edits.voxels.len(), t_city);
     println!("Mundo: {} chunks en {} niveles, generado en {:.2?}", world.chunk_count(), world.levels.len(), t_gen);
     for l in &world.levels {
         let lt: usize = meshes.iter().filter(|(lod, _)| *lod == l.spec.lod).map(|(_, m)| m.triangles()).sum();
         println!("  nivel {} (vóxel {} m, chunk {} m): {} columnas, {} chunks, {} triángulos", l.spec.lod, l.spec.voxel(), l.spec.chunk_m(), l.columns.len(), l.chunks.len(), lt);
     }
     println!("Mallado: {} triángulos en {:.2?}", tris, t_mesh);
+    if let Some(mb) = peak_memory_mb() {
+        println!("Memoria máxima hasta el mallado: {mb:.0} MB");
+    }
 
     if let Some(path) = args.shot {
         let mut renderer = match render::Renderer::new() {

@@ -14,7 +14,8 @@ const P: i32 = N + 2;
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct Vertex {
     pub pos: [f32; 3],
-    /// Color sRGB del material; alfa 255 = ventana (brilla de noche).
+    /// Color sRGB del material; el alfa lleva el número de material (para los dibujos
+    /// finos por material del shader y las ventanas que brillan de noche).
     pub color: [u8; 4],
     /// Normal (xyz) y oclusión ambiental (w, 0..127).
     pub normal: [i8; 4],
@@ -163,7 +164,7 @@ fn emit_quad(mesh: &mut Mesh, origin: Vec3, vs: f32, axis: usize, u_ax: usize, v
         [origin.x + c[0] * vs, origin.y + c[1] * vs, origin.z + c[2] * vs]
     };
     let rgb = palette::color(m);
-    let color = [rgb[0], rgb[1], rgb[2], if palette::is_window(m) { 255 } else { 0 }];
+    let color = [rgb[0], rgb[1], rgb[2], m];
     let mut nrm = [0i8; 3];
     nrm[axis] = (sign * 127) as i8;
     // Esquinas en orden antihorario visto desde la normal +eje (u × v = eje).

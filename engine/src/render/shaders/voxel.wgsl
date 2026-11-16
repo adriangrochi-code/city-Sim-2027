@@ -72,9 +72,31 @@ fn shadow(world: vec3<f32>, n: vec3<f32>) -> f32 {
     return sum / 9.0;
 }
 
+// Números de material (deben coincidir con palette.rs).
+const M_WINDOW: u32 = 14u;
+const M_TILE: u32 = 8u;
+const M_THATCH: u32 = 9u;
+const M_TILE_DARK: u32 = 30u;
+const M_TILE_LIGHT: u32 = 31u;
+const M_THATCH_DARK: u32 = 32u;
+const M_REJA: u32 = 35u;
+const M_STONE: u32 = 36u;
+const M_STONE_DARK: u32 = 37u;
+const M_HIDE: u32 = 38u;
+const M_DOME: u32 = 41u;
+
+// Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
+fn along(world: vec3<f32>, n: vec3<f32>) -> f32 {
+    if (abs(n.x) > 0.5) {
+        return world.z;
+    }
+    return world.x;
+}
+
 @fragment
 fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let n = normalize(v.normal);
+    let mat = u32(v.color.a * 255.0 + 0.5);
     // Variación de tono por vóxel: se ve cada bloque aunque las caras estén unidas.
     let cell = floor((v.world - n * 0.01 * v.voxel) / v.voxel);
     let tint = 0.9 + 0.16 * hash3(cell);
@@ -87,6 +109,53 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let line = (1.0 - smoothstep(0.0, 0.07, edge)) * (1.0 - smoothstep(0.15, 0.6, fw));
     albedo *= 1.0 - 0.18 * line;
 
+    // Detalle más fino que el vóxel, dibujado por material. Se apaga a lo lejos (fwidth)
+    // para que no haga ruido: de lejos manda el color del material.
+    let near = 1.0 - smoothstep(0.25, 0.7, length(fwidth(v.world * 4.0)));
+    var glass = 0.0;
+    if (mat == M_REJA) {
+        // Reja de hierro: barrotes verticales cada 12,5 cm y un travesaño arriba.
+        let h = fract(along(v.world, n) * 8.0);
+        let ty = fract(v.world.y * 2.0);
+        let bar = max(step(h, 0.3), step(0.86, ty));
+        // Vidrio que refleja el cielo detrás de barrotes casi negros: así la reja se lee.
+        let pane = srgb_to_linear(vec3(0.24, 0.29, 0.34)) * (0.85 + 0.3 * fract(v.world.y * 0.7));
+        let iron = srgb_to_linear(vec3(0.05, 0.05, 0.05));
+        albedo = mix(pane, iron, bar * near + (1.0 - near) * 0.5);
+        glass = 1.0 - bar * near;
+    } else if (mat == M_WINDOW) {
+        glass = 1.0;
+        albedo = mix(albedo, srgb_to_linear(vec3(0.20, 0.24, 0.28)), 0.6);
+        // Postigos: marco claro alrededor de cada hoja de 0,5 m.
+        let h = fract(along(v.world, n) * 2.0);
+        let frame = 1.0 - step(0.12, h) * step(h, 0.88);
+        albedo = mix(albedo, albedo * 2.2, frame * near * 0.5);
+    } else if (mat == M_TILE || mat == M_TILE_DARK || mat == M_TILE_LIGHT) {
+        // Tejas: canales cada 25 cm y filas de 25 cm, en tresbolillo.
+        let a = along(v.world, n) * 4.0;
+        let row = select(floor(v.world.y * 4.0), floor(v.world.z * 4.0), n.y > 0.5);
+        let canal = 0.5 + 0.5 * sin((a + row * 0.5) * 6.2832);
+        albedo *= mix(1.0, 0.82 + 0.22 * canal, near);
+    } else if (mat == M_THATCH || mat == M_THATCH_DARK) {
+        // Paja: hebras verticales irregulares.
+        let a = along(v.world, n) * 10.0;
+        let s = hash3(vec3(floor(a), floor(v.world.y * 3.0), 0.0));
+        albedo *= mix(1.0, 0.82 + 0.3 * s, near);
+    } else if (mat == M_STONE || mat == M_STONE_DARK) {
+        // Sillería: juntas de mortero que dividen el vóxel en dos sillares en tresbolillo.
+        let a = fract(along(v.world, n) * 2.0 + floor(v.world.y * 2.0) * 0.5);
+        let joint = max(1.0 - step(0.06, fract(v.world.y * 2.0)), 1.0 - step(0.05, a));
+        albedo *= 1.0 - 0.25 * joint * near;
+    } else if (mat == M_HIDE) {
+        // Cueros estaqueados: borde más oscuro.
+        let a = fract(along(v.world, n) * 2.0);
+        albedo *= mix(1.0, 0.75 + 0.25 * smoothstep(0.0, 0.2, min(a, 1.0 - a)), near);
+    } else if (mat == M_DOME) {
+        // Azulejos de la cúpula: damero fino.
+        let c = floor(along(v.world, n) * 6.0) + floor(v.world.y * 6.0);
+        albedo *= mix(1.0, 0.9 + 0.12 * (c - 2.0 * floor(c * 0.5)), near);
+    }
+
     let ao = mix(0.42, 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
     let ndl = max(dot(n, g.sun_dir.xyz), 0.0);
     let sh = shadow(v.world, n);
@@ -95,10 +164,10 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     var light = g.sun_color.rgb * ndl * sh + (sky * 0.55 + bounce * 0.2) * g.params.w * ao;
     var col = albedo * light;
     // Ventanas iluminadas por velas de noche.
-    if (v.color.a > 0.5) {
+    if (glass > 0.0) {
         // Toda la ventana se enciende o no (celda de ~2 m × 3 m), no vóxel por vóxel.
         let lit = step(0.5, hash3(floor(v.world / vec3(2.0, 3.0, 2.0))));
-        col += vec3(1.0, 0.55, 0.2) * 1.6 * g.params.y * lit;
+        col += vec3(1.0, 0.55, 0.2) * 1.6 * g.params.y * lit * glass;
     }
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
