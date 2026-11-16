@@ -9,6 +9,7 @@ struct Globals {
     sky_top: vec4<f32>,
     sky_horizon: vec4<f32>,
     params: vec4<f32>, // x: densidad de niebla, y: noche (0..1), z: tiempo, w: luz ambiente
+    extra: vec4<f32>, // x: suavizado de escalones del terreno (1 = activo)
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 

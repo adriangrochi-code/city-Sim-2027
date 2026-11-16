@@ -87,11 +87,24 @@ iglesia matriz en sus 5 fases de obra.
 
 ![Iglesia matriz en sus fases de obra, en vóxeles](docs/capturas/voxel-iglesia-fases.jpg)
 
+Ya funciona como aplicación interactiva: ventana con cámara de constructor de ciudades, mundo que
+se genera en hilos a medida que te movés (primer cuadro en menos de 1 s) y un modo sandbox para
+colocar estructuras del catálogo, excavar y rellenar terreno.
+
 ```
 cd engine
-cargo run --release -- --shot captura.png              # ciudad colonial
+cargo run --release                                    # ventana interactiva
+cargo run --release -- --msaa 1                        # más rápida sin GPU dedicada
+cargo run --release -- --auto-test salida/             # recorrido automático con capturas
+cargo run --release -- --shot captura.png              # una captura sin ventana
 cargo run --release -- --scene catalogo --shot cat.png # catálogo de estructuras
 ```
+
+Controles: WASD/flechas mover · Q/E girar · rueda zoom · botón central orbitar · botón derecho
+arrastrar · clic izquierdo colocar estructura · clic derecho excavar · F rellenar · 1–9/Tab elegir
+estructura · R rotar · [ ] hora del día · P pausar el día · F12 captura.
+
+![Motor de vóxeles en modo sandbox](docs/capturas/motor-sandbox.jpg)
 
 ### Cómo ejecutarlo
 1. Instala [Godot 4.3](https://godotengine.org/download) o superior.

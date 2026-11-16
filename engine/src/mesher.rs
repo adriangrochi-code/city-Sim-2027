@@ -19,7 +19,59 @@ pub struct Vertex {
     pub color: [u8; 4],
     /// Normal (xyz) y oclusión ambiental (w, 0..127).
     pub normal: [i8; 4],
+    /// Normal suave de la ladera (solo terreno): para iluminar el relieve sin que los
+    /// escalones de un vóxel se vean como curvas de nivel oscuras.
+    pub smooth: [i8; 4],
     pub voxel: f32,
+}
+
+/// Materiales del terreno natural y del suelo (calles, plaza, huertas).
+pub fn is_terrain(m: Mat) -> bool {
+    use palette::*;
+    matches!(m, GRASS | DIRT | SAND | ROCK | MUD | COBBLE | DIRT_ROAD | PLAZA | GRASS_DRY | GARDEN)
+}
+
+/// Altura (índice y en la copia con borde) del vóxel de terreno más alto de cada columna.
+fn terrain_tops(v: &[Mat]) -> Vec<i32> {
+    let mut tops = vec![-1i32; (P * P) as usize];
+    for z in 0..P {
+        for x in 0..P {
+            for y in (0..P).rev() {
+                if is_terrain(at(v, x, y, z)) {
+                    tops[(x + z * P) as usize] = y;
+                    break;
+                }
+            }
+        }
+    }
+    tops
+}
+
+/// Normal suave en una esquina de la grilla (coordenadas de la copia con borde).
+fn smooth_normal(tops: &[i32], cx: i32, cz: i32) -> [i8; 4] {
+    let raw = |x: i32, z: i32| tops[(x.clamp(0, P - 1) + z.clamp(0, P - 1) * P) as usize];
+    // Altura de referencia: la de las columnas que tocan la esquina. Las columnas sin terreno
+    // (fuera del anillo del nivel, o con la superficie por debajo de este chunk) la toman
+    // prestada, así los bordes entre niveles no se ven como pendientes enormes.
+    let mut sum = 0;
+    let mut cnt = 0;
+    for (x, z) in [(cx - 1, cz - 1), (cx, cz - 1), (cx - 1, cz), (cx, cz)] {
+        let t = raw(x, z);
+        if t >= 0 {
+            sum += t;
+            cnt += 1;
+        }
+    }
+    let base = if cnt > 0 { sum as f32 / cnt as f32 } else { 0.0 };
+    let h = |x: i32, z: i32| -> f32 {
+        let t = raw(x, z);
+        if t >= 0 { t as f32 } else { base }
+    };
+    let gx = (h(cx, cz - 1) + h(cx, cz) + h(cx + 1, cz - 1) + h(cx + 1, cz)) - (h(cx - 1, cz - 1) + h(cx - 1, cz) + h(cx - 2, cz - 1) + h(cx - 2, cz));
+    let gz = (h(cx - 1, cz) + h(cx, cz) + h(cx - 1, cz + 1) + h(cx, cz + 1)) - (h(cx - 1, cz - 1) + h(cx, cz - 1) + h(cx - 1, cz - 2) + h(cx, cz - 2));
+    // Cada suma son 4 columnas a 2 vóxeles de distancia: pendiente = g / 4 / 2.
+    let n = Vec3::new(-gx / 8.0, 1.0, -gz / 8.0).normalize();
+    [(n.x * 127.0) as i8, (n.y * 127.0) as i8, (n.z * 127.0) as i8, 0]
 }
 
 #[derive(Default)]
@@ -69,6 +121,7 @@ fn at(v: &[Mat], x: i32, y: i32, z: i32) -> Mat {
 /// Malla de un chunk a partir de su copia con borde. `origin` en metros, `vs` = tamaño del vóxel.
 pub fn mesh_chunk(v: &[Mat], origin: Vec3, vs: f32) -> Mesh {
     let mut mesh = Mesh::default();
+    let tops = terrain_tops(v);
     let mut mask = vec![0u32; (N * N) as usize];
     for axis in 0..3usize {
         let u_ax = (axis + 1) % 3;
@@ -122,7 +175,7 @@ pub fn mesh_chunk(v: &[Mat], origin: Vec3, vs: f32) -> Mesh {
                                 mask[(i + ii + (j + jj) * N) as usize] = 0;
                             }
                         }
-                        emit_quad(&mut mesh, origin, vs, axis, u_ax, v_ax, sign, slice, i, j, w, h, key);
+                        emit_quad(&mut mesh, &tops, origin, vs, axis, u_ax, v_ax, sign, slice, i, j, w, h, key);
                         i += w;
                     }
                 }
@@ -152,17 +205,22 @@ fn face_ao(v: &[Mat], p: [i32; 3], u_ax: usize, v_ax: usize) -> u32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_quad(mesh: &mut Mesh, origin: Vec3, vs: f32, axis: usize, u_ax: usize, v_ax: usize, sign: i32, slice: i32, i: i32, j: i32, w: i32, h: i32, key: u32) {
+fn emit_quad(mesh: &mut Mesh, tops: &[i32], origin: Vec3, vs: f32, axis: usize, u_ax: usize, v_ax: usize, sign: i32, slice: i32, i: i32, j: i32, w: i32, h: i32, key: u32) {
     let m = (key & 0xff) as Mat;
     let ao = (key >> 8) & 0xff;
     let plane = if sign > 0 { slice + 1 } else { slice };
-    let corner = |du: i32, dv: i32| -> [f32; 3] {
-        let mut c = [0f32; 3];
-        c[axis] = plane as f32;
-        c[u_ax] = (i + du) as f32;
-        c[v_ax] = (j + dv) as f32;
-        [origin.x + c[0] * vs, origin.y + c[1] * vs, origin.z + c[2] * vs]
+    let grid = |du: i32, dv: i32| -> [i32; 3] {
+        let mut c = [0i32; 3];
+        c[axis] = plane;
+        c[u_ax] = i + du;
+        c[v_ax] = j + dv;
+        c
     };
+    let corner = |du: i32, dv: i32| -> [f32; 3] {
+        let c = grid(du, dv);
+        [origin.x + c[0] as f32 * vs, origin.y + c[1] as f32 * vs, origin.z + c[2] as f32 * vs]
+    };
+    let terrain = is_terrain(m);
     let rgb = palette::color(m);
     let color = [rgb[0], rgb[1], rgb[2], m];
     let mut nrm = [0i8; 3];
@@ -172,10 +230,17 @@ fn emit_quad(mesh: &mut Mesh, origin: Vec3, vs: f32, axis: usize, u_ax: usize, v
     let aos = [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3];
     let base = mesh.vertices.len() as u32;
     for (k, (du, dv)) in corners.iter().enumerate() {
+        let smooth = if terrain {
+            let g = grid(*du, *dv);
+            smooth_normal(tops, g[0] + 1, g[2] + 1)
+        } else {
+            [nrm[0], nrm[1], nrm[2], 0]
+        };
         mesh.vertices.push(Vertex {
             pos: corner(*du, *dv),
             color,
             normal: [nrm[0], nrm[1], nrm[2], (aos[k] * 42) as i8],
+            smooth,
             voxel: vs,
         });
     }
@@ -215,6 +280,24 @@ mod tests {
         let m = mesh_chunk(&v, Vec3::ZERO, 0.5);
         // Arriba y abajo: un solo quad cada uno; los 4 bordes: un quad por lado.
         assert_eq!(m.triangles(), 12);
+    }
+
+    #[test]
+    fn la_normal_suave_sigue_la_ladera() {
+        // Terreno en escalera que sube hacia +x: la normal suave debe inclinarse hacia -x.
+        let mut v = empty();
+        for z in 0..P {
+            for x in 0..P {
+                for y in 0..=(x / 4 + 2).min(P - 1) {
+                    v[(x + z * P + y * P * P) as usize] = palette::GRASS;
+                }
+            }
+        }
+        let m = mesh_chunk(&v, Vec3::ZERO, 0.5);
+        let ups: Vec<&Vertex> = m.vertices.iter().filter(|q| q.normal[1] > 0).collect();
+        assert!(!ups.is_empty());
+        let avg_x: f32 = ups.iter().map(|q| q.smooth[0] as f32).sum::<f32>() / ups.len() as f32;
+        assert!(avg_x < -10.0, "la normal suave no se inclina con la pendiente ({avg_x})");
     }
 
     #[test]

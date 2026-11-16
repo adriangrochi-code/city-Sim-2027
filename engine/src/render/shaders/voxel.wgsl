@@ -10,6 +10,7 @@ struct Globals {
     sky_top: vec4<f32>,
     sky_horizon: vec4<f32>,
     params: vec4<f32>,
+    extra: vec4<f32>, // x: suavizado de escalones del terreno (1 = activo)
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
@@ -19,7 +20,8 @@ struct VIn {
     @location(0) pos: vec3<f32>,
     @location(1) color: vec4<f32>,
     @location(2) normal: vec4<f32>,
-    @location(3) voxel: f32,
+    @location(3) smooth_n: vec4<f32>,
+    @location(4) voxel: f32,
 };
 
 struct VOut {
@@ -29,6 +31,7 @@ struct VOut {
     @location(2) normal: vec3<f32>,
     @location(3) ao: f32,
     @location(4) voxel: f32,
+    @location(5) smooth_n: vec3<f32>,
 };
 
 @vertex
@@ -40,6 +43,7 @@ fn vs_main(v: VIn) -> VOut {
     o.normal = v.normal.xyz;
     o.ao = v.normal.w * 127.0 / 42.0;
     o.voxel = v.voxel;
+    o.smooth_n = v.smooth_n.xyz;
     return o;
 }
 
@@ -85,6 +89,11 @@ const M_STONE_DARK: u32 = 37u;
 const M_HIDE: u32 = 38u;
 const M_DOME: u32 = 41u;
 
+// Materiales del terreno (deben coincidir con palette.rs).
+fn is_terrain(m: u32) -> bool {
+    return m == 1u || m == 2u || m == 3u || m == 4u || m == 5u || m == 12u || m == 13u || m == 17u || m == 20u || m == 25u;
+}
+
 // Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
 fn along(world: vec3<f32>, n: vec3<f32>) -> f32 {
     if (abs(n.x) > 0.5) {
@@ -107,7 +116,20 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let edge = min(min(e3.x, e3.y), e3.z);
     let fw = length(fwidth(v.world / v.voxel));
     let line = (1.0 - smoothstep(0.0, 0.07, edge)) * (1.0 - smoothstep(0.15, 0.6, fw));
-    albedo *= 1.0 - 0.18 * line;
+    // Escalones del terreno: el terreno es una ladera suave cortada en vóxeles. Se ilumina
+    // con la normal suave de la ladera (calculada al mallar), así el relieve se lee como una
+    // colina y los escalones de un vóxel no forman "curvas de nivel" oscuras a lo lejos.
+    let terr = is_terrain(mat) && g.extra.x > 0.5;
+    var ln = n;
+    if (terr) {
+        ln = normalize(v.smooth_n);
+        // De cerca se nota algo el escalón (estética de vóxeles); de lejos, nada.
+        if (abs(n.y) < 0.5) {
+            let far = smoothstep(0.08, 0.35, fw);
+            ln = normalize(mix(normalize(n * 0.35 + ln), ln, far));
+        }
+    }
+    albedo *= 1.0 - select(0.18, 0.05, terr) * line;
 
     // Detalle más fino que el vóxel, dibujado por material. Se apaga a lo lejos (fwidth)
     // para que no haga ruido: de lejos manda el color del material.
@@ -156,11 +178,11 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         albedo *= mix(1.0, 0.9 + 0.12 * (c - 2.0 * floor(c * 0.5)), near);
     }
 
-    let ao = mix(0.42, 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
-    let ndl = max(dot(n, g.sun_dir.xyz), 0.0);
+    let ao = mix(select(0.42, 0.8, terr), 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
+    let ndl = max(dot(ln, g.sun_dir.xyz), 0.0);
     let sh = shadow(v.world, n);
-    let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, n.y * 0.5 + 0.5);
-    let bounce = vec3(0.35, 0.30, 0.22) * max(-n.y, 0.0);
+    let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, ln.y * 0.5 + 0.5);
+    let bounce = vec3(0.35, 0.30, 0.22) * max(-ln.y, 0.0);
     var light = g.sun_color.rgb * ndl * sh + (sky * 0.55 + bounce * 0.2) * g.params.w * ao;
     var col = albedo * light;
     // Ventanas iluminadas por velas de noche.

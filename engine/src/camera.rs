@@ -31,14 +31,37 @@ impl OrbitCamera {
         Mat4::perspective_infinite_reverse_rh(self.fov_y.to_radians(), aspect, near)
     }
 
-    #[allow(dead_code)] // para el modo con ventana (pendiente)
     pub fn orbit(&mut self, dyaw: f32, dpitch: f32) {
         self.yaw += dyaw;
         self.pitch = (self.pitch + dpitch).clamp(5.0, 89.0);
     }
 
-    #[allow(dead_code)] // para el modo con ventana (pendiente)
+    /// Acerca o aleja (de ~15 m a ~15 km).
     pub fn zoom(&mut self, factor: f32) {
-        self.distance = (self.distance * factor).clamp(10.0, 30000.0);
+        self.distance = (self.distance * factor).clamp(15.0, 15000.0);
+    }
+
+    /// Dirección "hacia adelante" sobre el suelo y "a la derecha".
+    pub fn ground_axes(&self) -> (Vec3, Vec3) {
+        let y = self.yaw.to_radians();
+        (Vec3::new(-y.sin(), 0.0, -y.cos()), Vec3::new(y.cos(), 0.0, -y.sin()))
+    }
+
+    /// Mueve el objetivo sobre el suelo: `fwd` y `right` en metros.
+    pub fn pan(&mut self, right: f32, fwd: f32) {
+        let (f, r) = self.ground_axes();
+        self.target += f * fwd + r * right;
+    }
+
+    /// Rayo (origen, dirección) que pasa por el píxel (`mx`, `my`) de una imagen `w`×`h`.
+    pub fn ray(&self, mx: f32, my: f32, w: f32, h: f32) -> (Vec3, Vec3) {
+        let eye = self.eye();
+        let fwd = (self.target - eye).normalize();
+        let right = fwd.cross(Vec3::Y).normalize();
+        let up = right.cross(fwd);
+        let t = (self.fov_y.to_radians() * 0.5).tan();
+        let x = (2.0 * mx / w - 1.0) * t * (w / h);
+        let y = (1.0 - 2.0 * my / h) * t;
+        (eye, (fwd + right * x + up * y).normalize())
     }
 }

@@ -1,0 +1,585 @@
+//! Mundo en streaming: genera y malla columnas de chunks alrededor de la cámara en hilos de
+//! trabajo, de la más cercana a la más lejana, y las entrega de a poco para subirlas a la GPU.
+//!
+//! Cada trabajo es una *columna* de chunks de un nivel de detalle. Como el terreno es una
+//! función y las ediciones están en el [`EditStore`], cada columna se genera sola, sin
+//! depender de que las vecinas existan: el borde de un vóxel que necesita el mallado se
+//! calcula directamente. Fuera del anillo del nivel se considera aire, igual que antes: así
+//! los bordes entre niveles generan "faldones" que tapan grietas.
+
+use crate::lod::{level_columns, LevelSpec, CHUNK};
+use crate::mesher::{self, Mesh};
+use crate::palette::*;
+use crate::store::{chunk_of, local_index, EditStore};
+use crate::terrain::TerrainGen;
+use glam::{IVec2, IVec3, Vec2, Vec3};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtOrd};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::thread::JoinHandle;
+
+const N: i32 = CHUNK;
+const Q: i32 = N + 2;
+
+pub type Key = (u32, IVec2);
+
+struct Job {
+    prio: f32,
+    key: Key,
+    version: u32,
+    ring: Arc<HashSet<IVec2>>,
+}
+impl PartialEq for Job {
+    fn eq(&self, o: &Self) -> bool {
+        self.prio == o.prio
+    }
+}
+impl Eq for Job {}
+impl PartialOrd for Job {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Job {
+    // BinaryHeap es de máximos: invertimos para sacar primero la prioridad más baja (más cerca).
+    fn cmp(&self, o: &Self) -> Ordering {
+        o.prio.partial_cmp(&self.prio).unwrap_or(Ordering::Equal)
+    }
+}
+
+pub struct ColumnResult {
+    pub key: Key,
+    pub version: u32,
+    pub prio: f32,
+    pub mesh: Mesh,
+}
+
+struct Shared {
+    queue: Mutex<BinaryHeap<Job>>,
+    cv: Condvar,
+    quit: AtomicBool,
+    in_flight: AtomicUsize,
+}
+
+/// Cambios para el renderer.
+pub enum Op {
+    Set(Key, Mesh),
+    Remove(Key),
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct Stats {
+    pub columns_built: usize,
+    pub uploads: usize,
+}
+
+pub struct Streamer {
+    pub store: Arc<RwLock<EditStore>>,
+    pub specs: Vec<LevelSpec>,
+    sets: Vec<Arc<HashSet<IVec2>>>,
+    regions: Vec<(IVec2, IVec2)>,
+    versions: HashMap<Key, u32>,
+    ready: HashMap<Key, u32>,
+    uploads: Vec<ColumnResult>,
+    retired: HashSet<Key>,
+    next_version: u32,
+    center: Vec2,
+    shared: Arc<Shared>,
+    rx: Receiver<ColumnResult>,
+    workers: Vec<JoinHandle<()>>,
+    pub stats: Stats,
+}
+
+impl Streamer {
+    pub fn new(terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, levels: u32, threads: usize) -> Streamer {
+        let specs: Vec<LevelSpec> = (0..levels).map(|lod| LevelSpec { lod }).collect();
+        let shared = Arc::new(Shared { queue: Mutex::new(BinaryHeap::new()), cv: Condvar::new(), quit: AtomicBool::new(false), in_flight: AtomicUsize::new(0) });
+        let (tx, rx) = channel();
+        let mut workers = Vec::new();
+        for _ in 0..threads.max(1) {
+            let (sh, tx, t, s, specs): (Arc<Shared>, Sender<ColumnResult>, Arc<TerrainGen>, Arc<RwLock<EditStore>>, Vec<LevelSpec>) = (shared.clone(), tx.clone(), terrain.clone(), store.clone(), specs.clone());
+            workers.push(std::thread::spawn(move || worker(sh, tx, t, s, specs)));
+        }
+        Streamer {
+            store,
+            specs,
+            sets: Vec::new(),
+            regions: Vec::new(),
+            versions: HashMap::new(),
+            ready: HashMap::new(),
+            uploads: Vec::new(),
+            retired: HashSet::new(),
+            next_version: 1,
+            center: Vec2::ZERO,
+            shared,
+            rx,
+            workers,
+            stats: Stats::default(),
+        }
+    }
+
+    fn bump(&mut self, key: Key) {
+        self.versions.insert(key, self.next_version);
+        self.next_version += 1;
+    }
+
+    fn prio(&self, key: Key) -> f32 {
+        let cm = self.specs[key.0 as usize].chunk_m();
+        let c = Vec2::new((key.1.x as f32 + 0.5) * cm, (key.1.y as f32 + 0.5) * cm);
+        c.distance(self.center) + key.0 as f32
+    }
+
+    /// Recentra los anillos de detalle si la cámara se movió lo suficiente.
+    pub fn update(&mut self, center: Vec2) {
+        self.center = center;
+        let regions: Vec<(IVec2, IVec2)> = self.specs.iter().map(|s| s.region(center)).collect();
+        if regions == self.regions {
+            return;
+        }
+        let cols = level_columns(&self.specs, center);
+        let mut new_sets = Vec::new();
+        for (li, list) in cols.into_iter().enumerate() {
+            let lod = li as u32;
+            let new: HashSet<IVec2> = list.into_iter().collect();
+            let old: HashSet<IVec2> = self.sets.get(li).map(|s| (**s).clone()).unwrap_or_default();
+            let added: Vec<IVec2> = new.difference(&old).copied().collect();
+            let removed: Vec<IVec2> = old.difference(&new).copied().collect();
+            for c in &removed {
+                self.versions.remove(&(lod, *c));
+                if self.ready.contains_key(&(lod, *c)) {
+                    self.retired.insert((lod, *c));
+                }
+            }
+            // Las columnas que siguen y tocan el borde cambian de faldón: hay que re-mallarlas.
+            let mut border = HashSet::new();
+            for c in added.iter().chain(removed.iter()) {
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        let n = *c + IVec2::new(dx, dz);
+                        if new.contains(&n) && old.contains(&n) {
+                            border.insert(n);
+                        }
+                    }
+                }
+            }
+            for c in added {
+                self.retired.remove(&(lod, c));
+                self.bump((lod, c));
+            }
+            for c in border {
+                self.bump((lod, c));
+            }
+            new_sets.push(Arc::new(new));
+        }
+        self.sets = new_sets;
+        self.regions = regions;
+        self.requeue_all();
+    }
+
+    /// Rehace la cola con todo lo que falta, ordenado por cercanía a la cámara actual.
+    fn requeue_all(&mut self) {
+        let mut jobs = BinaryHeap::new();
+        for (&key, &v) in &self.versions {
+            if self.ready.get(&key) != Some(&v) {
+                jobs.push(Job { prio: self.prio(key), key, version: v, ring: self.sets[key.0 as usize].clone() });
+            }
+        }
+        *self.shared.queue.lock().unwrap() = jobs;
+        self.shared.cv.notify_all();
+    }
+
+    fn enqueue(&mut self, keys: &[Key], urgent: bool) {
+        let mut q = self.shared.queue.lock().unwrap();
+        for &key in keys {
+            if let Some(&v) = self.versions.get(&key) {
+                let prio = if urgent { -1.0 + key.0 as f32 * 0.01 } else { self.prio(key) };
+                q.push(Job { prio, key, version: v, ring: self.sets[key.0 as usize].clone() });
+            }
+        }
+        drop(q);
+        self.shared.cv.notify_all();
+    }
+
+    /// Aplica ediciones y re-malla solo las columnas tocadas (en todos los niveles).
+    /// Devuelve cuántas columnas se volvieron a encolar.
+    pub fn edit(&mut self, edits: &crate::buildings::Edits) -> Vec<Key> {
+        let touched = self.store.write().unwrap().apply(edits, true);
+        self.requeue_touched(touched, true)
+    }
+
+    fn requeue_touched(&mut self, touched: Vec<HashSet<IVec2>>, urgent: bool) -> Vec<Key> {
+        let mut keys = Vec::new();
+        for (li, set) in touched.into_iter().enumerate() {
+            for c in set {
+                let key = (li as u32, c);
+                if self.versions.contains_key(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+        for &k in &keys {
+            self.bump(k);
+        }
+        self.enqueue(&keys, urgent);
+        keys
+    }
+
+    /// Reemplaza todas las ediciones (por ejemplo, cuando termina de cargarse la escena) y
+    /// regenera solo las columnas que tienen ediciones.
+    pub fn replace_store(&mut self, store: EditStore) -> usize {
+        let mut touched: Vec<HashSet<IVec2>> = vec![HashSet::new(); self.specs.len()];
+        for (li, l) in store.levels.iter().enumerate() {
+            let set = &mut touched[li];
+            let mut add = |c: IVec2| {
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        set.insert(c + IVec2::new(dx, dz));
+                    }
+                }
+            };
+            for k in l.voxels.keys() {
+                add(IVec2::new(k.x, k.z));
+            }
+            let cols: HashSet<IVec2> = l.surface.keys().map(|c| IVec2::new(c.x >> 5, c.y >> 5)).collect();
+            for c in cols {
+                add(c);
+            }
+        }
+        *self.store.write().unwrap() = store;
+        self.requeue_touched(touched, false).len()
+    }
+
+    /// Recibe columnas terminadas y devuelve cambios para la GPU, con un presupuesto de
+    /// vértices por cuadro (para no trabar la imagen).
+    pub fn poll(&mut self, vertex_budget: usize) -> Vec<Op> {
+        while let Ok(r) = self.rx.try_recv() {
+            self.stats.columns_built += 1;
+            if self.versions.get(&r.key) == Some(&r.version) {
+                self.uploads.push(r);
+            }
+        }
+        // Lo más cercano primero.
+        self.uploads.sort_by(|a, b| b.prio.partial_cmp(&a.prio).unwrap_or(Ordering::Equal));
+        let mut ops = Vec::new();
+        let mut used = 0usize;
+        while let Some(r) = self.uploads.pop() {
+            if self.versions.get(&r.key) != Some(&r.version) {
+                continue;
+            }
+            used += r.mesh.vertices.len().max(1);
+            self.ready.insert(r.key, r.version);
+            self.stats.uploads += 1;
+            ops.push(Op::Set(r.key, r.mesh));
+            if used >= vertex_budget {
+                break;
+            }
+        }
+        // Lo que quedó fuera de los anillos se borra cuando ya no hay nada pendiente
+        // (o si se acumula mucho), así no aparecen agujeros mientras llega lo nuevo.
+        if !self.retired.is_empty() && (self.idle_now() || self.retired.len() > 3000) {
+            for key in self.retired.drain() {
+                self.ready.remove(&key);
+                ops.push(Op::Remove(key));
+            }
+        }
+        ops
+    }
+
+    fn idle_now(&self) -> bool {
+        self.uploads.is_empty() && self.shared.in_flight.load(AtOrd::SeqCst) == 0 && self.shared.queue.lock().unwrap().is_empty()
+    }
+
+    /// ¿Está todo generado y entregado para la posición actual?
+    pub fn idle(&mut self) -> bool {
+        if !self.idle_now() {
+            return false;
+        }
+        // Un trabajo pudo terminar justo entre la última lectura del canal y esta comprobación.
+        if let Ok(r) = self.rx.try_recv() {
+            self.stats.columns_built += 1;
+            if self.versions.get(&r.key) == Some(&r.version) {
+                self.uploads.push(r);
+            }
+            return false;
+        }
+        self.retired.is_empty()
+    }
+
+    pub fn pending(&self) -> usize {
+        self.shared.queue.lock().unwrap().len() + self.shared.in_flight.load(AtOrd::SeqCst) + self.uploads.len()
+    }
+
+    pub fn wanted_columns(&self) -> usize {
+        self.versions.len()
+    }
+}
+
+impl Drop for Streamer {
+    fn drop(&mut self) {
+        self.shared.quit.store(true, AtOrd::SeqCst);
+        self.shared.cv.notify_all();
+        for w in self.workers.drain(..) {
+            let _ = w.join();
+        }
+    }
+}
+
+fn worker(sh: Arc<Shared>, tx: Sender<ColumnResult>, terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, specs: Vec<LevelSpec>) {
+    loop {
+        let job = {
+            let mut q = sh.queue.lock().unwrap();
+            loop {
+                if sh.quit.load(AtOrd::SeqCst) {
+                    return;
+                }
+                if let Some(j) = q.pop() {
+                    sh.in_flight.fetch_add(1, AtOrd::SeqCst);
+                    break j;
+                }
+                q = sh.cv.wait(q).unwrap();
+            }
+        };
+        let mesh = {
+            let s = store.read().unwrap();
+            build_column(&terrain, &s, specs[job.key.0 as usize], job.key.1, &job.ring)
+        };
+        let _ = tx.send(ColumnResult { key: job.key, version: job.version, prio: job.prio, mesh });
+        sh.in_flight.fetch_sub(1, AtOrd::SeqCst);
+    }
+}
+
+/// Índice del vóxel de superficie del terreno a partir de la altura (en metros).
+#[inline]
+pub fn top_from_height(h: f32, vs: f32) -> i32 {
+    // Bajo el agua, la cara superior del vóxel no debe asomar sobre el nivel del río.
+    if h < 0.0 {
+        (h / vs - 1.0).floor() as i32
+    } else {
+        (h / vs - 0.5).floor() as i32
+    }
+}
+
+#[inline]
+fn layer(depth: i32, soil: i32, surf: Mat) -> Mat {
+    if depth == 0 {
+        surf
+    } else if depth <= soil {
+        match surf {
+            SAND | MUD => surf,
+            ROCK => ROCK,
+            _ => DIRT,
+        }
+    } else {
+        ROCK
+    }
+}
+
+/// Genera y malla una columna de chunks completa de un nivel.
+pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>) -> Mesh {
+    let vs = spec.voxel();
+    let ls = &store.levels[spec.lod as usize];
+    let p = N + 4;
+    let base = col * N;
+    // Alturas con dos vóxeles de margen (uno para el borde y otro para la pendiente).
+    let mut hs = vec![0f32; (p * p) as usize];
+    for j in 0..p {
+        for i in 0..p {
+            let x = ((base.x + i - 2) as f32 + 0.5) * vs;
+            let z = ((base.y + j - 2) as f32 + 0.5) * vs;
+            hs[(i + j * p) as usize] = t.height(x, z);
+        }
+    }
+    // Superficie y material de cada columna de vóxeles, con un vóxel de borde.
+    let present = |gx: i32, gz: i32| ring.contains(&IVec2::new(gx >> 5, gz >> 5));
+    let mut top = vec![i32::MIN; (Q * Q) as usize];
+    let mut surf = vec![AIR; (Q * Q) as usize];
+    let (mut tmin, mut tmax, mut pmin) = (i32::MAX, i32::MIN, i32::MAX);
+    for j in 0..Q {
+        for i in 0..Q {
+            let (gx, gz) = (base.x + i - 1, base.y + j - 1);
+            if !present(gx, gz) {
+                pmin = i32::MIN;
+                continue;
+            }
+            let hi = |a: i32, b: i32| hs[((i + 1 + a) + (j + 1 + b) * p) as usize];
+            let h = hi(0, 0);
+            let dx = hi(1, 0) - hi(-1, 0);
+            let dz = hi(0, 1) - hi(0, -1);
+            let slope = (dx * dx + dz * dz).sqrt() / (2.0 * vs);
+            let ty = top_from_height(h, vs);
+            let k = (i + j * Q) as usize;
+            top[k] = ty;
+            let x = (gx as f32 + 0.5) * vs;
+            let z = (gz as f32 + 0.5) * vs;
+            surf[k] = ls.surface.get(&IVec2::new(gx, gz)).copied().unwrap_or_else(|| t.surface_material(x, z, h, slope));
+            pmin = pmin.min(ty);
+            if i >= 1 && i <= N && j >= 1 && j <= N {
+                tmin = tmin.min(ty);
+                tmax = tmax.max(ty);
+            }
+        }
+    }
+    let soil = ((2.0 / vs).ceil() as i32).max(1);
+    let edit_top = ls.max_y.get(&col).copied().unwrap_or(i32::MIN);
+    let y0 = (tmin - 1).div_euclid(N);
+    let y1 = tmax.max(edit_top).div_euclid(N);
+    let mut out = Mesh::default();
+    let mut pad = vec![AIR; (Q * Q * Q) as usize];
+    for cy in y0..=y1 {
+        let ck = IVec3::new(col.x, cy, col.y);
+        let lo = IVec3::new(base.x - 1, cy * N - 1, base.y - 1);
+        // ¿Hay ediciones en este chunk o en sus vecinos?
+        let mut any_edit = false;
+        for dz in -1..=1 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    if ls.voxels.contains_key(&(ck + IVec3::new(dx, dy, dz))) {
+                        any_edit = true;
+                    }
+                }
+            }
+        }
+        // Chunk enterrado y sin ediciones: todo macizo, no tiene caras visibles.
+        if !any_edit && pmin != i32::MIN && cy * N + N <= pmin {
+            continue;
+        }
+        // Terreno por capas.
+        let mut solid = 0usize;
+        for j in 0..Q {
+            for i in 0..Q {
+                let k = (i + j * Q) as usize;
+                let ty = top[k];
+                if ty == i32::MIN {
+                    for y in 0..Q {
+                        pad[(i + j * Q + y * Q * Q) as usize] = AIR;
+                    }
+                    continue;
+                }
+                for y in 0..Q {
+                    let gy = lo.y + y;
+                    let m = if gy > ty { AIR } else { layer(ty - gy, soil, surf[k]) };
+                    solid += (m != AIR) as usize;
+                    pad[(i + j * Q + y * Q * Q) as usize] = m;
+                }
+            }
+        }
+        if any_edit {
+            // Ediciones del propio chunk: se recorren todas.
+            if let Some(map) = ls.voxels.get(&ck) {
+                for (&idx, &(_, m)) in map {
+                    let (lx, lz, ly) = ((idx & 31) as i32, ((idx >> 5) & 31) as i32, (idx >> 10) as i32);
+                    pad[((lx + 1) + (lz + 1) * Q + (ly + 1) * Q * Q) as usize] = m;
+                    solid += 1;
+                }
+            }
+            // Borde: consultas puntuales a los chunks vecinos.
+            for y in 0..Q {
+                for j in 0..Q {
+                    for i in 0..Q {
+                        if i != 0 && i != Q - 1 && j != 0 && j != Q - 1 && y != 0 && y != Q - 1 {
+                            continue;
+                        }
+                        let g = lo + IVec3::new(i, y, j);
+                        if top[(i + j * Q) as usize] == i32::MIN {
+                            continue;
+                        }
+                        if let Some(map) = ls.voxels.get(&chunk_of(g)) {
+                            if let Some(&(_, m)) = map.get(&local_index(g)) {
+                                pad[(i + j * Q + y * Q * Q) as usize] = m;
+                                solid += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if solid == 0 {
+            continue;
+        }
+        let origin = Vec3::new(ck.x as f32, ck.y as f32, ck.z as f32) * (N as f32 * vs);
+        let m = mesher::mesh_chunk(&pad, origin, vs);
+        out.append(&m);
+    }
+    out
+}
+
+/// Índice del vóxel de superficie del terreno en el nivel 0 (vóxel de 0,5 m).
+pub fn terrain_top_l0(t: &TerrainGen, x: i32, z: i32) -> i32 {
+    let vs = crate::lod::BASE_VOXEL;
+    top_from_height(t.height((x as f32 + 0.5) * vs, (z as f32 + 0.5) * vs), vs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buildings::Edits;
+    use std::time::{Duration, Instant};
+
+    fn pump(s: &mut Streamer, secs: u64) -> Vec<Key> {
+        let t0 = Instant::now();
+        let mut order = Vec::new();
+        while !s.idle() && t0.elapsed() < Duration::from_secs(secs) {
+            for op in s.poll(usize::MAX) {
+                if let Op::Set(k, _) = op {
+                    order.push(k);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for op in s.poll(usize::MAX) {
+            if let Op::Set(k, _) = op {
+                order.push(k);
+            }
+        }
+        order
+    }
+
+    #[test]
+    fn primero_se_cargan_las_columnas_cercanas() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(2)));
+        let mut s = Streamer::new(t, store, 2, 1);
+        let center = Vec2::new(13500.0, 16300.0);
+        s.update(center);
+        let order = pump(&mut s, 120);
+        assert_eq!(order.len(), s.wanted_columns(), "faltan columnas");
+        // Con un solo hilo el orden es exacto: la distancia de las primeras debe ser menor
+        // que la de las últimas.
+        let d = |k: &Key| {
+            let cm = s.specs[k.0 as usize].chunk_m();
+            Vec2::new((k.1.x as f32 + 0.5) * cm, (k.1.y as f32 + 0.5) * cm).distance(center)
+        };
+        let n = order.len() / 5;
+        let first: f32 = order[..n].iter().map(d).sum::<f32>() / n as f32;
+        let last: f32 = order[order.len() - n..].iter().map(d).sum::<f32>() / n as f32;
+        assert!(first < last * 0.5, "las cercanas ({first:.0} m) no salieron antes que las lejanas ({last:.0} m)");
+    }
+
+    #[test]
+    fn editar_re_malla_solo_las_columnas_tocadas() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(3)));
+        let mut s = Streamer::new(t.clone(), store, 3, 2);
+        s.update(Vec2::new(13500.0, 16300.0));
+        pump(&mut s, 120);
+        let total = s.wanted_columns();
+        // Un bloque de 3×3×3 vóxeles en medio de una columna: toca su columna en cada nivel.
+        let v = IVec3::new(27010, terrain_top_l0(&t, 27010, 32610) + 1, 32610);
+        let mut e = Edits::default();
+        e.fill(v, v + IVec3::splat(3), CAL);
+        let keys = s.edit(&e);
+        assert!(!keys.is_empty() && keys.len() <= 3 * 4, "se encolaron {} columnas de {total}", keys.len());
+        assert!(keys.contains(&(0, IVec2::new(27010 >> 5, 32610 >> 5))));
+        let rebuilt = pump(&mut s, 60);
+        assert_eq!(rebuilt.len(), keys.len(), "solo deben volver a subirse las columnas tocadas");
+        // Y al quitarlo, lo mismo.
+        let mut q = Edits::default();
+        for (&p, _) in &e.voxels {
+            q.set(p, AIR);
+        }
+        let keys2 = s.edit(&q);
+        assert_eq!(keys2.len(), keys.len());
+    }
+}

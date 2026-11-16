@@ -1,15 +1,17 @@
-//! Render con wgpu: pase de sombras del sol, cielo, vóxeles opacos y agua translúcida.
-//! Funciona sin ventana (captura a PNG) para poder verificarlo en servidores.
+//! Render con wgpu: pase de sombras del sol, cielo, vóxeles opacos, agua translúcida y una
+//! capa de resaltado. Dibuja en una ventana (superficie) o en una textura para guardar
+//! capturas sin pantalla.
 
 use crate::camera::OrbitCamera;
 use crate::mesher::{Mesh, Vertex};
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{IVec2, Mat4, Vec3, Vec4};
+use std::collections::HashMap;
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 const SHADOW_SIZE: u32 = 4096;
-const MSAA: u32 = 4;
-const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MAX_VERTS_PER_BATCH: usize = 6_000_000;
 
@@ -25,6 +27,15 @@ struct Globals {
     sky_top: [f32; 4],
     sky_horizon: [f32; 4],
     params: [f32; 4],
+    extra: [f32; 4],
+}
+
+/// Vértice de la capa de resaltado.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct OverlayVertex {
+    pub pos: [f32; 3],
+    pub color: [f32; 4],
 }
 
 struct Batch {
@@ -34,9 +45,18 @@ struct Batch {
     lod: u32,
 }
 
+struct Targets {
+    width: u32,
+    height: u32,
+    msaa: Option<wgpu::TextureView>,
+    depth: wgpu::TextureView,
+}
+
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    format: wgpu::TextureFormat,
+    msaa: u32,
     globals: wgpu::Buffer,
     main_bg: wgpu::BindGroup,
     shadow_bg: wgpu::BindGroup,
@@ -45,9 +65,18 @@ pub struct Renderer {
     shadow_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
+    overlay_pipe: wgpu::RenderPipeline,
     water: wgpu::Buffer,
     batches: Vec<Batch>,
+    columns: HashMap<(u32, IVec2), Batch>,
+    overlay: wgpu::Buffer,
+    overlay_count: u32,
+    targets: Option<Targets>,
     pub adapter_name: String,
+    /// Suaviza el sombreado de los escalones del terreno (evita las líneas oscuras de lejos).
+    pub smooth_terrain: bool,
+    /// Tiempo en segundos (para las ondas del agua).
+    pub time: f32,
 }
 
 /// Luz del día según la hora (0–24). Sol del norte: estamos en el hemisferio sur.
@@ -88,23 +117,63 @@ pub fn lighting(hour: f32) -> Lighting {
     Lighting { sun_dir, sun_color, sky_top: top, sky_horizon: horizon, night: 1.0 - smoothstep(-0.06, 0.1, elev), ambient: 0.25 + 0.75 * day }
 }
 
+fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let mut limits = wgpu::Limits::default();
+    limits.max_buffer_size = adapter.limits().max_buffer_size.min(1 << 30);
+    limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
+    limits
+}
+
 impl Renderer {
+    /// Renderer sin ventana (captura a PNG).
     pub fn new() -> Result<Renderer, String> {
-        pollster::block_on(Self::new_async())
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::all(), ..Default::default() });
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: None })
+                .await
+                .ok_or("no se encontró ningún adaptador gráfico (¿falta un driver Vulkan?)")?;
+            Self::from_adapter(&adapter, OFFSCREEN_FORMAT, 4).await
+        })
     }
 
-    async fn new_async() -> Result<Renderer, String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::all(), ..Default::default() });
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: None })
-            .await
-            .ok_or("no se encontró ningún adaptador gráfico (¿falta un driver Vulkan?)")?;
+    /// Renderer para una ventana: crea la superficie y elige su formato.
+    pub fn for_window(window: Arc<winit::window::Window>, msaa: u32) -> Result<(Renderer, wgpu::Surface<'static>, wgpu::SurfaceConfiguration), String> {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::all(), ..Default::default() });
+            let size = window.inner_size();
+            let surface = instance.create_surface(window).map_err(|e| format!("no se pudo crear la superficie: {e}"))?;
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: Some(&surface) })
+                .await
+                .ok_or("ningún adaptador gráfico puede dibujar en esta ventana")?;
+            let caps = surface.get_capabilities(&adapter);
+            let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
+            let renderer = Self::from_adapter(&adapter, format, msaa).await?;
+            let config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                width: size.width.max(1),
+                height: size.height.max(1),
+                present_mode: wgpu::PresentMode::AutoVsync,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: caps.alpha_modes[0],
+                view_formats: vec![],
+            };
+            surface.configure(&renderer.device, &config);
+            Ok((renderer, surface, config))
+        })
+    }
+
+    pub fn configure(&mut self, surface: &wgpu::Surface<'static>, config: &wgpu::SurfaceConfiguration) {
+        surface.configure(&self.device, config);
+        self.targets = None;
+    }
+
+    async fn from_adapter(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, msaa: u32) -> Result<Renderer, String> {
         let adapter_name = format!("{} ({:?})", adapter.get_info().name, adapter.get_info().backend);
-        let mut limits = wgpu::Limits::default();
-        limits.max_buffer_size = adapter.limits().max_buffer_size.min(1 << 30);
-        limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor { label: Some("motor"), required_features: wgpu::Features::empty(), required_limits: limits, memory_hints: Default::default() }, None)
+            .request_device(&wgpu::DeviceDescriptor { label: Some("motor"), required_features: wgpu::Features::empty(), required_limits: device_limits(adapter), memory_hints: Default::default() }, None)
             .await
             .map_err(|e| format!("no se pudo crear el dispositivo: {e}"))?;
 
@@ -167,18 +236,20 @@ impl Renderer {
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }],
         });
 
-        let voxel_mod = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("voxel"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/voxel.wgsl").into()) });
-        let sky_mod = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("cielo"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sky.wgsl").into()) });
-        let water_mod = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("agua"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/water.wgsl").into()) });
+        let shader = |label, src: &str| device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(src.into()) });
+        let voxel_mod = shader("voxel", include_str!("shaders/voxel.wgsl"));
+        let sky_mod = shader("cielo", include_str!("shaders/sky.wgsl"));
+        let water_mod = shader("agua", include_str!("shaders/water.wgsl"));
+        let overlay_mod = shader("resaltado", include_str!("shaders/overlay.wgsl"));
         let main_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[&main_bgl], push_constant_ranges: &[] });
         let simple_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[&simple_bgl], push_constant_ranges: &[] });
 
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Unorm8x4, 2 => Snorm8x4, 3 => Float32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Unorm8x4, 2 => Snorm8x4, 3 => Snorm8x4, 4 => Float32],
         };
-        let ms = wgpu::MultisampleState { count: MSAA, mask: !0, alpha_to_coverage_enabled: false };
+        let ms = wgpu::MultisampleState { count: msaa, mask: !0, alpha_to_coverage_enabled: false };
         let reverse_depth = |write: bool, compare| wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: write,
@@ -186,12 +257,13 @@ impl Renderer {
             stencil: Default::default(),
             bias: Default::default(),
         };
+        let blend_target = Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL });
 
         let voxel_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("voxeles"),
             layout: Some(&main_layout),
             vertex: wgpu::VertexState { module: &voxel_mod, entry_point: "vs_main", compilation_options: Default::default(), buffers: &[vertex_layout.clone()] },
-            fragment: Some(wgpu::FragmentState { module: &voxel_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(COLOR_FORMAT.into())] }),
+            fragment: Some(wgpu::FragmentState { module: &voxel_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(format.into())] }),
             primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
             depth_stencil: Some(reverse_depth(true, wgpu::CompareFunction::Greater)),
             multisample: ms,
@@ -219,7 +291,7 @@ impl Renderer {
             label: Some("cielo"),
             layout: Some(&simple_layout),
             vertex: wgpu::VertexState { module: &sky_mod, entry_point: "vs_main", compilation_options: Default::default(), buffers: &[] },
-            fragment: Some(wgpu::FragmentState { module: &sky_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(COLOR_FORMAT.into())] }),
+            fragment: Some(wgpu::FragmentState { module: &sky_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(format.into())] }),
             primitive: Default::default(),
             depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::Always)),
             multisample: ms,
@@ -235,14 +307,29 @@ impl Renderer {
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout { array_stride: 12, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![0 => Float32x3] }],
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &water_mod,
-                entry_point: "fs_main",
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: COLOR_FORMAT, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
-            }),
+            fragment: Some(wgpu::FragmentState { module: &water_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[blend_target.clone()] }),
             primitive: Default::default(),
             depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::Greater)),
+            multisample: ms,
+            multiview: None,
+            cache: None,
+        });
+        let overlay_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("resaltado"),
+            layout: Some(&simple_layout),
+            vertex: wgpu::VertexState {
+                module: &overlay_mod,
+                entry_point: "vs_main",
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<OverlayVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState { module: &overlay_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[blend_target] }),
+            primitive: Default::default(),
+            depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::Always)),
             multisample: ms,
             multiview: None,
             cache: None,
@@ -259,8 +346,37 @@ impl Renderer {
             }
         }
         let water = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("agua"), contents: bytemuck::cast_slice(&wv), usage: wgpu::BufferUsages::VERTEX });
+        let overlay = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("resaltado"),
+            size: (std::mem::size_of::<OverlayVertex>() * 4096) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
-        Ok(Renderer { device, queue, globals, main_bg, shadow_bg, shadow_view, voxel_pipe, shadow_pipe, sky_pipe, water_pipe, water, batches: Vec::new(), adapter_name })
+        Ok(Renderer {
+            device,
+            queue,
+            format,
+            msaa,
+            globals,
+            main_bg,
+            shadow_bg,
+            shadow_view,
+            voxel_pipe,
+            shadow_pipe,
+            sky_pipe,
+            water_pipe,
+            overlay_pipe,
+            water,
+            batches: Vec::new(),
+            columns: HashMap::new(),
+            overlay,
+            overlay_count: 0,
+            targets: None,
+            adapter_name,
+            smooth_terrain: true,
+            time: 3.0,
+        })
     }
 
     /// Sube las mallas a la GPU agrupadas en lotes grandes (pocas llamadas de dibujo).
@@ -273,28 +389,76 @@ impl Renderer {
             let mut acc = Mesh::default();
             for m in list {
                 if acc.vertices.len() + m.vertices.len() > MAX_VERTS_PER_BATCH {
-                    self.push_batch(&acc, lod);
+                    if let Some(b) = self.make_batch(&acc, lod) {
+                        self.batches.push(b);
+                    }
                     acc = Mesh::default();
                 }
                 acc.append(m);
             }
-            self.push_batch(&acc, lod);
+            if let Some(b) = self.make_batch(&acc, lod) {
+                self.batches.push(b);
+            }
         }
     }
 
-    fn push_batch(&mut self, m: &Mesh, lod: u32) {
+    fn make_batch(&self, m: &Mesh, lod: u32) -> Option<Batch> {
         if m.indices.is_empty() {
-            return;
+            return None;
         }
         let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&m.vertices), usage: wgpu::BufferUsages::VERTEX });
         let ibuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&m.indices), usage: wgpu::BufferUsages::INDEX });
-        self.batches.push(Batch { vbuf, ibuf, count: m.indices.len() as u32, lod });
+        Some(Batch { vbuf, ibuf, count: m.indices.len() as u32, lod })
     }
 
-    /// Dibuja la escena y la guarda como imagen (PNG o JPG según la extensión).
-    pub fn capture(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, path: &str) -> Result<(), String> {
+    /// Reemplaza la malla de una columna del mundo en streaming (vacía = la quita).
+    pub fn set_column(&mut self, key: (u32, IVec2), mesh: &Mesh) {
+        match self.make_batch(mesh, key.0) {
+            Some(b) => {
+                self.columns.insert(key, b);
+            }
+            None => {
+                self.columns.remove(&key);
+            }
+        }
+    }
+
+    pub fn remove_column(&mut self, key: (u32, IVec2)) {
+        self.columns.remove(&key);
+    }
+
+    /// Libera los recursos de la GPU que ya no se usan (columnas reemplazadas o descargadas).
+    pub fn maintain(&self) {
+        // Un envío (aunque esté vacío) hace que wgpu ejecute las copias pendientes de las
+        // mallas nuevas y libere sus búferes intermedios; sin ventana casi no hay envíos.
+        self.queue.submit(std::iter::empty());
+        self.device.poll(wgpu::Maintain::Poll);
+    }
+
+    /// Memoria de las mallas en la GPU, en MB.
+    pub fn mesh_mb(&self) -> f64 {
+        self.columns.values().chain(self.batches.iter()).map(|b| (b.vbuf.size() + b.ibuf.size()) as f64).sum::<f64>() / 1048576.0
+    }
+
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    pub fn triangles(&self) -> usize {
+        self.columns.values().chain(self.batches.iter()).map(|b| b.count as usize / 3).sum()
+    }
+
+    /// Cajas de resaltado para el próximo cuadro.
+    pub fn set_overlay(&mut self, verts: &[OverlayVertex]) {
+        let n = verts.len().min(4096);
+        if n > 0 {
+            self.queue.write_buffer(&self.overlay, 0, bytemuck::cast_slice(&verts[..n]));
+        }
+        self.overlay_count = n as u32;
+    }
+
+    fn write_globals(&self, cam: &OrbitCamera, hour: f32, aspect: f32) {
         let l = lighting(hour);
-        let aspect = width as f32 / height as f32;
         let view_proj = cam.proj(aspect) * cam.view();
         // Cámara de sombras: ortográfica desde el sol, centrada en el objetivo.
         let half = (cam.distance * 0.9).clamp(120.0, 1500.0);
@@ -311,20 +475,26 @@ impl Renderer {
             sky_top: l.sky_top.extend(0.0).into(),
             sky_horizon: l.sky_horizon.extend(0.0).into(),
             // Niebla: más tenue cuanto más se aleja la cámara, para que la vista del mapa no se lave.
-            params: Vec4::new(1.0 / (9000.0f32).max(cam.distance * 7.0), l.night, 3.0, l.ambient).into(),
+            params: Vec4::new(1.0 / (9000.0f32).max(cam.distance * 7.0), l.night, self.time, l.ambient).into(),
+            extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
+    }
 
+    fn make_targets(&self, width: u32, height: u32) -> Targets {
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
-        let make = |format, samples, usage| {
-            self.device.create_texture(&wgpu::TextureDescriptor { label: None, size, mip_level_count: 1, sample_count: samples, dimension: wgpu::TextureDimension::D2, format, usage, view_formats: &[] })
+        let make = |format, usage| {
+            self.device
+                .create_texture(&wgpu::TextureDescriptor { label: None, size, mip_level_count: 1, sample_count: self.msaa, dimension: wgpu::TextureDimension::D2, format, usage, view_formats: &[] })
+                .create_view(&Default::default())
         };
-        let msaa = make(COLOR_FORMAT, MSAA, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let resolve = make(COLOR_FORMAT, 1, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
-        let depth = make(DEPTH_FORMAT, MSAA, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let (msaa_v, resolve_v, depth_v) = (msaa.create_view(&Default::default()), resolve.create_view(&Default::default()), depth.create_view(&Default::default()));
+        let msaa = if self.msaa > 1 { Some(make(self.format, wgpu::TextureUsages::RENDER_ATTACHMENT)) } else { None };
+        Targets { width, height, msaa, depth: make(DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT) }
+    }
 
-        let mut enc = self.device.create_command_encoder(&Default::default());
+    /// Graba los pases de sombras y principal. `out` es la imagen final (o el destino del
+    /// resolve si hay MSAA).
+    fn encode(&self, enc: &mut wgpu::CommandEncoder, targets: &Targets, out: &wgpu::TextureView) {
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sombras"),
@@ -339,43 +509,93 @@ impl Renderer {
             });
             pass.set_pipeline(&self.shadow_pipe);
             pass.set_bind_group(0, &self.shadow_bg, &[]);
-            for b in self.batches.iter().filter(|b| b.lod <= 3) {
+            for b in self.batches.iter().chain(self.columns.values()).filter(|b| b.lod <= 3) {
                 pass.set_vertex_buffer(0, b.vbuf.slice(..));
                 pass.set_index_buffer(b.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..b.count, 0, 0..1);
             }
         }
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("principal"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &msaa_v,
-                    resolve_target: Some(&resolve_v),
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Discard },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_v,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_pipeline(&self.sky_pipe);
-            pass.set_bind_group(0, &self.shadow_bg, &[]);
-            pass.draw(0..3, 0..1);
-            pass.set_pipeline(&self.voxel_pipe);
-            pass.set_bind_group(0, &self.main_bg, &[]);
-            for b in &self.batches {
-                pass.set_vertex_buffer(0, b.vbuf.slice(..));
-                pass.set_index_buffer(b.ibuf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..b.count, 0, 0..1);
-            }
-            pass.set_pipeline(&self.water_pipe);
-            pass.set_bind_group(0, &self.shadow_bg, &[]);
-            pass.set_vertex_buffer(0, self.water.slice(..));
-            pass.draw(0..(self.water.size() / 12) as u32, 0..1);
+        let (view, resolve) = match &targets.msaa {
+            Some(m) => (m, Some(out)),
+            None => (out, None),
+        };
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("principal"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: resolve,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: if resolve.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &targets.depth,
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.sky_pipe);
+        pass.set_bind_group(0, &self.shadow_bg, &[]);
+        pass.draw(0..3, 0..1);
+        pass.set_pipeline(&self.voxel_pipe);
+        pass.set_bind_group(0, &self.main_bg, &[]);
+        for b in self.batches.iter().chain(self.columns.values()) {
+            pass.set_vertex_buffer(0, b.vbuf.slice(..));
+            pass.set_index_buffer(b.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..b.count, 0, 0..1);
         }
+        pass.set_pipeline(&self.water_pipe);
+        pass.set_bind_group(0, &self.shadow_bg, &[]);
+        pass.set_vertex_buffer(0, self.water.slice(..));
+        pass.draw(0..(self.water.size() / 12) as u32, 0..1);
+        if self.overlay_count > 0 {
+            pass.set_pipeline(&self.overlay_pipe);
+            pass.set_vertex_buffer(0, self.overlay.slice(..));
+            pass.draw(0..self.overlay_count, 0..1);
+        }
+    }
+
+    /// Dibuja un cuadro en la ventana.
+    pub fn render_surface(&mut self, surface: &wgpu::Surface<'static>, config: &wgpu::SurfaceConfiguration, cam: &OrbitCamera, hour: f32) -> Result<(), String> {
+        let frame = match surface.get_current_texture() {
+            Ok(f) => f,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                self.configure(surface, config);
+                surface.get_current_texture().map_err(|e| format!("superficie: {e}"))?
+            }
+            Err(e) => return Err(format!("superficie: {e}")),
+        };
+        let (w, h) = (frame.texture.width(), frame.texture.height());
+        if self.targets.as_ref().map(|t| (t.width, t.height)) != Some((w, h)) {
+            self.targets = Some(self.make_targets(w, h));
+        }
+        self.write_globals(cam, hour, w as f32 / h as f32);
+        let view = frame.texture.create_view(&Default::default());
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        self.encode(&mut enc, self.targets.as_ref().unwrap(), &view);
+        self.queue.submit([enc.finish()]);
+        frame.present();
+        Ok(())
+    }
+
+    /// Dibuja la escena y la guarda como imagen (PNG o JPG según la extensión).
+    pub fn capture(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, path: &str) -> Result<(), String> {
+        self.write_globals(cam, hour, width as f32 / height as f32);
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let targets = self.make_targets(width, height);
+        let resolve = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let resolve_v = resolve.create_view(&Default::default());
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        self.encode(&mut enc, &targets, &resolve_v);
         let row = (width * 4).div_ceil(256) * 256;
         let out = self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * height) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
         enc.copy_texture_to_buffer(
@@ -388,15 +608,34 @@ impl Renderer {
         slice.map_async(wgpu::MapMode::Read, |_| {});
         self.device.poll(wgpu::Maintain::Wait);
         let data = slice.get_mapped_range();
+        let bgra = matches!(self.format, wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Bgra8Unorm);
         let mut img = image::RgbImage::new(width, height);
         for y in 0..height {
             for x in 0..width {
                 let i = (y * row + x * 4) as usize;
-                img.put_pixel(x, y, image::Rgb([data[i], data[i + 1], data[i + 2]]));
+                let (r, b) = if bgra { (data[i + 2], data[i]) } else { (data[i], data[i + 2]) };
+                img.put_pixel(x, y, image::Rgb([r, data[i + 1], b]));
             }
         }
         drop(data);
         out.unmap();
         img.save(path).map_err(|e| format!("no se pudo guardar {path}: {e}"))
+    }
+}
+
+/// Caja translúcida (12 triángulos) entre dos esquinas, en metros.
+pub fn overlay_box(out: &mut Vec<OverlayVertex>, a: Vec3, b: Vec3, color: [f32; 4]) {
+    let c = |x: f32, y: f32, z: f32| OverlayVertex { pos: [x, y, z], color };
+    let (x0, y0, z0, x1, y1, z1) = (a.x, a.y, a.z, b.x, b.y, b.z);
+    let quads = [
+        [c(x0, y1, z0), c(x1, y1, z0), c(x1, y1, z1), c(x0, y1, z1)],
+        [c(x0, y0, z0), c(x0, y0, z1), c(x1, y0, z1), c(x1, y0, z0)],
+        [c(x0, y0, z1), c(x0, y1, z1), c(x1, y1, z1), c(x1, y0, z1)],
+        [c(x0, y0, z0), c(x1, y0, z0), c(x1, y1, z0), c(x0, y1, z0)],
+        [c(x1, y0, z0), c(x1, y0, z1), c(x1, y1, z1), c(x1, y1, z0)],
+        [c(x0, y0, z0), c(x0, y1, z0), c(x0, y1, z1), c(x0, y0, z1)],
+    ];
+    for q in quads {
+        out.extend_from_slice(&[q[0], q[1], q[2], q[0], q[2], q[3]]);
     }
 }

@@ -1,18 +1,30 @@
 //! Motor de vóxeles del juego: genera el mapa colonial en vóxeles a la vista, lo malla con
 //! niveles de detalle y lo dibuja con wgpu.
 //!
-//! Uso (modo captura, sin ventana):
-//!   motor --shot salida.png [--cam x,z,distancia,giro,inclinación] [--hour 10.5]
-//!         [--size 1600x900] [--levels 8]
+//! Uso:
+//!   motor                              ventana interactiva (mundo en streaming)
+//!   motor --shot salida.png [...]      una captura sin ventana (todo el mundo de una vez)
+//!   motor --auto-test carpeta          recorrido automático sin pantalla, con capturas
+//!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
+//! Opciones: --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
+//!   --hour 10.5, --size 1600x900, --levels 8, --threads N, --msaa 1|4, --frames N,
+//!   --sin-suavizar (sin el suavizado de los escalones del terreno)
 
+mod app;
 mod buildings;
 mod camera;
 mod lod;
 mod mesher;
 mod palette;
+mod raycast;
 mod render;
+mod sandbox;
+mod session;
+mod store;
+mod stream;
 mod structures;
 mod terrain;
+mod tour;
 mod world;
 
 use camera::OrbitCamera;
@@ -31,10 +43,31 @@ struct Args {
     levels: u32,
     scene: String,
     cam_set: bool,
+    auto_test: Option<String>,
+    window: bool,
+    frames: Option<u64>,
+    msaa: u32,
+    threads: usize,
+    smooth: bool,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { shot: None, cam: [13500.0, 16300.0, 420.0, 200.0, 38.0], hour: 10.5, size: (1600, 900), levels: 8, scene: "ciudad".into(), cam_set: false };
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1);
+    let mut a = Args {
+        shot: None,
+        cam: [13500.0, 16300.0, 420.0, 200.0, 38.0],
+        hour: 10.5,
+        size: (1600, 900),
+        levels: 8,
+        scene: "ciudad".into(),
+        cam_set: false,
+        auto_test: None,
+        window: false,
+        frames: None,
+        msaa: 4,
+        threads,
+        smooth: true,
+    };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < argv.len() {
@@ -55,8 +88,22 @@ fn parse_args() -> Args {
                 }
             }
             "--levels" => a.levels = next.parse().unwrap_or(8),
+            "--auto-test" => a.auto_test = Some(next),
+            "--frames" => a.frames = next.parse().ok(),
+            "--msaa" => a.msaa = if next == "1" { 1 } else { 4 },
+            "--threads" => a.threads = next.parse().unwrap_or(a.threads).max(1),
+            "--window" => {
+                a.window = true;
+                i += 1;
+                continue;
+            }
+            "--sin-suavizar" => {
+                a.smooth = false;
+                i += 1;
+                continue;
+            }
             "--help" | "-h" => {
-                println!("motor --shot salida.png [--scene ciudad|catalogo] [--cam x,z,distancia,giro,inclinación] [--hour 10.5] [--size 1600x900] [--levels 8]");
+                println!("{}", include_str!("main.rs").lines().skip(3).take(9).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
                 std::process::exit(0);
             }
             other => eprintln!("argumento desconocido: {other}"),
@@ -113,17 +160,63 @@ fn peak_memory_mb() -> Option<f64> {
     Some(kb / 1024.0)
 }
 
+/// Recorrido automático sin pantalla.
+fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
+    let cam = if args.cam_set { args.cam } else { session::scene_camera(&args.scene) };
+    let t0 = std::time::Instant::now();
+    let mut r = render::Renderer::new()?;
+    r.smooth_terrain = args.smooth;
+    println!("Adaptador: {} · listo en {:.2?} · {} hilos de trabajo", r.adapter_name, t0.elapsed(), args.threads);
+    let mut s = session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour);
+    let mut tour = tour::Tour::new(dir, args.size.0, args.size.1);
+    let mut first_logged = false;
+    loop {
+        s.update(1.0 / 30.0);
+        s.apply_ops(&mut r, usize::MAX);
+        if !first_logged && s.first_frame.is_some() {
+            first_logged = true;
+            println!("Primeras columnas listas para dibujar a los {:.2?}", s.first_frame.unwrap());
+        }
+        if tour.step(&mut s, &mut r) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    println!("Resumen del recorrido:");
+    for l in &tour.report {
+        println!("  {l}");
+    }
+    println!("Columnas generadas en total: {} · subidas a la GPU: {}", s.streamer.stats.columns_built, s.streamer.stats.uploads);
+    Ok(())
+}
+
 fn main() {
     let mut args = parse_args();
     let plaza = Vec2::new(13500.0, 16300.0);
+    if args.shot.is_none() {
+        let result = match (&args.auto_test, args.window) {
+            (Some(dir), false) => run_headless_tour(&args, &dir.clone()),
+            _ => {
+                let cam = if args.cam_set { args.cam } else { session::scene_camera(&args.scene) };
+                let s = session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour);
+                app::run(s, app::Options { size: args.size, msaa: args.msaa, frames: args.frames, tour_dir: args.auto_test.clone() })
+            }
+        };
+        if let Err(e) = result {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let t0 = Instant::now();
     let terrain = TerrainGen::new(1726);
     let scene = match args.scene.as_str() {
         "catalogo" => structures::scenes::catalogo(&terrain),
         "ciudad" => structures::scenes::ciudad(&terrain, plaza, 3, 7),
+        "vacia" => structures::scenes::SceneOut { edits: buildings::Edits::default(), cam: args.cam, center: plaza },
         other => {
-            eprintln!("escena desconocida: {other} (use ciudad o catalogo)");
+            eprintln!("escena desconocida: {other} (use ciudad, catalogo o vacia)");
             std::process::exit(2);
         }
     };
@@ -165,6 +258,7 @@ fn main() {
             }
         };
         println!("Adaptador: {}", renderer.adapter_name);
+        renderer.smooth_terrain = args.smooth;
         renderer.upload(&meshes);
         let ground = world.terrain.height(focus.x, focus.y).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(focus.x, ground, focus.y), yaw: args.cam[3], pitch: args.cam[4], distance: args.cam[2], fov_y: 50.0 };
