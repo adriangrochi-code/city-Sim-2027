@@ -8,7 +8,8 @@ Estética rioplatense a lo largo de las épocas. Ciudades del tamaño de Montevi
 
 - [Documento de diseño (GDD)](docs/GDD.md): intención, pilares, estética, mecánicas base y preguntas abiertas.
 - [Época 1: Plaza fuerte colonial](docs/epocas/01-colonial.md): diseño detallado de la primera época (trabajo actual).
-- [Época 2: Ciudad Nueva](docs/epocas/02-ciudad-nueva.md) y [Época 3: Inmigración](docs/epocas/03-inmigracion.md): borradores. Épocas 4–6: pendientes.
+- Borradores de las demás épocas: [2 Ciudad Nueva](docs/epocas/02-ciudad-nueva.md) · [3 Inmigración](docs/epocas/03-inmigracion.md) · [4 Art Déco y la Rambla](docs/epocas/04-art-deco-rambla.md) · [5 Modernismo](docs/epocas/05-modernismo.md) · [6 Contemporánea](docs/epocas/06-contemporanea.md)
+- [Hoja de ruta](docs/HOJA_DE_RUTA.md)
 
 Motor previsto: Godot 4.
 

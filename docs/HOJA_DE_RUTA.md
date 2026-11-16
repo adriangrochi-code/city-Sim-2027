@@ -8,7 +8,7 @@
 
 | Área | Qué está |
 |---|---|
-| Diseño | GDD, épocas 1 a 3 en detalle, agentes y conducción, edificios ampliables, motor y estética de vóxeles |
+| Diseño | GDD, las 6 épocas en detalle, agentes y conducción, edificios ampliables, motor y estética de vóxeles |
 | Prototipo: época colonial | Mapa por parcelas, calles curvas, solares, crecimiento en 3 niveles, vecinos con conducción realista, agua, incendios, puerto y flujos, muralla y aduana, serenos, campo, iglesia por fases, ampliar y modernizar, nuevo orden, guardar/cargar |
 | Motor de vóxeles | Mundo por chunks con LOD, streaming en hilos, catálogo colonial en vóxeles, ventana interactiva, sandbox, optimizado (dibujo indirecto, caras compactas, descarte en GPU) |
 | Distribución | Versión de prueba para Linux (probada) y Windows (compilada) con `tools/empaquetar.sh` |
@@ -33,7 +33,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 
 ## Fase 3: diseño de todas las épocas
 
-- [ ] Épocas 4, 5 y 6 en detalle (Art Déco y la Rambla, Modernismo, Contemporánea)
+- [x] Épocas 4, 5 y 6 en detalle (Art Déco y la Rambla, Modernismo, Contemporánea): borradores v0.1
 - [ ] Kits de vóxeles por época (estética de estructuras de la época 2 en adelante)
 - [ ] Mapa del país (escala país) en detalle
 
