@@ -14,6 +14,8 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 const SHADOW_SIZE: u32 = 4096;
+/// Vértices de resaltado por cuadro (vistas previas de calles y solares del modo juego).
+pub const OVERLAY_MAX: usize = 196_608;
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Columnas (orígenes de malla) que caben en las tablas de la GPU.
@@ -654,7 +656,7 @@ impl Renderer {
         };
         let overlay = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("resaltado"),
-            size: (std::mem::size_of::<OverlayVertex>() * 4096) as u64,
+            size: (std::mem::size_of::<OverlayVertex>() * OVERLAY_MAX) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -923,7 +925,7 @@ impl Renderer {
 
     /// Cajas de resaltado para el próximo cuadro.
     pub fn set_overlay(&mut self, verts: &[OverlayVertex]) {
-        let n = verts.len().min(4096);
+        let n = verts.len().min(OVERLAY_MAX);
         let bytes: &[u8] = bytemuck::cast_slice(&verts[..n]);
         let mut h = crate::fxhash::FxHasher::default();
         std::hash::Hasher::write(&mut h, bytes);

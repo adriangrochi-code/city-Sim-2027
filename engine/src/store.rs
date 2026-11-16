@@ -4,9 +4,11 @@
 //! calles, excavaciones), ya llevadas a la resolución de cada nivel. Así el mundo en streaming
 //! puede generar cualquier chunk cuando lo necesita y la memoria no crece con el mapa.
 //!
-//! Regla al reducir resolución: cada vóxel grueso toma el material del vóxel fino editado
-//! más alto que contiene (desde arriba se ve el techo, no un moteado). A igual altura gana la
-//! edición más reciente, así excavar o construir encima reemplaza lo anterior.
+//! Regla al reducir resolución: cada vóxel grueso toma el material del vóxel fino macizo
+//! más alto que contiene (desde arriba se ve el techo, no un moteado); solo si todo lo que
+//! trae la carga en ese vóxel es aire, queda aire. Cada carga nueva reemplaza a la anterior
+//! en los vóxeles que toca, así excavar, demoler o reemplazar un edificio funciona en todos
+//! los niveles.
 
 use crate::buildings::Edits;
 use crate::lod::CHUNK;
@@ -54,8 +56,9 @@ impl ChunkEdits {
         self.idx.capacity() * 2 + self.h.capacity() * 2 + self.m.capacity() + std::mem::size_of::<Self>()
     }
 
-    /// Une entradas nuevas (ordenadas por índice y sin repetir). Gana la nueva si su vóxel
-    /// fino está a igual o mayor altura (la edición más reciente gana los empates).
+    /// Une entradas nuevas (ordenadas por índice y sin repetir). La carga nueva reemplaza a la
+    /// vieja en cada vóxel que toca: así se puede demoler o reemplazar un edificio (la carga
+    /// trae aire donde estaba el viejo) también en los niveles gruesos.
     fn merge(&mut self, new: &[(u16, i16, Mat)]) {
         let (mut idx, mut h, mut m) = (Vec::with_capacity(self.idx.len() + new.len()), Vec::new(), Vec::new());
         h.reserve(self.idx.len() + new.len());
@@ -75,16 +78,10 @@ impl ChunkEdits {
                 m.push(new[b].2);
                 b += 1;
             } else {
-                // Mismo vóxel: decide la altura; a igual altura, la edición nueva.
-                let (nh, nm) = (new[b].1, new[b].2);
+                // Mismo vóxel: gana la carga nueva.
                 idx.push(new[b].0);
-                if nh >= self.h[a] {
-                    h.push(nh);
-                    m.push(nm);
-                } else {
-                    h.push(self.h[a]);
-                    m.push(self.m[a]);
-                }
+                h.push(new[b].1);
+                m.push(new[b].2);
                 a += 1;
                 b += 1;
             }
@@ -123,15 +120,18 @@ impl LevelStore {
         // 1. Ganador de cada vóxel del nivel dentro de esta carga: el vóxel fino más alto; a
         //    igual altura, el de mayor posición (x, z). Así el resultado no depende del orden
         //    en que se recorre el HashMap de ediciones.
-        let mut staged: HashMap<IVec3, HashMap<u16, (i32, u64, Mat)>> = HashMap::new();
+        //    Un vóxel macizo le gana al aire: si en la carga se reemplaza un edificio alto por
+        //    uno más bajo, el aire que borra el viejo no tapa el techo del nuevo en lo grueso.
+        let mut staged: HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>> = HashMap::new();
         let mut cols: Vec<IVec2> = Vec::new();
         for (&v, &m) in &edits.voxels {
             let k = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
             let ck = chunk_of(k);
             let tb = tiebreak(v.x, v.z);
-            let e = staged.entry(ck).or_default().entry(local_index(k)).or_insert((i32::MIN, 0, m));
-            if (v.y, tb) >= (e.0, e.1) {
-                *e = (v.y, tb, m);
+            let solid = m != crate::palette::AIR;
+            let e = staged.entry(ck).or_default().entry(local_index(k)).or_insert((false, i32::MIN, 0, m));
+            if (solid, v.y, tb) >= (e.0, e.1, e.2) {
+                *e = (solid, v.y, tb, m);
             }
             let col = IVec2::new(ck.x, ck.z);
             let my = self.max_y.entry(col).or_insert(i32::MIN);
@@ -142,7 +142,7 @@ impl LevelStore {
         }
         // 2. Se compacta y se une con lo que ya había (la carga nueva gana los empates).
         for (ck, map) in staged {
-            let mut list: Vec<(u16, i16, Mat)> = map.into_iter().map(|(i, (h, _, m))| (i, h.clamp(i16::MIN as i32, i16::MAX as i32) as i16, m)).collect();
+            let mut list: Vec<(u16, i16, Mat)> = map.into_iter().map(|(i, (_, h, _, m))| (i, h.clamp(i16::MIN as i32, i16::MAX as i32) as i16, m)).collect();
             list.sort_unstable_by_key(|e| e.0);
             self.voxels.entry(ck).or_default().merge(&list);
         }
