@@ -85,6 +85,20 @@ impl<'a> std::ops::Index<&LoteId> for Lotes<'a> {
     }
 }
 
+/// Escuela, salud, insalubridad y delito de un solar (los calcula `services::barrio`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ServiciosLote {
+    /// Acceso a una escuela (0 a 1: lugar por lo que rinde).
+    pub escuela: f32,
+    /// Cobertura de botica, médico y hospital (0 a 1).
+    pub salud: f32,
+    /// Agua mala, pozos negros y basurales (0 a 1).
+    pub insalubre: f32,
+    /// Riesgo de delito (0 a 1) y vigilancia (0 a 1).
+    pub delito: f32,
+    pub vigilancia: f32,
+}
+
 /// Lo que la ciudad le cuenta a la población cada mes.
 #[derive(Clone, Debug, Default)]
 pub struct Entorno {
@@ -103,11 +117,27 @@ pub struct Entorno {
     pub ordenanzas: Vec<Ordinance>,
     /// ¿Hay iglesia matriz (plaza fundada)? Pesa en la felicidad de los devotos.
     pub iglesia: bool,
+    /// Escuela, salud, insalubridad y delito de cada solar (por id de solar). Si está vacío,
+    /// la población funciona sin edificios: las ordenanzas de escuelas y hospital actúan en
+    /// toda la ciudad (la ciudad sintética de las pruebas).
+    pub servicios: Vec<ServiciosLote>,
+    /// ¿La ciudad tiene el modelo de edificios de escuelas, salud y seguridad?
+    pub con_servicios: bool,
 }
 
 impl Entorno {
     pub fn vigente(&self, o: Ordinance) -> bool {
         self.ordenanzas.contains(&o)
+    }
+
+    /// Servicios del solar de un hogar (ceros si no vive en un solar).
+    pub fn servicios_de(&self, lote: Option<LoteId>) -> ServiciosLote {
+        lote.and_then(|l| self.servicios.get(l as usize)).copied().unwrap_or_default()
+    }
+
+    /// Servicios del solar donde vive un hogar.
+    pub(crate) fn servicios_hogar(&self, h: Option<&Hogar>) -> ServiciosLote {
+        self.servicios_de(h.filter(|h| h.vive_en_solar()).and_then(|h| h.lote))
     }
 }
 
@@ -990,6 +1020,21 @@ impl Poblacion {
         n
     }
 
+    /// Un robo en un solar (casa) o el asalto a un comercio (`comercio`): el hogar que vive ahí
+    /// (o el dueño del comercio) pierde una parte de sus ahorros. Devuelve lo robado (pesos).
+    pub fn choque_robo(&mut self, lote: LoteId, comercio: bool) -> f32 {
+        let victima = if comercio {
+            self.duenos.get(&lote).copied()
+        } else {
+            self.idx.por_lote.get(&lote).and_then(|hs| hs.iter().copied().max_by(|a, b| self.hogares[*a as usize].ahorro.total_cmp(&self.hogares[*b as usize].ahorro).then(b.cmp(a))))
+        };
+        let Some(h) = victima else { return 0.0 };
+        let hg = &mut self.hogares[h as usize];
+        let robo = (hg.ahorro * 0.2).min(if comercio { 80.0 } else { 40.0 }).max(0.0);
+        hg.ahorro -= robo;
+        robo
+    }
+
     /// Hambruna o sequía larga: `severidad` 0 a 1. Pesa sobre los hogares sin reservas.
     pub fn choque_hambruna(&mut self, severidad: f32) -> u32 {
         self.choque(Causa::Hambre, 0.02 * severidad.clamp(0.0, 1.0), None)
@@ -1061,6 +1106,8 @@ impl Poblacion {
             }
         }
         self.reindexar();
+        // Las fotos, al día (los incendios pasan entre un mes y otro).
+        self.stats = self.estadisticas();
     }
 }
 

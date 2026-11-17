@@ -107,9 +107,21 @@ impl Poblacion {
                 if h.meses_de_hambre >= 3 {
                     f *= 1.5;
                 }
-                if hospital && h.clase <= Clase::Modesta {
+                if hospital && h.clase <= Clase::Modesta && !ent.con_servicios {
                     f *= 0.85;
                 }
+            }
+            if ent.con_servicios {
+                // Botica, médico y hospital cerca (los pobres, si el cabildo les paga la cama);
+                // el agua mala, los pozos negros y la basura: diarreas y fiebres, sobre todo en
+                // los chicos.
+                let sv = ent.servicios_hogar(h);
+                let acceso = match h.map_or(Clase::Pobre, |h| h.clase) {
+                    Clase::Pobre | Clase::Modesta if !hospital => 0.5,
+                    _ => 1.0,
+                };
+                f *= 1.0 - 0.3 * sv.salud * acceso;
+                f *= 1.0 + sv.insalubre * if edad < 5 { 1.3 } else { 0.35 };
             }
             if p.condicion == Condicion::Esclavizada {
                 f *= 1.3;
@@ -638,6 +650,7 @@ impl Poblacion {
                 let h = &self.hogares[h as usize];
                 (h.clase, h.meses_de_hambre, h.alojamiento == Alojamiento::SinCasa)
             });
+            let sv = ent.servicios_hogar(hogar.map(|h| &self.hogares[h as usize]));
             let padre_oficio = self.personas[id as usize].padre.map(|f| self.personas[f as usize].oficio);
             let p = &mut self.personas[id as usize];
             p.duelo = p.duelo.saturating_sub(1);
@@ -652,7 +665,10 @@ impl Poblacion {
             if clase == Clase::Pobre {
                 meta -= 0.08;
             }
-            if hospital && clase <= Clase::Modesta {
+            if ent.con_servicios {
+                let acceso = if hospital || clase >= Clase::Acomodada { 1.0 } else { 0.5 };
+                meta += 0.08 * sv.salud * acceso - 0.15 * sv.insalubre;
+            } else if hospital && clase <= Clase::Modesta {
                 meta += 0.05;
             }
             if p.condicion == Condicion::Esclavizada {
@@ -670,7 +686,16 @@ impl Poblacion {
                     Clase::Modesta => 0.05,
                     Clase::Pobre => 0.015,
                 };
-                if escuelas {
+                if ent.con_servicios {
+                    // La escuela del barrio: hay que tener lugar en una; los pobres y modestos
+                    // van si el cabildo paga al maestro (si no, pocos pueden pagarle).
+                    let paga = match clase {
+                        Clase::Pobre if !escuelas => 0.25,
+                        Clase::Modesta if !escuelas => 0.6,
+                        _ => 1.0,
+                    };
+                    chance += 0.4 * sv.escuela * paga;
+                } else if escuelas {
                     chance += 0.2;
                 }
                 if tardia {
@@ -678,7 +703,7 @@ impl Poblacion {
                 }
                 if p.condicion == Condicion::Esclavizada {
                     // Restricción de la época: casi sin acceso a la escuela.
-                    chance = if escuelas { 0.04 } else { 0.0 };
+                    chance = if escuelas && (!ent.con_servicios || sv.escuela > 0.0) { 0.04 } else { 0.0 };
                 }
                 if rng.f() < chance {
                     p.educacion += 1;

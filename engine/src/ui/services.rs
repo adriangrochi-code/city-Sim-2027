@@ -1,12 +1,16 @@
-//! Tarjetas y acciones de los servicios en la interfaz: agua, serenos, lazareto e iglesia
-//! (Servicios); hornos, canteras, chacras y estancias (Producción); muelle, aduana y muralla
-//! (Puerto y muralla); y las capas de datos de agua, serenos y fuego.
+//! Tarjetas y acciones de los servicios en la interfaz. El cajón de Servicios tiene pestañas:
+//! agua, educación, salud, seguridad, saneamiento e iglesia; cada una con sus edificios, las
+//! ordenanzas que le tocan y, desactivados, los de las épocas siguientes («Época N»).
+//! Además: hornos, canteras, chacras y estancias (Producción); muelle, aduana y muralla
+//! (Puerto y muralla); y las capas de datos (agua, serenos, fuego, educación, salud,
+//! saneamiento y delito).
 
 use super::icons::Icon;
 use super::{Card, Category, UiAction};
-use crate::city::economy::Res;
+use crate::city::economy::{ord_info, Ordinance, Res};
 use crate::city::game::{fmt_thousands, Game, InspectKind, Tool};
-use crate::city::services::{self, port, works, Kind, Layer, Order, Placeable};
+use crate::city::services::barrio::{numero_epoca, FUTUROS};
+use crate::city::services::{self, port, works, Grupo, Kind, Layer, Order, Placeable};
 
 /// Lo que se pide desde las tarjetas y la ficha de los servicios.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -15,6 +19,10 @@ pub enum Act {
     /// Muestra u oculta una capa de datos.
     Layer(Layer),
     Order(Order),
+    /// Elige la pestaña del cajón de Servicios.
+    Grupo(Grupo),
+    /// Aprueba o deroga una ordenanza desde su tarjeta.
+    Ordenanza(Ordinance),
 }
 
 fn icon_of(k: Kind) -> Icon {
@@ -28,7 +36,102 @@ fn icon_of(k: Kind) -> Icon {
         Kind::Horno => Icon::Ladrillo,
         Kind::Cantera => Icon::Cantera,
         Kind::Aduana => Icon::Aduana,
+        Kind::Escuela => Icon::Escuela,
+        Kind::Convento => Icon::Iglesia,
+        Kind::Botica => Icon::Botica,
+        Kind::Medico | Kind::Hospital => Icon::Hospital,
+        Kind::Alcalde => Icon::Alcalde,
+        Kind::Carcel => Icon::Carcel,
+        Kind::Basurero => Icon::Basura,
     }
+}
+
+/// Nombre corto para la tarjeta (el completo va en el globo de ayuda).
+fn nombre_corto(k: Kind) -> &'static str {
+    match k {
+        Kind::Escuela => "Escuela",
+        Kind::Convento => "Convento",
+        Kind::Medico => "Médico",
+        Kind::Hospital => "Hospital de caridad",
+        Kind::Alcalde => "Alcalde de barrio",
+        Kind::Carcel => "Cárcel del Cabildo",
+        Kind::Basurero => "Basurero",
+        _ => services::info(k).name,
+    }
+}
+
+fn ordenanza_corta(o: Ordinance) -> &'static str {
+    match o {
+        Ordinance::EscuelasPrimerasLetras => "Maestro del cabildo",
+        Ordinance::HospitalCaridad => "Asistencia a pobres",
+        Ordinance::RecoleccionBasura => "Recolección",
+        Ordinance::PozosNegrosLejos => "Pozos negros lejos",
+        Ordinance::Limpieza => "Limpieza de calles",
+        Ordinance::TurnosAgua => "Turnos de agua",
+        _ => ord_info(o).name,
+    }
+}
+
+fn grupo_icon(g: Grupo) -> Icon {
+    match g {
+        Grupo::Agua => Icon::Agua,
+        Grupo::Educacion => Icon::Escuela,
+        Grupo::Salud => Icon::Hospital,
+        Grupo::Seguridad => Icon::Sereno,
+        Grupo::Saneamiento => Icon::Basura,
+        Grupo::Otros => Icon::Iglesia,
+    }
+}
+
+/// Tarjeta de una ordenanza que se aprueba o deroga desde el cajón.
+fn ordinance_card(game: &Game, o: Ordinance, icon: Icon) -> Card {
+    let i = ord_info(o);
+    let on = game.city.economy.is_on(o);
+    Card {
+        icon,
+        name: ordenanza_corta(o),
+        cost: if on { "vigente · derogar".into() } else { "ordenanza".into() },
+        tip: format!("Ordenanza «{}»: {} Aprobar o derogar cuesta {} pesos de papeleo.", i.name, i.desc, crate::city::economy::TOGGLE_COST),
+        action: Some(UiAction::Servicio(Act::Ordenanza(o))),
+        disabled: if game.city.plaza.is_none() { Some("Falta la plaza".into()) } else if game.city.money < crate::city::economy::TOGGLE_COST { Some("Sin fondos".into()) } else { None },
+        selected: on,
+    }
+}
+
+/// Tarjetas de los servicios de las épocas siguientes de un grupo (desactivadas).
+fn future_cards(g: Grupo) -> Vec<Card> {
+    FUTUROS
+        .iter()
+        .filter(|f| f.grupo == g)
+        .map(|f| Card {
+            icon: grupo_icon(g),
+            name: f.nombre,
+            cost: String::new(),
+            tip: format!("{} Llega con la época «{}»{}.", f.efecto, f.desde.nombre(), f.fecha.map_or(String::new(), |y| format!(" (en Montevideo, desde {y})"))),
+            action: None,
+            disabled: Some(format!("Época {}", numero_epoca(f.desde))),
+            selected: false,
+        })
+        .collect()
+}
+
+/// Tarjetas de una pestaña del cajón de Servicios.
+pub fn group_cards(g: Grupo, game: &Game) -> Vec<Card> {
+    let mut v = match g {
+        Grupo::Agua => vec![place_card(game, Kind::Pozo), place_card(game, Kind::Aljibe), place_card(game, Kind::Aguadores), ordinance_card(game, Ordinance::TurnosAgua, Icon::Agua)],
+        Grupo::Educacion => vec![place_card(game, Kind::Escuela), place_card(game, Kind::Convento), ordinance_card(game, Ordinance::EscuelasPrimerasLetras, Icon::Escuela)],
+        Grupo::Salud => vec![place_card(game, Kind::Botica), place_card(game, Kind::Medico), place_card(game, Kind::Hospital), place_card(game, Kind::Lazareto), ordinance_card(game, Ordinance::HospitalCaridad, Icon::Hospital)],
+        Grupo::Seguridad => vec![place_card(game, Kind::Serenos), place_card(game, Kind::Alcalde), place_card(game, Kind::Carcel)],
+        Grupo::Saneamiento => vec![
+            place_card(game, Kind::Basurero),
+            ordinance_card(game, Ordinance::RecoleccionBasura, Icon::Basura),
+            ordinance_card(game, Ordinance::PozosNegrosLejos, Icon::Aljibe),
+            ordinance_card(game, Ordinance::Limpieza, Icon::Basura),
+        ],
+        Grupo::Otros => vec![church_card(game)],
+    };
+    v.extend(future_cards(g));
+    v
 }
 
 fn place_card(game: &Game, k: Kind) -> Card {
@@ -50,15 +153,24 @@ fn place_card(game: &Game, k: Kind) -> Card {
         Some("Falta el muelle")
     } else if k == Kind::Aduana && game.city.services.count(Kind::Aduana) > 0 {
         Some("Ya construida")
+    } else if matches!(k, Kind::Convento | Kind::Carcel) && game.city.services.count(k) > 0 {
+        Some("Ya hay uno")
     } else {
         None
     };
     let p = Placeable::Building(k);
     Card {
         icon: icon_of(k),
-        name: i.name,
+        name: nombre_corto(k),
         cost,
-        tip: format!("{}{}", i.desc, if i.radius > 0.0 { format!(" Alcance: {} m.", i.radius as i32) } else { String::new() }),
+        tip: format!(
+            "{}: {}{}{} Mantenimiento: {} pesos al mes.",
+            i.name,
+            i.desc,
+            if i.radius > 0.0 { format!(" Alcance: {} m.", i.radius as i32) } else { String::new() },
+            if i.plazas > 0 { format!(" Capacidad: {}.", fmt_thousands(i.plazas as i64)) } else { String::new() },
+            i.upkeep
+        ),
         action: Some(UiAction::Servicio(Act::Place(p))),
         disabled: disabled.map(str::to_string),
         selected: game.tool == Tool::Service && game.service == p,
@@ -98,14 +210,7 @@ fn soon(icon: Icon, name: &'static str, tip: &str) -> Card {
 /// Tarjetas de los servicios para una categoría (`None` si la categoría no es de servicios).
 pub fn cards(cat: Category, game: &Game) -> Option<Vec<Card>> {
     Some(match cat {
-        Category::Servicios => vec![
-            place_card(game, Kind::Pozo),
-            place_card(game, Kind::Aljibe),
-            place_card(game, Kind::Aguadores),
-            place_card(game, Kind::Serenos),
-            place_card(game, Kind::Lazareto),
-            church_card(game),
-        ],
+        Category::Servicios => group_cards(game.grupo, game),
         Category::Produccion => vec![
             place_card(game, Kind::Chacra),
             place_card(game, Kind::Estancia),
@@ -147,6 +252,10 @@ pub fn cards(cat: Category, game: &Game) -> Option<Vec<Card>> {
             layer_card(game, Layer::Agua, Icon::Agua, "Agua", "Qué casas tienen agua (buena, regular o mala) y el alcance de pozos, aljibes y aguadores"),
             layer_card(game, Layer::Serenos, Icon::Sereno, "Serenos", "Calles con faroles y vigiladas de noche"),
             layer_card(game, Layer::Fuego, Icon::Bomba, "Fuego", "Riesgo de incendio por el techo y el agua cercana; lo que arde y las ruinas"),
+            layer_card(game, Layer::Educacion, Icon::Escuela, "Educación", "Casas con lugar en una escuela (verde) o sin escuela cerca (rojo) y el alcance de escuelas y conventos"),
+            layer_card(game, Layer::Salud, Icon::Hospital, "Salud", "Quién tiene botica, médico u hospital cerca"),
+            layer_card(game, Layer::Saneamiento, Icon::Basura, "Saneamiento", "Insalubridad de cada casa (agua mala, pozos negros, basura), los basurales y los pozos sucios"),
+            layer_card(game, Layer::Delito, Icon::Delito, "Delito", "Mapa de calor del riesgo de robos y asaltos, y la ronda de serenos, alcaldes y guardia"),
             soon(Icon::Valor, "Valor del suelo", "Mapa de calor del valor"),
         ],
         _ => return None,
@@ -168,6 +277,14 @@ pub fn apply(a: Act, game: &mut Game) {
         Act::Place(p) => game.set_service(p),
         Act::Layer(l) => game.layer = if game.layer == Some(l) { None } else { Some(l) },
         Act::Order(o) => game.orders.push(o),
+        Act::Grupo(g) => game.grupo = g,
+        Act::Ordenanza(o) => {
+            let c = &mut game.city;
+            match c.economy.toggle(o, &mut c.money) {
+                Ok(m) | Err(m) => game.say(m),
+            }
+            game.city.refresh_barrio();
+        }
     }
 }
 
@@ -187,8 +304,29 @@ mod tests {
         g.city.money = 100_000;
         let sv = cards(Category::Servicios, &g).unwrap();
         let pozo = sv.iter().find(|c| c.name == "Pozo de balde").unwrap();
+        // Pestañas: educación con la escuela, el convento, la ordenanza y lo que viene.
+        apply(Act::Grupo(Grupo::Educacion), &mut g);
+        let ed = cards(Category::Servicios, &g).unwrap();
+        assert!(ed.iter().any(|c| c.name == "Escuela" && c.disabled.is_none()));
+        assert!(ed.iter().any(|c| c.name == "Escuela pública" && c.disabled.as_deref() == Some("Época 3")), "las de otras épocas, desactivadas");
+        apply(Act::Grupo(Grupo::Saneamiento), &mut g);
+        let san = cards(Category::Servicios, &g).unwrap();
+        let rec = san.iter().find(|c| c.name == "Recolección").unwrap().clone();
+        assert!(!rec.selected);
+        apply(Act::Ordenanza(Ordinance::RecoleccionBasura), &mut g);
+        assert!(g.city.economy.is_on(Ordinance::RecoleccionBasura), "la tarjeta aprueba la ordenanza");
+        for gr in Grupo::PESTAÑAS {
+            apply(Act::Grupo(gr), &mut g);
+            assert!(!cards(Category::Servicios, &g).unwrap().is_empty(), "{gr:?}");
+        }
+        apply(Act::Grupo(Grupo::Agua), &mut g);
+        let capas = cards(Category::Capas, &g).unwrap();
+        assert!(capas.iter().any(|c| c.name == "Delito") && capas.iter().any(|c| c.name == "Saneamiento"));
         assert!(pozo.disabled.is_none(), "{:?}", pozo.disabled);
-        assert_eq!(sv.iter().find(|c| c.name == "Iglesia matriz").unwrap().disabled.as_deref(), Some("Falta gente"));
+        g.grupo = Grupo::Otros;
+        let ig = cards(Category::Servicios, &g).unwrap();
+        assert_eq!(ig.iter().find(|c| c.name == "Iglesia matriz").unwrap().disabled.as_deref(), Some("Falta gente"));
+        g.grupo = Grupo::Agua;
         // Elegir la tarjeta elige la herramienta; la capa se prende y se apaga.
         apply(Act::Place(Placeable::Building(Kind::Pozo)), &mut g);
         assert_eq!(g.tool, Tool::Service);

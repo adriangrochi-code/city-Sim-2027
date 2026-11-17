@@ -8,10 +8,10 @@ use super::*;
 use crate::city::economy::Ordinance;
 
 /// Factores de la felicidad (el orden de los motivos).
-pub const FACTORES: [&str; 11] = ["Comida", "Vivienda", "Agua", "Salud", "Trabajo", "Familia", "Libertad", "Comparación con los vecinos", "Fe y fiestas", "Ordenanzas", "Seguridad"];
+pub const FACTORES: [&str; 12] = ["Comida", "Vivienda", "Agua", "Salud", "Trabajo", "Familia", "Libertad", "Comparación con los vecinos", "Fe y fiestas", "Ordenanzas", "Seguridad", "Educación"];
 
 /// Pesos base de cada factor (la personalidad los mueve).
-const PESOS: [f32; 11] = [1.6, 1.0, 0.6, 0.8, 0.9, 0.8, 2.5, 0.5, 0.5, 0.4, 0.6];
+const PESOS: [f32; 12] = [1.6, 1.0, 0.6, 0.8, 0.9, 0.8, 2.5, 0.5, 0.5, 0.4, 0.6, 0.6];
 
 /// Sin motivo de queja.
 pub const SIN_MOTIVO: u8 = 255;
@@ -31,6 +31,7 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
         8 => "falta agua en el barrio",
         12 => "está enfermo",
         13 => "está débil por la edad",
+        14 => "no hay médico ni botica cerca",
         16 => "no tiene trabajo",
         17 => "trabaja por su cuenta, sin taller ni mostrador",
         20 => "está de duelo",
@@ -42,6 +43,9 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
         36 => "le molestan las ordenanzas del cabildo",
         40 => "teme por su seguridad",
         41 => "perdió su casa en un incendio o una inundación",
+        42 => "teme a los ladrones del barrio",
+        44 => "no hay escuela para sus hijos",
+        45 => "no puede pagar la escuela de sus hijos",
         _ => "—",
     }
 }
@@ -49,8 +53,8 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
 /// Felicidad desglosada de una persona (para la ficha).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Desglose {
-    pub valores: [f32; 11],
-    pub pesos: [f32; 11],
+    pub valores: [f32; 12],
+    pub pesos: [f32; 12],
     pub total: f32,
     pub motivos: [u8; 2],
 }
@@ -123,8 +127,8 @@ impl Poblacion {
         let edad = p.edad(mes);
         let h = p.hogar.map(|h| &self.hogares[h as usize]);
         let r = &p.rasgos;
-        let mut v = [0.7f32; 11];
-        let mut var = [0u8; 11];
+        let mut v = [0.7f32; 12];
+        let mut var = [0u8; 12];
         // 0 Comida: lo que gana el hogar frente a lo que cuesta comer.
         if let Some(h) = h {
             if Self::colectivo(h) {
@@ -175,10 +179,17 @@ impl Poblacion {
         }
         // 2 Agua.
         v[2] = (0.3 + ent.agua * 0.7).clamp(0.0, 1.0);
-        // 3 Salud.
+        // 3 Salud: la propia y, con el modelo de servicios, tener quién lo atienda.
+        let sv = ent.servicios_hogar(h);
         v[3] = p.salud;
         if p.salud < 0.5 {
             var[3] = if edad > 60 { 1 } else { 0 };
+        }
+        if ent.con_servicios {
+            v[3] = p.salud * 0.75 + 0.25 * (0.35 + 0.65 * sv.salud);
+            if p.salud >= 0.5 && sv.salud < 0.1 {
+                var[3] = 2;
+            }
         }
         // 4 Trabajo.
         v[4] = if !(16..=60).contains(&edad) {
@@ -266,9 +277,31 @@ impl Poblacion {
         // afueras), no tener techo y haber perdido la casa en un desastre.
         if let Some(h) = h {
             v[10] = [0.8, 0.72, 0.55, 0.3, 0.6][self.barrio_de(h, info) as usize];
+            if ent.con_servicios && h.vive_en_solar() {
+                // El delito del barrio (pobreza, oscuridad, baldíos) y quién lo vigila.
+                v[10] = (0.85 - 0.6 * sv.delito + 0.1 * sv.vigilancia).clamp(0.0, 1.0);
+                if sv.delito > 0.3 {
+                    var[10] = 2;
+                }
+            }
             if h.desastre.is_some_and(|m| mes - m < 12) {
                 v[10] = 0.25;
                 var[10] = 1;
+            }
+        }
+        // 11 Educación: para los padres con hijos de 5 a 12 años y para los chicos de esa edad,
+        // tener escuela en el barrio (con el modelo de servicios).
+        let en_edad = |e: i32| (5..=12).contains(&e);
+        let con_hijos = en_edad(edad) || p.hijos.iter().any(|&c| self.personas[c as usize].viva() && en_edad(self.personas[c as usize].edad(mes)));
+        let mut pesa_educacion = false;
+        if ent.con_servicios && con_hijos && p.libre() {
+            pesa_educacion = true;
+            let paga = vig(Ordinance::EscuelasPrimerasLetras) || clase >= Clase::Acomodada;
+            v[11] = if sv.escuela <= 0.0 { 0.35 } else if paga { 0.55 + 0.4 * sv.escuela } else { 0.5 };
+            if sv.escuela <= 0.0 {
+                var[11] = 0;
+            } else if !paga {
+                var[11] = 1;
             }
         }
         // Pesos según la personalidad.
@@ -280,6 +313,9 @@ impl Poblacion {
         w[7] *= 0.4 + 1.2 * r.ambicion();
         w[8] *= 0.3 + 1.4 * r.devocion();
         w[10] *= 0.7 + 0.6 * r.prudencia();
+        if !pesa_educacion {
+            w[11] = 0.0;
+        }
         if edad < 14 {
             w[4] = 0.0;
             w[7] *= 0.3;
@@ -294,7 +330,7 @@ impl Poblacion {
         let peor = v.iter().zip(&w).filter(|(_, &b)| b >= 0.5).map(|(a, _)| *a).fold(1.0f32, f32::min);
         let total = 0.65 * media + 0.35 * peor;
         // Motivos: lo que más le pesa (por debajo de lo aceptable).
-        let mut peor: Vec<(usize, f32)> = (0..11).map(|i| (i, w[i] * (0.62 - v[i]))).filter(|x| x.1 > 0.0).collect();
+        let mut peor: Vec<(usize, f32)> = (0..12).map(|i| (i, w[i] * (0.62 - v[i]))).filter(|x| x.1 > 0.0).collect();
         peor.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         let cod = |i: usize| (i * 4) as u8 + var[i];
         let motivos = match peor.len() {

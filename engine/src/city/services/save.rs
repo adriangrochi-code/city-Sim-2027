@@ -25,6 +25,9 @@ pub struct BuildingData {
     pub centro: [f32; 2],
     pub frente: [f32; 2],
     pub abastece: i32,
+    /// Pozos y aljibes: cuánto se ensució el agua (las partidas viejas, limpia).
+    #[serde(default)]
+    pub contaminacion: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -64,6 +67,9 @@ pub struct ServicesData {
     pub faroles: Vec<([i32; 2], i32)>,
     #[serde(default)]
     pub faroles_firma: (usize, i64),
+    /// Basurales, presos, delitos y brotes (las partidas viejas empiezan sin ellos).
+    #[serde(default)]
+    pub barrio: super::barrio::BarrioData,
 }
 
 impl ServicesData {
@@ -72,7 +78,7 @@ impl ServicesData {
         topes.sort();
         let p = &s.port;
         ServicesData {
-            edificios: s.buildings.values().map(|b| BuildingData { id: b.id, tipo: info(b.kind).key.into(), centro: v2(b.c), frente: v2(b.f), abastece: b.served }).collect(),
+            edificios: s.buildings.values().map(|b| BuildingData { id: b.id, tipo: info(b.kind).key.into(), centro: v2(b.c), frente: v2(b.f), abastece: b.served, contaminacion: b.contaminacion }).collect(),
             proximo: s.next,
             agua: s.water.iter().map(|(&l, &(q, src))| (l, q, src)).collect(),
             topes,
@@ -96,6 +102,7 @@ impl ServicesData {
             azar: s.rng.state(),
             faroles: s.lamps.iter().map(|&(v, b)| ([v.x, v.y], b)).collect(),
             faroles_firma: s.lamp_sig,
+            barrio: s.barrio.guardar(),
         }
     }
 
@@ -104,7 +111,7 @@ impl ServicesData {
         let mut s = Services::default();
         for b in &self.edificios {
             let kind = kind_from_key(&b.tipo).ok_or_else(|| format!("servicio desconocido: {}", b.tipo))?;
-            s.buildings.insert(b.id, Building { id: b.id, kind, c: p2(b.centro), f: p2(b.frente), served: b.abastece, voxels: Vec::new() });
+            s.buildings.insert(b.id, Building { id: b.id, kind, c: p2(b.centro), f: p2(b.frente), served: b.abastece, contaminacion: b.contaminacion.clamp(0.0, 1.0), voxels: Vec::new() });
         }
         s.next = self.proximo.max(s.buildings.keys().copied().max().unwrap_or(0));
         s.water = self.agua.iter().map(|&(l, q, src)| (l, (q, src))).collect();
@@ -124,6 +131,7 @@ impl ServicesData {
         s.rng = Rng::from_state(self.azar);
         s.lamps = self.faroles.iter().map(|&(v, b)| (glam::IVec2::new(v[0], v[1]), b)).collect();
         s.lamp_sig = self.faroles_firma;
+        s.barrio = super::barrio::Barrio::cargar(&self.barrio);
         Ok((s, self.topes.iter().copied().collect()))
     }
 }

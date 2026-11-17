@@ -164,6 +164,9 @@ pub enum Ordinance {
     SinPaja,
     Limpieza,
     FarolesVecinos,
+    // --- Saneamiento (efectos en `services::barrio`) ---
+    PozosNegrosLejos,
+    RecoleccionBasura,
     // --- Políticas sociales (efectos en `poblacion`) ---
     RepartoSolares,
     ContribucionProgresiva,
@@ -203,12 +206,14 @@ pub const ORDINANCES: &[OrdInfo] = &[
     OrdInfo { id: Ordinance::SinPaja, name: "Prohibido techar con paja cerca de la plaza", desc: "Ranchos a menos de 400 m de la plaza: 70 % menos incendios.", opinion: [-10, 5, 0], monthly: 0 },
     OrdInfo { id: Ordinance::Limpieza, name: "Limpieza de calles y basurales", desc: "Las epidemias se contagian un 40 % menos. 20 pesos por mes cada 1.000 habitantes.", opinion: [5, 0, 0], monthly: 0 },
     OrdInfo { id: Ordinance::FarolesVecinos, name: "Faroles a cargo de los vecinos", desc: "El sebo de los faroles lo pagan los vecinos, no la ciudad.", opinion: [-8, 0, 0], monthly: 0 },
+    OrdInfo { id: Ordinance::PozosNegrosLejos, name: "Alejar los pozos negros de los pozos de agua", desc: "Letrinas y pozos negros al fondo del solar, lejos de los pozos y aljibes: el agua se ensucia mucho menos. Molesta a los vecinos; 10 pesos por mes de inspección.", opinion: [-4, 0, 0], monthly: 10 },
+    OrdInfo { id: Ordinance::RecoleccionBasura, name: "Recolección de basura con carretilla", desc: "Carretillas del cabildo juntan la basura casa por casa y la llevan al basurero: sin basurero no tienen dónde descargar. 15 pesos más 15 por cada 1.000 habitantes.", opinion: [4, 2, 0], monthly: 15 },
     // Políticas sociales: el costo real depende de la población (sale en el presupuesto).
     OrdInfo { id: Ordinance::RepartoSolares, name: "Reparto de solares a familias pobres", desc: "Las familias pobres sin casa reciben en propiedad los ranchos libres. 25 pesos por mes de mensura y escrituras.", opinion: [8, -3, -5], monthly: 25 },
     OrdInfo { id: Ordinance::ContribucionProgresiva, name: "Contribución progresiva", desc: "Los pobres no pagan contribución; los acomodados pagan 1,5 veces y los principales 2,5 veces.", opinion: [8, -10, -10], monthly: 0 },
     OrdInfo { id: Ordinance::PanDeLosPobres, name: "Pan barato para los pobres", desc: "Los hogares pobres compran el pan al precio normal; la ciudad paga la diferencia cuando está caro.", opinion: [10, -3, 0], monthly: 0 },
-    OrdInfo { id: Ordinance::HospitalCaridad, name: "Hospital de caridad y asistencia a pobres", desc: "Menos muertes y mejor salud de pobres y modestos. 20 pesos más 30 por cada 1.000 habitantes.", opinion: [6, 0, 0], monthly: 20 },
-    OrdInfo { id: Ordinance::EscuelasPrimerasLetras, name: "Escuelas de primeras letras", desc: "Más niños aprenden a leer y escribir: más oficios letrados y movilidad. 15 pesos más un cuarto por niño.", opinion: [5, 2, 0], monthly: 15 },
+    OrdInfo { id: Ordinance::HospitalCaridad, name: "Hospital de caridad y asistencia a pobres", desc: "El cabildo paga la cama, el médico y la botica de pobres y modestos: con hospital, médico o botica cerca, se atienden como los demás. 20 pesos más 30 por cada 1.000 habitantes.", opinion: [6, 0, 0], monthly: 20 },
+    OrdInfo { id: Ordinance::EscuelasPrimerasLetras, name: "Escuelas de primeras letras", desc: "El cabildo paga al maestro y los niños pobres van gratis a la escuela de su barrio: más lectura, oficios letrados y movilidad. Hacen falta escuelas. 15 pesos más un cuarto por niño.", opinion: [5, 2, 0], monthly: 15 },
     OrdInfo { id: Ordinance::PrestamosCabildo, name: "Préstamos del cabildo", desc: "El cabildo presta barato a pobres y modestos en los meses malos; pierde parte de lo prestado.", opinion: [6, -4, 0], monthly: 10 },
     OrdInfo { id: Ordinance::FondoManumision, name: "Fondo de manumisión", desc: "El cabildo completa la suma de la carta de libertad a quienes ya juntaron buena parte. 40 pesos por mes.", opinion: [3, -2, -8], monthly: 40 },
     OrdInfo { id: Ordinance::LibertadVientres, name: "Libertad de vientres", desc: "Quien nace en la ciudad nace libre y se prohíbe el tráfico de personas. No se puede derogar.", opinion: [4, -4, -8], monthly: 0 },
@@ -268,6 +273,9 @@ pub struct MonthInput {
     /// Líneas del presupuesto que vienen de la población (políticas sociales, venta de
     /// solares, alquileres del cabildo).
     pub social: Vec<(String, i64)>,
+    /// Riesgo de delito medio en los comercios (0 a 1; ver `services::barrio`): baja la
+    /// alcabala y enoja a los comerciantes.
+    pub crimen: f32,
 }
 
 /// Una línea del presupuesto (positiva = ingreso).
@@ -637,7 +645,9 @@ impl Economy {
         // pulperos ambulantes y la alcabala casi no cobra.
         let coverage = (inp.jobs_c as f32 / (pop * 0.08).max(1.0)).min(1.2);
         let sales = pop * 0.9 * (self.price(Res::Pan) * 0.5 + 0.5) * (0.4 + 0.6 * coverage) + inp.jobs_i as f32 * 4.0;
-        rep.add("Alcabala", (sales * self.tax(Tax::Alcabala) as f32 / 100.0 * 3.0) as i64);
+        // Con robos y asaltos, la gente compra menos y el comercio esconde ventas.
+        let miedo = 1.0 - 0.3 * inp.crimen.clamp(0.0, 1.0);
+        rep.add("Alcabala", (sales * self.tax(Tax::Alcabala) as f32 / 100.0 * 3.0 * miedo) as i64);
         rep.add("Aduana", (duty * (1.0 - inp.contraband.clamp(0.0, 1.0))) as i64);
         for (concept, amount) in &inp.other {
             rep.add(concept.clone(), *amount);
@@ -652,6 +662,12 @@ impl Economy {
         }
         if self.is_on(Ordinance::Limpieza) {
             rep.add("Limpieza de calles", -(20.0 * pop / 1000.0) as i64);
+        }
+        if self.is_on(Ordinance::RecoleccionBasura) {
+            rep.add("Recolección de basura (carretillas)", -(15.0 + 15.0 * pop / 1000.0) as i64);
+        }
+        if self.is_on(Ordinance::PozosNegrosLejos) {
+            rep.add("Inspección de pozos negros", -ord_info(Ordinance::PozosNegrosLejos).monthly);
         }
         for (c, a) in &inp.social {
             rep.add(c.clone(), *a);
@@ -681,6 +697,9 @@ impl Economy {
         if inp.blockade {
             target[1] -= 10.0;
         }
+        // El delito: los comerciantes temen por sus mostradores; los vecinos, por sus casas.
+        target[1] -= inp.crimen.clamp(0.0, 1.0) * 30.0;
+        target[0] -= inp.crimen.clamp(0.0, 1.0) * 8.0;
         target[2] += (inp.world_hides - 1.0) * 20.0;
         // Cómo viven de verdad las personas de cada sector (felicidad de la población).
         if let Some(a) = inp.animo {

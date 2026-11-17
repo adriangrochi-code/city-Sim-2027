@@ -41,6 +41,8 @@ pub fn rancho(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     if r.f() < 0.6 {
         fence(f, e, 1, f.width - 1, back, f.depth - 1, f.width / 2);
     }
+    // Letrina de pozo al fondo de la huerta.
+    letrina(f, e, f.width - 6, f.depth - 6);
 }
 
 /// Fachada de planta baja: zócalo, zaguán y ventanas con reja volada.
@@ -96,6 +98,8 @@ pub fn casa_azotea(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     f.surface(e, patio_u, patio_u + patio_w, fd, w1, PLAZA);
     aljibe(f, e, patio_u + patio_w / 2 - 1, fd + 6);
     f.surface(e, 1, f.width - 1, w1, f.depth - 1, GARDEN);
+    // Pozo negro con su casilla al fondo.
+    letrina(f, e, if left { f.width - 5 } else { 3 }, f.depth - 5);
 }
 
 /// Casa de altos: dos plantas, zócalo de piedra, cornisas, balcones de hierro en la planta
@@ -1406,6 +1410,374 @@ pub fn ruina(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     }
 }
 
+// --- Educación, salud, seguridad y saneamiento ------------------------------------------------
+
+/// Letrina de pozo: casilla de tablas de 1 × 1 m y 2 m de alto con techo de paja, sobre el
+/// pozo negro al fondo del solar.
+pub fn letrina(f: &Frame, e: &mut Edits, u: i32, w: i32) {
+    f.surface(e, u - 1, u + 3, w - 1, w + 3, MUD);
+    f.raw_fill(e, u, u + 2, 0, 4, w, w + 2, WOOD_DARK);
+    f.raw_fill(e, u - 1, u + 3, 4, 5, w - 1, w + 3, THATCH);
+    // Puerta (más clara) hacia el frente.
+    f.raw_fill(e, u, u + 2, 0, 3, w - 1, w, WOOD);
+}
+
+/// Escuela de primeras letras: casa de azotea encalada sobre la calle con el aula al frente
+/// (ventanas altas con reja), portón con tablero sobre el dintel, espadaña chica con la campana
+/// que llama a clase, patio de tierra para el recreo con un árbol, bancos y la letrina al fondo.
+/// Marco: 24 × 32 (12 × 16 m).
+pub fn escuela(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h) = (24, 14, 10);
+    f.foundation(t, e, 0, wd, 0, fd, ZOCALO);
+    f.fill(e, 0, wd, 0, h, 0, fd, CAL);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, wd, h, h + 1, 0, fd, CAL);
+    zocalo(f, e, 0, wd, 0, fd, 2, ZOCALO);
+    cornisa(f, e, 0, wd, h - 1, CAL);
+    // Portón al centro y tablero de la escuela encima.
+    opening(f, e, 10, 14, 0, 6, 1, WOOD_DARK);
+    f.fill(e, 9, 15, 6, 7, -1, 0, STONE);
+    f.raw_fill(e, 9, 15, 7, 8, -1, 0, WOOD_DARK);
+    // Ventanas altas del aula (luz para leer, a salvo de los curiosos de la calle).
+    for u in [3, 18] {
+        window_reja(f, e, u, u + 3, 3, 7);
+    }
+    // Espadaña con la campana sobre el pretil.
+    f.fill(e, 10, 14, h + 1, h + 6, 0, 1, CAL);
+    arch(f, e, 11, 13, h + 2, h + 5, 0, 1);
+    f.raw(e, 11, h + 3, 0, IRON);
+    f.fill(e, 11, 13, h + 6, h + 7, 0, 1, CAL);
+    // Patio de recreo con un árbol, bancos y la letrina en el fondo.
+    f.surface(e, 0, wd, fd, f.depth, DIRT);
+    ring(f, e, 0, wd, 0, 4, fd, f.depth, CAL);
+    f.raw_fill(e, 4, 5, 0, 5, fd + 8, fd + 9, TRUNK);
+    f.raw_fill(e, 2, 8, 5, 7, fd + 6, fd + 11, LEAF);
+    f.raw_fill(e, 3, 7, 7, 8, fd + 7, fd + 10, LEAF);
+    letrina(f, e, wd - 5, f.depth - 5);
+    f.raw_fill(e, 9, 16, 0, 1, f.depth - 3, f.depth - 2, WOOD);
+}
+
+/// Convento con aulas: iglesia de una nave con espadaña de dos campanas y techo de teja, y al
+/// costado el claustro (galería de arcos alrededor de un patio con aljibe) con celdas y aulas, y
+/// la huerta de los frailes al fondo. Marco: 60 × 72 (30 × 36 m).
+pub fn convento(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    // Iglesia.
+    let ig = f.sub(0, 0, 18, 56, 1);
+    ig.foundation(t, e, 0, 18, 0, 56, STONE);
+    ig.fill(e, 0, 18, 0, 14, 0, 56, CAL);
+    zocalo(&ig, e, 0, 18, 0, 56, 2, STONE);
+    gable(&ig, e, 0, 18, 0, 56, 14, 2, 1, TILE, CAL, false);
+    arch(&ig, e, 7, 11, 0, 9, 0, 1);
+    ig.raw_fill(e, 7, 11, 0, 8, 1, 2, WOOD_DARK);
+    window_reja(&ig, e, 8, 10, 11, 13);
+    // Espadaña de dos campanas.
+    ig.fill(e, 4, 14, 14, 26, 0, 2, CAL);
+    for u in [5, 10] {
+        arch(&ig, e, u, u + 3, 18, 24, 0, 2);
+        ig.raw(e, u + 1, 20, 1, IRON);
+    }
+    ig.fill(e, 8, 10, 26, 28, 0, 2, CAL);
+    ig.raw_fill(e, 8, 10, 28, 31, 1, 2, IRON);
+    // Claustro: cuatro alas alrededor del patio.
+    let (u0, u1, w0, w1, h) = (20, 60, 4, 52, 10);
+    for (a, b, c, d) in [(u0, u1, w0, w0 + 10), (u0, u1, w1 - 10, w1), (u0, u0 + 10, w0, w1), (u1 - 10, u1, w0, w1)] {
+        f.foundation(t, e, a, b, c, d, STONE);
+        f.fill(e, a, b, 0, h, c, d, CAL);
+    }
+    gable(f, e, u0, u1, w0, w0 + 10, h, 2, 1, TILE, CAL, true);
+    gable(f, e, u0, u1, w1 - 10, w1, h, 2, 1, TILE, CAL, true);
+    gable(f, e, u0, u0 + 10, w0 + 10, w1 - 10, h, 2, 1, TILE, CAL, false);
+    gable(f, e, u1 - 10, u1, w0 + 10, w1 - 10, h, 2, 1, TILE, CAL, false);
+    // Galería de arcos hacia el patio.
+    let (pu0, pu1, pw0, pw1) = (u0 + 10, u1 - 10, w0 + 10, w1 - 10);
+    f.surface(e, pu0, pu1, pw0, pw1, GARDEN);
+    let mut w = pw0 + 1;
+    while w + 3 < pw1 {
+        for (a, b) in [(pu0 - 3, pu0), (pu1, pu1 + 3)] {
+            f.clear(e, a, b, 0, 6, w, w + 3);
+        }
+        w += 5;
+    }
+    let mut u = pu0 + 1;
+    while u + 3 < pu1 {
+        for (a, b) in [(pw0 - 3, pw0), (pw1, pw1 + 3)] {
+            f.clear(e, u, u + 3, 0, 6, a, b);
+        }
+        u += 5;
+    }
+    aljibe(f, e, (pu0 + pu1) / 2 - 1, (pw0 + pw1) / 2 - 1);
+    // Portería y ventanas de las aulas hacia la calle.
+    f.fill(e, 36, 40, 0, 6, w0 - 1, w0, WOOD_DARK);
+    for u in [24, 30, 44, 50] {
+        f.fill(e, u, u + 2, 3, 6, w0 - 1, w0, REJA);
+    }
+    f.surface(e, u0, u1, 0, w0, PLAZA);
+    // Huerta de los frailes.
+    f.surface(e, 2, 58, 56, 71, GARDEN);
+    fence(f, e, 1, 59, 55, 71, 30);
+    for u in (6..54).step_by(8) {
+        f.raw_fill(e, u, u + 1, 0, 4, 64, 65, TRUNK);
+        f.raw_fill(e, u - 1, u + 2, 4, 6, 63, 66, LEAF_DARK);
+    }
+}
+
+/// Botica: casa chica de azotea con puerta y vidriera, frascos de colores en el estante de la
+/// vidriera y el almirez colgado de una ménsula de hierro. Marco: 16 × 24 (8 × 12 m).
+pub fn botica(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h) = (16, 16, 9);
+    f.foundation(t, e, 0, wd, 0, fd, ZOCALO);
+    f.fill(e, 0, wd, 0, h, 0, fd, CAL_AZUL);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, wd, h, h + 1, 0, fd, CAL_AZUL);
+    zocalo(f, e, 0, wd, 0, fd, 2, ZOCALO);
+    cornisa(f, e, 0, wd, h - 1, CAL);
+    opening(f, e, 2, 5, 0, 6, 1, WOOD_DARK);
+    // Vidriera con estante de frascos.
+    opening(f, e, 7, 14, 2, 6, 1, WINDOW);
+    for (k, m) in [CAL_AZUL, CAL_ROSA, CAL_OCRE, CAL_AZUL, FLOR_AMARILLA, CAL_ROSA, CAL_AZUL].into_iter().enumerate() {
+        f.raw(e, 7 + k as i32, 3, 1, m);
+    }
+    f.fill(e, 6, 15, 1, 2, -1, 0, STONE);
+    // Ménsula con el almirez (mortero) colgado.
+    f.raw_fill(e, 5, 6, 7, 8, -2, 0, IRON);
+    f.raw(e, 5, 6, -2, BRICK);
+    // Patio chico con hierbas medicinales.
+    f.surface(e, 0, wd, fd, f.depth, GARDEN);
+    for u in (2..wd - 2).step_by(3) {
+        f.raw(e, u, 0, fd + 3, FLOR_BLANCA);
+        f.raw(e, u + 1, 0, fd + 5, FLOR_VIOLETA);
+    }
+}
+
+/// Casa del médico y cirujano: casa de teja con zaguán, consultorio al frente con ventanas de
+/// reja, chapa en la puerta y el caballo ensillado en el palenque para salir a ver enfermos.
+/// Marco: 24 × 36 (12 × 18 m).
+pub fn casa_medico(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h) = (24, 16, 9);
+    f.foundation(t, e, 0, wd, 0, fd, ZOCALO);
+    f.fill(e, 0, wd, 0, h, 0, fd, CAL_OCRE);
+    zocalo(f, e, 0, wd, 0, fd, 2, ZOCALO);
+    gable(f, e, 0, wd, 0, fd, h, 2, 1, TILE, CAL_OCRE, true);
+    opening(f, e, 3, 6, 0, 6, 1, WOOD_DARK);
+    for u in [10, 16] {
+        window_reja(f, e, u, u + 3, 2, 6);
+    }
+    f.raw_fill(e, 6, 7, 4, 5, -1, 0, CAL);
+    // Palenque y caballo sobre la vereda.
+    f.raw_fill(e, 17, 18, 0, 3, -4, -3, WOOD_DARK);
+    f.raw_fill(e, 22, 23, 0, 3, -4, -3, WOOD_DARK);
+    f.raw_fill(e, 17, 23, 2, 3, -4, -3, WOOD_DARK);
+    animal(f, e, 18, -3, true, HIDE);
+    // Patio con aljibe, ala de atrás y la letrina.
+    f.surface(e, 0, wd, fd, f.depth, PLAZA);
+    aljibe(f, e, 12, fd + 5);
+    f.foundation(t, e, 0, 8, fd, f.depth - 4, ZOCALO);
+    f.fill(e, 0, 8, 0, h - 1, fd, f.depth - 4, CAL_OCRE);
+    f.fill(e, 0, 8, h - 1, h, fd, f.depth - 4, AZOTEA);
+    letrina(f, e, wd - 5, f.depth - 5);
+}
+
+/// Hospital de caridad: frente de una planta con portada de piedra (arco, frontón y cruz),
+/// salas largas de camas a los costados de un patio con aljibe y canteros, ala del fondo con la
+/// capilla y su espadaña, y la huerta atrás. Marco: 72 × 60 (36 × 30 m).
+pub fn hospital_caridad(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, dp, h) = (72, 52, 12);
+    for (a, b, c, d) in [(0, wd, 0, 12), (0, wd, dp - 10, dp), (0, 14, 12, dp - 10), (wd - 14, wd, 12, dp - 10)] {
+        f.foundation(t, e, a, b, c, d, STONE);
+        f.fill(e, a, b, 0, h, c, d, CAL);
+    }
+    zocalo(f, e, 0, wd, 0, 12, 3, STONE);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, 11, AZOTEA);
+    ring(f, e, 0, wd, h, h + 1, 0, 12, CAL);
+    cornisa(f, e, 0, wd, h - 1, STONE);
+    gable(f, e, 0, wd, dp - 10, dp, h, 2, 1, TILE, CAL, true);
+    gable(f, e, 0, 14, 12, dp - 10, h, 2, 1, TILE, CAL, false);
+    gable(f, e, wd - 14, wd, 12, dp - 10, h, 2, 1, TILE, CAL, false);
+    // Portada de piedra con arco, frontón escalonado y cruz.
+    f.fill(e, 30, 42, 0, h + 3, -1, 1, STONE);
+    for k in 0..4 {
+        f.fill(e, 31 + k * 2, 41 - k * 2, h + 3 + k, h + 4 + k, -1, 0, STONE);
+    }
+    arch(f, e, 33, 39, 0, 10, -1, 12);
+    f.raw_fill(e, 35, 37, h + 7, h + 12, -1, 0, IRON);
+    f.raw_fill(e, 34, 38, h + 10, h + 11, -1, 0, IRON);
+    // Ventanas altas en el frente y en las salas (las camas, a lo largo de los muros).
+    let mut u = 4;
+    while u < wd - 4 {
+        if !(27..44).contains(&u) {
+            window_reja(f, e, u, u + 2, 4, 9);
+        }
+        u += 6;
+    }
+    for side in [f.left_side(), f.right_side()] {
+        let mut w = 14;
+        while w < dp - 12 {
+            opening(&side, e, w, w + 2, 6, 10, 1, WINDOW);
+            w += 6;
+        }
+    }
+    // Patio con aljibe y canteros.
+    f.surface(e, 14, wd - 14, 12, dp - 10, PLAZA);
+    aljibe(f, e, wd / 2 - 1, (12 + dp - 10) / 2 - 1);
+    for u in [20, wd - 24] {
+        f.surface(e, u, u + 4, 18, dp - 16, GARDEN);
+    }
+    // Espadaña de la capilla en el ala del fondo.
+    f.fill(e, 30, 42, h + 3, h + 12, dp - 6, dp - 4, CAL);
+    arch(f, e, 34, 38, h + 5, h + 10, dp - 6, dp - 4);
+    f.raw(e, 35, h + 7, dp - 5, IRON);
+    // Huerta y camposanto chico atrás.
+    f.surface(e, 0, wd, dp, f.depth, GARDEN);
+    for u in (4..20).step_by(4) {
+        f.raw_fill(e, u, u + 1, 0, 3, dp + 4, dp + 5, WOOD_DARK);
+        f.raw_fill(e, u - 1, u + 2, 2, 3, dp + 4, dp + 5, WOOD_DARK);
+    }
+}
+
+/// Garita del alcalde de barrio: casilla de 4 × 4 m de cal con techo de teja a cuatro aguas,
+/// puerta, ventanuco, banco, farol y la vara de la justicia junto a la puerta. Marco: 8 × 8.
+pub fn garita_alcalde(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.foundation(t, e, 0, 8, 0, 8, STONE);
+    f.fill(e, 0, 8, 0, 6, 0, 8, CAL);
+    zocalo(f, e, 0, 8, 0, 8, 1, STONE);
+    for k in 0..4 {
+        f.fill(e, k, 8 - k, 6 + k, 7 + k, k, 8 - k, TILE);
+    }
+    opening(f, e, 3, 5, 0, 5, 1, WOOD_DARK);
+    window_reja(f, e, 6, 7, 2, 4);
+    // Vara de la justicia (bastón alto con puño de hierro) y banco.
+    f.raw_fill(e, 1, 2, 0, 5, -1, 0, WOOD_DARK);
+    f.raw(e, 1, 5, -1, IRON);
+    f.raw_fill(e, 5, 8, 0, 1, -2, -1, WOOD);
+    // Farol en la esquina.
+    f.raw_fill(e, 0, 1, 5, 6, -1, 0, IRON);
+    f.raw(e, 0, 4, -1, WINDOW);
+}
+
+/// Cárcel del Cabildo con su cuerpo de guardia: dos plantas (piedra abajo, cal arriba), recova
+/// de arcos al frente donde está la guardia, calabozos con ventanucos de reja gruesa arriba,
+/// escudo, pretil con garitas en las esquinas y patio de muros altos detrás.
+/// Marco: 48 × 40 (24 × 20 m).
+pub fn carcel(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h1, h) = (48, 22, 10, 19);
+    f.foundation(t, e, 0, wd, 0, fd, STONE);
+    f.fill(e, 0, wd, 0, h1, 0, fd, STONE);
+    f.fill(e, 0, wd, h1, h, 0, fd, CAL);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    cornisa(f, e, 0, wd, h1, STONE);
+    cornisa(f, e, 0, wd, h - 1, STONE);
+    // Recova del cuerpo de guardia.
+    f.clear(e, 2, wd - 2, 0, h1 - 2, 1, 7);
+    for k in 0..7 {
+        let u0 = 3 + k * 6;
+        arch(f, e, u0, u0 + 4, 0, h1 - 2, 0, 1);
+    }
+    f.surface(e, 0, wd, 0, 7, PLAZA);
+    f.raw_fill(e, 22, 26, 0, 6, 7, 8, WOOD_DARK);
+    for u in [6, 14, 32, 40] {
+        f.raw_fill(e, u, u + 2, 2, 6, 7, 8, REJA);
+    }
+    // Fusiles apoyados y el centinela en la puerta.
+    f.raw_fill(e, 4, 5, 0, 4, 6, 7, WOOD_DARK);
+    f.raw_fill(e, 24, 25, 0, 3, -2, -1, WOOD_DARK);
+    f.raw(e, 24, 3, -2, CAL_ROSA);
+    // Calabozos: ventanucos chicos con reja gruesa.
+    let mut u = 3;
+    while u < wd - 3 {
+        f.clear(e, u, u + 2, h1 + 3, h1 + 6, 0, 1);
+        f.raw_fill(e, u, u + 2, h1 + 3, h1 + 6, 0, 1, REJA);
+        u += 5;
+    }
+    // Pretil con garitas en las esquinas.
+    ring(f, e, 0, wd, h, h + 2, 0, fd, CAL);
+    for u in [0, wd - 4] {
+        f.fill(e, u, u + 4, h, h + 6, 0, 4, STONE);
+        f.fill(e, u, u + 4, h + 6, h + 7, 0, 4, TILE_DARK);
+        f.clear(e, u + 1, u + 3, h + 3, h + 5, 0, 1);
+    }
+    // Escudo sobre la puerta.
+    f.fill(e, 22, 26, h1 + 6, h1 + 9, -1, 0, STONE);
+    f.raw_fill(e, 23, 25, h1 + 7, h1 + 8, -2, -1, CAL_OCRE);
+    // Patio de muros altos.
+    ring(f, e, 0, wd, 0, 12, fd, f.depth, STONE);
+    f.surface(e, 1, wd - 1, fd, f.depth - 1, DIRT);
+}
+
+/// Montones de basura: tierra y barro, huesos y cueros podridos, tablas, trapos y loza rota,
+/// más altos hacia el medio.
+#[allow(clippy::too_many_arguments)]
+fn montones(f: &Frame, e: &mut Edits, u0: i32, u1: i32, w0: i32, w1: i32, alto: i32, salt: u64) {
+    let mut r = f.rng(salt);
+    // Lo de arriba: huesos y cueros podridos, tablas, trapos, loza rota y paja.
+    let resto = [WOOD_DARK, HIDE, SACK, CAL_SUCIA, GRASS_DRY, ADOBE_DARK, MUD, MUD];
+    f.surface(e, u0 - 1, u1 + 1, w0 - 1, w1 + 1, MUD);
+    // Dos o tres montones redondeados que se juntan.
+    let n = 2 + (r.next() % 2) as i32;
+    let picos: Vec<(f32, f32, f32)> = (0..n)
+        .map(|_| {
+            let cu = r.range(u0 + 2, u1 - 3) as f32 + 0.5;
+            let cw = r.range(w0 + 2, w1 - 3) as f32 + 0.5;
+            let rad = ((u1 - u0).min(w1 - w0) as f32 * (0.3 + r.f() * 0.2)).max(2.5);
+            (cu, cw, rad)
+        })
+        .collect();
+    for u in u0..u1 {
+        for w in w0..w1 {
+            let mut h = 0.0f32;
+            for &(cu, cw, rad) in &picos {
+                let d = ((u as f32 + 0.5 - cu).powi(2) + (w as f32 + 0.5 - cw).powi(2)).sqrt() / rad;
+                h = h.max((1.0 - d * d) * alto as f32);
+            }
+            // Los bordes se desparraman (talud), no cortan a pique.
+            let borde = (u - u0).min(u1 - 1 - u).min(w - w0).min(w1 - 1 - w) as f32;
+            let h = h * ((borde + 0.5) / 3.0).min(1.0);
+            let hh = (h + r.f() * 0.6 - 0.2).floor() as i32;
+            if hh <= 0 {
+                if r.f() < 0.15 {
+                    f.raw(e, u, 0, w, resto[(r.next() % resto.len() as u64) as usize]);
+                }
+                continue;
+            }
+            for y in 0..hh {
+                let arriba = y + 1 == hh && r.f() < 0.3;
+                let m = if arriba { resto[(r.next() % resto.len() as u64) as usize] } else if (u * 7 + w * 3 + y) % 5 < 2 { DIRT } else { MUD };
+                f.raw(e, u, y, w, m);
+            }
+        }
+    }
+}
+
+/// Basural en un baldío: montones de basura sobre el barro, a medio solar de la calle y una
+/// rueda de carreta rota. Va en el marco del solar (24 × 76).
+pub fn basural(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(17);
+    let (u0, w0) = (r.range(2, 5), r.range(6, 14));
+    let (u1, w1) = ((u0 + r.range(12, 16)).min(f.width - 2), w0 + r.range(14, 22));
+    // Asentado en el terreno (en la ladera, el barro rellena hasta la base).
+    f.foundation(t, e, u0 - 1, u1 + 1, w0 - 1, w1 + 1, MUD);
+    montones(f, e, u0, u1, w0, w1, 3, 18);
+    f.raw_fill(e, u1 - 1, u1, 0, 3, w0 + 2, w0 + 3, WOOD_DARK);
+}
+
+/// Basurero fuera de la muralla: tierra removida con montones de basura, la rampa por donde
+/// entran las carretillas, una carretilla volcando y un cerco de palo a pique.
+/// Marco: 60 × 60 (30 × 30 m).
+pub fn basurero(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.surface(e, 0, 60, 0, 60, DIRT);
+    f.foundation(t, e, 7, 53, 13, 55, MUD);
+    montones(f, e, 8, 52, 14, 54, 5, 21);
+    // Rampa de entrada desde el camino.
+    f.surface(e, 26, 34, 0, 14, DIRT_ROAD);
+    // Carretilla: cajón de tablas sobre una rueda, con dos varas.
+    f.raw_fill(e, 28, 31, 1, 2, 10, 13, WOOD);
+    f.raw_fill(e, 28, 31, 2, 3, 10, 11, WOOD);
+    f.raw_fill(e, 28, 31, 2, 3, 12, 13, WOOD);
+    f.raw(e, 29, 0, 13, IRON);
+    f.raw_fill(e, 28, 29, 1, 2, 7, 10, WOOD_DARK);
+    f.raw_fill(e, 30, 31, 1, 2, 7, 10, WOOD_DARK);
+    fence(f, e, 1, 59, 2, 59, 30);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1425,6 +1797,36 @@ mod tests {
 
     type Builder = fn(&TerrainGen, &mut Edits, &Frame);
     const HOUSES: [(&str, Builder); 3] = [("rancho", rancho), ("casa de azotea", casa_azotea), ("casa de altos", casa_altos)];
+
+    /// Escuela, convento, botica, médico, hospital, garita, cárcel, basurero y basural: tienen
+    /// vóxeles, caben en su marco (a tamaño real) y no cambian con la misma semilla.
+    #[test]
+    fn los_edificios_del_barrio_caben_en_su_marco() {
+        let t = TerrainGen::new(1726);
+        let edificios: [(&str, Builder, i32, i32, usize); 9] = [
+            ("escuela", escuela, 24, 32, 2000),
+            ("convento", convento, 60, 72, 15000),
+            ("botica", botica, 16, 24, 1000),
+            ("médico", casa_medico, 24, 36, 2000),
+            ("hospital", hospital_caridad, 72, 60, 15000),
+            ("garita del alcalde", garita_alcalde, 8, 8, 200),
+            ("cárcel", carcel, 48, 40, 8000),
+            ("basurero", basurero, 60, 60, 1000),
+            ("basural", basural, LOT_W, LOT_D, 150),
+        ];
+        for (name, b, wd, dp, min) in edificios {
+            let (mut a, mut c) = (Edits::default(), Edits::default());
+            let f = frame(&t, 7, wd, dp);
+            b(&t, &mut a, &f);
+            b(&t, &mut c, &f);
+            assert_eq!(sorted(&a), sorted(&c), "{name}: determinista");
+            assert!(a.design.len() >= min, "{name}: {} vóxeles", a.design.len());
+            for p in a.design.keys() {
+                let (u, _, w) = f.local(*p);
+                assert!((-1..=wd).contains(&u) && (-5..dp).contains(&w), "{name}: vóxel fuera del marco en u={u}, w={w}");
+            }
+        }
+    }
 
     #[test]
     fn misma_semilla_mismo_edificio() {

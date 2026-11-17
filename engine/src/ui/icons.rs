@@ -45,6 +45,20 @@ pub enum Icon {
     Hacienda,
     /// Población: dos adultos y un niño.
     Familia,
+    /// Educación: un libro abierto.
+    Escuela,
+    /// Botica: un frasco.
+    Botica,
+    /// Hospital: una cruz en un escudo.
+    Hospital,
+    /// Cárcel: una ventana con reja.
+    Carcel,
+    /// Alcalde de barrio: la vara de la justicia.
+    Alcalde,
+    /// Saneamiento: un montón de basura y moscas.
+    Basura,
+    /// Delito: una bolsa de monedas con una mano.
+    Delito,
 }
 
 /// Dibuja el ícono dentro de `r` con el color `c`.
@@ -229,6 +243,54 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32) {
         }
         Icon::Agua => {
             poly(&[(0.0, -0.8), (0.45, 0.05), (0.45, 0.3), (0.2, 0.7), (-0.2, 0.7), (-0.45, 0.3), (-0.45, 0.05)], true, st);
+        }
+        Icon::Escuela => {
+            poly(&[(0.0, -0.45), (-0.8, -0.6), (-0.8, 0.55), (0.0, 0.7), (0.8, 0.55), (0.8, -0.6)], true, st);
+            line((0.0, -0.45), (0.0, 0.7));
+            for k in 0..3 {
+                let y = -0.25 + k as f32 * 0.25;
+                line((-0.6, y - 0.05), (-0.15, y + 0.03));
+                line((0.15, y + 0.03), (0.6, y - 0.05));
+            }
+        }
+        Icon::Botica => {
+            poly(&[(-0.2, -0.8), (-0.2, -0.35), (-0.55, 0.1), (-0.55, 0.75), (0.55, 0.75), (0.55, 0.1), (0.2, -0.35), (0.2, -0.8)], true, st);
+            line((-0.3, -0.8), (0.3, -0.8));
+            line((-0.55, 0.25), (0.55, 0.25));
+            dot(0.0, 0.5, 0.1);
+        }
+        Icon::Hospital => {
+            poly(&[(-0.7, -0.7), (0.7, -0.7), (0.7, 0.1), (0.0, 0.8), (-0.7, 0.1)], true, st);
+            rect(-0.12, -0.5, 0.12, 0.35);
+            rect(-0.4, -0.22, 0.4, 0.05);
+        }
+        Icon::Carcel => {
+            rect(-0.7, -0.7, 0.7, 0.7);
+            for k in 0..4 {
+                let x = -0.45 + k as f32 * 0.3;
+                line((x, -0.7), (x, 0.7));
+            }
+            line((-0.7, 0.0), (0.7, 0.0));
+        }
+        Icon::Alcalde => {
+            line((0.0, -0.55), (0.0, 0.85));
+            circle(0.0, -0.7, 0.15);
+            line((-0.25, -0.3), (0.25, -0.3));
+            arc(0.0, 0.85, 0.35, PI, 2.0 * PI, thin);
+        }
+        Icon::Basura => {
+            poly(&[(-0.85, 0.7), (-0.45, 0.1), (-0.1, 0.25), (0.2, -0.15), (0.55, 0.2), (0.85, 0.7)], true, st);
+            dot(-0.4, -0.45, 0.07);
+            dot(0.05, -0.65, 0.07);
+            dot(0.45, -0.4, 0.07);
+            line((-0.3, 0.45), (0.3, 0.45));
+        }
+        Icon::Delito => {
+            poly(&[(-0.25, -0.55), (-0.55, 0.0), (-0.5, 0.65), (0.5, 0.65), (0.55, 0.0), (0.25, -0.55)], true, st);
+            line((-0.25, -0.55), (0.0, -0.75));
+            line((0.25, -0.55), (0.0, -0.75));
+            line((-0.1, 0.0), (0.1, 0.35));
+            line((0.1, 0.0), (-0.1, 0.35));
         }
         Icon::Familia => {
             circle(-0.45, -0.45, 0.22);

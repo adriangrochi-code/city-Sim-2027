@@ -128,6 +128,7 @@ pub fn city_steps() -> Vec<Act> {
         Game("calle curva", d::curve),
         Game("zonificar", d::zone),
         Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("escuelas, salud, seguridad y saneamiento", d::barrio),
         Game("puente", d::bridge),
         Bridge,
         WaitIdle("puente"),
@@ -137,6 +138,7 @@ pub fn city_steps() -> Vec<Act> {
         Shot("motor-ciudad-trazado"),
         Game("crecer 60 meses", d::grow),
         WaitIdle("ciudad crecida"),
+        Game("escuelas, salud y delito después de crecer", d::barrio_informe),
         Game("un mes al ritmo del juego", d::month_realtime),
         WaitIdle("re-mallado de un mes"),
         // Vecinos y vehículos: la mañana de un día hábil.
@@ -226,6 +228,57 @@ pub fn city_steps() -> Vec<Act> {
         Hour(11.0),
         WaitIdle("cantera"),
         Shot("motor-servicios-cantera"),
+        // Educación, salud, seguridad y saneamiento: cada edificio de cerca, un basural y las capas.
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Escuela, 34.0)),
+        Hour(11.0),
+        WaitIdle("escuela"),
+        Shot("motor-barrio-escuela"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Convento, 85.0)),
+        Hour(11.0),
+        WaitIdle("convento"),
+        Shot("motor-barrio-convento"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Botica, 26.0)),
+        Hour(11.0),
+        WaitIdle("botica"),
+        Shot("motor-barrio-botica"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Medico, 32.0)),
+        Hour(11.0),
+        WaitIdle("médico"),
+        Shot("motor-barrio-medico"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Hospital, 85.0)),
+        Hour(11.0),
+        WaitIdle("hospital"),
+        Shot("motor-barrio-hospital"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Carcel, 60.0)),
+        Hour(11.0),
+        WaitIdle("cárcel"),
+        Shot("motor-barrio-carcel"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Alcalde, 18.0)),
+        Hour(11.0),
+        WaitIdle("alcalde"),
+        Shot("motor-barrio-alcalde"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Basurero, 70.0)),
+        Hour(11.0),
+        WaitIdle("basurero"),
+        Shot("motor-barrio-basurero"),
+        CamFn(d::view_basural),
+        Hour(11.0),
+        WaitIdle("basural"),
+        Shot("motor-barrio-basural"),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        Hour(11.0),
+        WaitIdle("capas del barrio"),
+        UiShot("motor-ui-capa-educacion", |s, u| ui_layer(s, u, crate::city::services::Layer::Educacion)),
+        UiShot("motor-ui-capa-salud", |s, u| ui_layer(s, u, crate::city::services::Layer::Salud)),
+        UiShot("motor-ui-capa-saneamiento", |s, u| ui_layer(s, u, crate::city::services::Layer::Saneamiento)),
+        UiShot("motor-ui-capa-delito", |s, u| ui_layer(s, u, crate::city::services::Layer::Delito)),
+        UiShot("motor-ui-cajon-educacion", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Educacion)),
+        UiShot("motor-ui-cajon-salud", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Salud)),
+        UiShot("motor-ui-cajon-seguridad", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Seguridad)),
+        UiShot("motor-ui-cajon-saneamiento", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Saneamiento)),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Escuela, 120.0)),
+        WaitIdle("ficha de la escuela"),
+        UiShot("motor-ui-ficha-escuela", |s, u| ui_ficha_servicio(s, u, crate::city::services::Kind::Escuela)),
         Game("incendio con viento del oeste", d::incendio),
         CamFn(d::view_fire),
         Hour(11.0),
@@ -371,6 +424,27 @@ fn ui_services(s: &mut Session, u: &mut GameUi) {
     g.set_tool(4);
     g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
     u.open = Some(ui::Category::Servicios);
+}
+
+/// Una pestaña del cajón de Servicios (educación, salud, seguridad, saneamiento).
+fn ui_grupo(s: &mut Session, u: &mut GameUi, g: crate::city::services::Grupo) {
+    let game = s.game.as_mut().unwrap();
+    game.layer = None;
+    game.inspected = None;
+    game.set_tool(7);
+    game.grupo = g;
+    u.open = Some(ui::Category::Servicios);
+    u.time += 30.0;
+}
+
+/// La ficha del primer edificio de un tipo.
+fn ui_ficha_servicio(s: &mut Session, u: &mut GameUi, k: crate::city::services::Kind) {
+    let game = s.game.as_mut().unwrap();
+    game.layer = None;
+    game.set_tool(7);
+    game.inspected = game.city.services.of_kind(k).next().map(|b| b.c);
+    u.open = None;
+    u.time += 30.0;
 }
 
 /// Una capa de datos (agua o fuego) con el cajón de capas abierto.
@@ -771,8 +845,11 @@ impl Tour {
                     let summary = |s: &Session| {
                         let c = &s.game.as_ref().unwrap().city;
                         let sv = &c.services;
-                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), serde_json::to_string(&c.poblacion).unwrap_or_default())
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default())
                     };
+                    // Lo derivado del barrio (escuelas, delito por solar), al día con el estado
+                    // que se guarda (al cargar se recalcula igual).
+                    s.game.as_mut().unwrap().city.refresh_barrio();
                     let before = summary(s);
                     let t0 = Instant::now();
                     u.menu.perform(MenuAction::Save, s, Some(r), &mut u.game_ui);

@@ -540,6 +540,74 @@ pub fn servicios(s: &mut Session) -> String {
     format!("{} · {} servicios · agua para {} solares", out.join(" · "), g.city.services.buildings.len(), g.city.services.water.len())
 }
 
+/// Educación, salud, seguridad y saneamiento: escuela y convento, botica, médico y hospital de
+/// caridad, garita del alcalde de barrio y cárcel del Cabildo cerca de la plaza, y el basurero
+/// sobre el camino al campo; el cabildo paga al maestro y la asistencia a los pobres (la
+/// recolección de basura queda sin aprobar: así se ven los basurales).
+pub fn barrio(s: &mut Session) -> String {
+    use super::economy::{Ordinance, Res};
+    {
+        let g = s.game.as_mut().unwrap();
+        g.city.money += 60_000;
+        g.city.economy.stocks[Res::Ladrillos as usize].amount += 1500.0;
+        g.city.economy.stocks[Res::Piedra as usize].amount += 800.0;
+    }
+    let (f, side) = plaza_frame(0.0);
+    let mut out = vec![
+        place(s, Kind::Carcel, PLAZA + f * (BLOCK * 0.9), 300.0),
+        place(s, Kind::Escuela, PLAZA - side * (BLOCK * 1.2) - f * (BLOCK * 0.6), 300.0),
+        place(s, Kind::Botica, PLAZA + side * (BLOCK * 0.9) - f * (BLOCK * 0.3), 250.0),
+        place(s, Kind::Alcalde, PLAZA - side * (BLOCK * 1.6) + f * (BLOCK * 1.5), 250.0),
+        place(s, Kind::Alcalde, PLAZA + side * (BLOCK * 1.8) + f * (BLOCK * 1.6), 250.0),
+        place(s, Kind::Medico, PLAZA + side * (BLOCK * 1.5) - f * (BLOCK * 1.6), 300.0),
+        place(s, Kind::Hospital, PLAZA - f * (BLOCK * 2.2), 450.0),
+        place(s, Kind::Convento, PLAZA + side * (BLOCK * 2.4) + f * (BLOCK * 0.4), 450.0),
+    ];
+    // El basurero, sobre el camino al campo, fuera de la ciudad.
+    let end = (*CAMINO_END.lock().unwrap()).unwrap_or(PLAZA + side * 900.0);
+    let dir = (end - PLAZA).normalize_or(side);
+    out.push(place(s, Kind::Basurero, PLAZA + dir * 650.0, 400.0));
+    let g = s.game.as_mut().unwrap();
+    for o in [Ordinance::EscuelasPrimerasLetras, Ordinance::HospitalCaridad] {
+        if !g.city.economy.is_on(o) {
+            g.city.economy.active.push(o);
+        }
+    }
+    g.city.refresh_barrio();
+    let b = g.city.barrio_resumen();
+    format!("{} · niños con escuela {}/{} · salud {:.0} % · delito {:.2}", out.join(" · "), b.niños.1, b.niños.0, b.salud * 100.0, b.delito)
+}
+
+/// Resumen de escuelas, salud, saneamiento y delito después de crecer.
+pub fn barrio_informe(s: &mut Session) -> String {
+    let g = s.game.as_ref().unwrap();
+    let b = g.city.barrio_resumen();
+    let p = &g.city.poblacion;
+    format!(
+        "niños con escuela {}/{} · saben leer {:.0} % · salud {:.0} % · insalubridad {:.0} % ({} basurales, {} pozos sucios, {} brotes) · delitos en el año {:?} ({} en total, {} presos)",
+        b.niños.1,
+        b.niños.0,
+        p.stats.lectura * 100.0,
+        b.salud * 100.0,
+        b.insalubre * 100.0,
+        b.basurales,
+        b.pozos_sucios,
+        b.brotes,
+        b.delitos_año,
+        g.city.services.barrio.delitos.total,
+        b.presos
+    )
+}
+
+/// Cámara sobre un basural (o, si no hay, sobre un rancho con su letrina).
+pub fn view_basural(s: &Session) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let id = c.services.barrio.basurales.iter().copied().min_by_key(|id| c.lots.lots[id].c.distance(PLAZA) as i32).or_else(|| c.lots.lots.values().filter(|l| l.level == 1).min_by_key(|l| l.c.distance(PLAZA) as i32).map(|l| l.id))?;
+    let l = &c.lots.lots[&id];
+    let p = l.c + l.f * 6.0;
+    Some([p.x, p.y, 34.0, l.f.x.atan2(l.f.y).to_degrees() + 200.0, 38.0])
+}
+
 /// La iglesia matriz: se financian las fases que la ciudad pueda pagar y se deja la siguiente
 /// en obra (con andamios) para la captura. Si la ciudad todavía no llega a los 1.000
 /// habitantes, la obra se fuerza para poder ver la fase (lo dice el informe).

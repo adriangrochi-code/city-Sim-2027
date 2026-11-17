@@ -150,7 +150,9 @@ Se suman a la producción de base del entorno rural. Cantidades: **estimaciones 
 
 ## 9. Interfaz
 
-- **Servicios**: pozo, aljibe, aguadores, serenos, lazareto e iglesia (financiar la fase).
+- **Servicios**: pestañas de agua (pozo, aljibe, aguadores), educación, salud (con el lazareto),
+  seguridad (serenos, alcalde de barrio, cárcel), saneamiento e iglesia (financiar la fase); ver
+  [educacion-salud-seguridad.md](educacion-salud-seguridad.md).
 - **Producción**: chacra, estancia, horno, cantera (atahona y saladero, próximamente).
 - **Puerto y muralla**: muelle, aduana y muralla (dos clics por tramo; vista previa con los
   portones).
@@ -171,4 +173,5 @@ fuegos, ruinas, epidemia, cuarentenas y el estado del azar. Los vóxeles se rege
   [edificios-ampliables.md](edificios-ampliables.md)) y agentes visibles (aguadores, serenos,
   barcos y lanchas) — los barcos esperan al sistema de vehículos.
 - Atahona, saladero y ciudadela; la decisión final de la muralla.
-- Contaminación de pozos por pozos negros (ver politicas-y-recursos.md, sección 5).
+- ~~Contaminación de pozos por pozos negros~~: hecho, junto con escuelas, salud, delito y
+  basurales (ver [educacion-salud-seguridad.md](educacion-salud-seguridad.md)).

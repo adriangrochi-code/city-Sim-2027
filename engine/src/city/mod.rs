@@ -246,7 +246,20 @@ impl City {
             contribucion: self.economy.tax(economy::Tax::Contribucion),
             ordenanzas: self.economy.active.clone(),
             iglesia: self.plaza.is_some(),
+            servicios: self.servicios_por_lote(),
+            con_servicios: true,
         }
+    }
+
+    /// Escuela, salud, insalubridad y delito de cada solar, por id (ver `services::barrio`).
+    pub fn servicios_por_lote(&self) -> Vec<poblacion::ServiciosLote> {
+        let br = &self.services.barrio;
+        let max = self.lots.lots.keys().next_back().map_or(0, |&k| k as usize + 1);
+        let mut v = vec![poblacion::ServiciosLote::default(); max];
+        for l in self.lots.lots.values().filter(|l| l.level > 0) {
+            v[l.id as usize] = poblacion::ServiciosLote { escuela: br.escuela_de(l.id), salud: br.salud_de(l.id), insalubre: br.insalubre_de(l.id), delito: br.delito_de(l.id), vigilancia: br.vigilancia_de(l.id) };
+        }
+        v
     }
 
     /// El entorno de la población como está ahora (sin llegadas), para la interfaz.

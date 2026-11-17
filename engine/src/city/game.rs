@@ -76,6 +76,8 @@ pub struct Game {
     pub service: Placeable,
     /// Capa de datos sobre el mapa (agua, serenos, fuego).
     pub layer: Option<Layer>,
+    /// Pestaña abierta del cajón de Servicios (agua, educación, salud, seguridad…).
+    pub grupo: services::Grupo,
     /// Órdenes de la interfaz que producen vóxeles (se cumplen en `update`).
     pub orders: Vec<Order>,
 }
@@ -131,6 +133,7 @@ impl Default for Game {
             density: Density::Baja,
             service: Placeable::Building(Kind::Pozo),
             layer: None,
+            grupo: services::Grupo::Agua,
             orders: Vec::new(),
             plaza_angle: 0.0,
             free_draw: false,
@@ -180,6 +183,11 @@ impl Game {
         }
         self.tool = Tool::Service;
         self.service = p;
+        if let Placeable::Building(k) = p {
+            if services::info(k).grupo != services::Grupo::Otros {
+                self.grupo = services::info(k).grupo;
+            }
+        }
         self.stage = 0;
         self.painting = false;
     }
@@ -504,8 +512,21 @@ impl Game {
                 if self.city.services.fires.burning.contains_key(&l.id) {
                     i.lines.push("¡Está ardiendo!".into());
                 }
+                let br = &self.city.services.barrio;
+                if l.kind() == Some(ZoneKind::Residencial) {
+                    let es = br.escuela_de(l.id);
+                    i.lines.push(format!("Escuela: {}", if es <= 0.0 { "no hay lugar cerca" } else if es < 0.9 { "las aulas del convento" } else { "escuela de primeras letras" }));
+                }
+                let sa = br.salud_de(l.id);
+                i.lines.push(format!("Salud: {}", if sa <= 0.0 { "nadie atiende" } else if sa < 0.5 { "botica o médico" } else { "bien atendido" }));
+                let ins = br.insalubre_de(l.id);
+                i.lines.push(format!("Insalubridad: {} % ({})", (ins * 100.0).round() as i32, if ins < 0.2 { "sana" } else if ins < 0.4 { "regular" } else { "pozos negros, agua mala o basura" }));
+                let d = br.delito_de(l.id);
+                i.lines.push(format!("Delito: {} · vigilancia {} %", if d < 0.1 { "bajo" } else if d < 0.25 { "medio" } else { "alto" }, (br.vigilancia_de(l.id) * 100.0).round() as i32));
             } else if self.city.services.ruins.contains(&l.id) {
                 i.lines.push("Ruinas: se quemó; volverá a edificarse".into());
+            } else if self.city.services.barrio.basurales.contains(&l.id) {
+                i.lines.push("Basural: la basura del barrio; ensucia el agua y trae enfermedades".into());
             }
             if let Some((k, _)) = zone_of(l.zone) {
                 let d = self.city.demand().of(k);
@@ -670,6 +691,10 @@ impl Game {
         let layer = self.layer.or(match (self.tool, self.service) {
             (Tool::Service, Placeable::Building(Kind::Pozo | Kind::Aljibe | Kind::Aguadores)) => Some(Layer::Agua),
             (Tool::Service, Placeable::Building(Kind::Serenos)) => Some(Layer::Serenos),
+            (Tool::Service, Placeable::Building(Kind::Escuela | Kind::Convento)) => Some(Layer::Educacion),
+            (Tool::Service, Placeable::Building(Kind::Botica | Kind::Medico | Kind::Hospital)) => Some(Layer::Salud),
+            (Tool::Service, Placeable::Building(Kind::Alcalde | Kind::Carcel)) => Some(Layer::Delito),
+            (Tool::Service, Placeable::Building(Kind::Basurero)) => Some(Layer::Saneamiento),
             _ => None,
         });
         if let Some(layer) = layer {
@@ -781,9 +806,16 @@ impl Game {
     fn layer_overlay(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, layer: Layer) {
         let s = &self.city.services;
         for l in self.city.lots.lots.values() {
-            if l.level == 0 && !(layer == Layer::Fuego && s.ruins.contains(&l.id)) {
+            let baldio_visible = match layer {
+                Layer::Fuego => s.ruins.contains(&l.id),
+                Layer::Saneamiento | Layer::Delito => s.barrio.basurales.contains(&l.id) || s.ruins.contains(&l.id),
+                _ => false,
+            };
+            if l.level == 0 && !baldio_visible {
                 continue;
             }
+            let br = &s.barrio;
+            let residencial = l.kind() == Some(ZoneKind::Residencial);
             let col = match layer {
                 Layer::Agua => match s.water_of(l.id) {
                     w if w <= 0.0 => [0.95, 0.35, 0.25, 0.5],
@@ -799,19 +831,58 @@ impl Game {
                     let r = self.city.fire_risk(l);
                     [0.95, 0.85 - r * 0.6, 0.3, 0.25 + r * 0.4]
                 }
+                // Educación: verde las casas con escuela, rojo las que no tienen.
+                Layer::Educacion if !residencial => continue,
+                Layer::Educacion => match br.escuela_de(l.id) {
+                    x if x <= 0.0 => [0.95, 0.35, 0.25, 0.5],
+                    x if x < 0.9 => [0.6, 0.85, 0.35, 0.55],
+                    _ => [0.25, 0.75, 0.3, 0.6],
+                },
+                // Salud: de rojo (nadie atiende) a verde (bien atendido).
+                Layer::Salud => {
+                    let x = br.salud_de(l.id);
+                    [0.95 - x * 0.7, 0.35 + x * 0.45, 0.3, 0.5]
+                }
+                // Saneamiento: celeste lo sano, amarillo lo regular, pardo y rojo lo insalubre;
+                // los basurales, negros.
+                Layer::Saneamiento if l.level == 0 => [0.12, 0.08, 0.05, 0.85],
+                Layer::Saneamiento => match br.insalubre_de(l.id) {
+                    x if x < 0.15 => [0.3, 0.7, 0.85, 0.55],
+                    x if x < 0.3 => [0.85, 0.8, 0.3, 0.55],
+                    x if x < 0.45 => [0.85, 0.45, 0.15, 0.6],
+                    _ => [0.7, 0.12, 0.08, 0.7],
+                },
+                // Delito: mapa de calor de amarillo pálido a rojo oscuro; baldíos y ruinas, grises.
+                Layer::Delito if l.level == 0 => [0.3, 0.28, 0.28, 0.7],
+                Layer::Delito => match br.delito_de(l.id) {
+                    x if x < 0.08 => [1.0, 0.95, 0.65, 0.4],
+                    x if x < 0.16 => [1.0, 0.78, 0.25, 0.55],
+                    x if x < 0.24 => [0.95, 0.45, 0.12, 0.65],
+                    _ => [0.7, 0.05, 0.05, 0.75],
+                },
             };
             quad(out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
         // Alcance de cada fuente o puesto.
         for b in s.buildings.values() {
+            let g = b.info().grupo;
             let show = match layer {
                 Layer::Agua => b.info().cap > 0,
                 Layer::Serenos => b.kind == Kind::Serenos,
                 Layer::Fuego => b.info().fire_reach > 0.0,
+                Layer::Educacion => g == services::Grupo::Educacion,
+                Layer::Salud => matches!(b.kind, Kind::Botica | Kind::Medico | Kind::Hospital),
+                Layer::Saneamiento => b.kind == Kind::Basurero,
+                Layer::Delito => g == services::Grupo::Seguridad,
             };
             if show {
                 let r = if layer == Layer::Fuego { b.info().fire_reach } else { b.info().radius };
                 circle(out, t, b.c, r, [0.35, 0.65, 1.0, 0.7]);
+            }
+            // Pozos y aljibes sucios (pozos negros y basura alrededor).
+            if layer == Layer::Saneamiento && matches!(b.kind, Kind::Pozo | Kind::Aljibe) {
+                let x = b.contaminacion;
+                circle(out, t, b.c, super::services::barrio::RADIO_POZO_NEGRO, [0.4 + x * 0.6, 0.75 - x * 0.5, 0.95 - x * 0.7, 0.85]);
             }
         }
     }

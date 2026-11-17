@@ -286,7 +286,7 @@ fn guardar_y_cargar_da_la_misma_poblacion() {
     p.reconstruir();
     assert!(p == a.p, "IGUAL al cargar");
     assert_eq!(p.estadisticas(), a.p.stats);
-    let mut b = CiudadSintetica { p, lotes: a.lotes.clone(), mes: a.mes, ordenanzas: a.ordenanzas.clone(), inmigracion: a.inmigracion, precio_pan: a.precio_pan, epidemia_cada: a.epidemia_cada };
+    let mut b = CiudadSintetica { p, lotes: a.lotes.clone(), mes: a.mes, ordenanzas: a.ordenanzas.clone(), inmigracion: a.inmigracion, precio_pan: a.precio_pan, epidemia_cada: a.epidemia_cada, servicios: a.servicios };
     for _ in 0..24 {
         a.paso();
         b.paso();

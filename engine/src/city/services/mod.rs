@@ -2,7 +2,8 @@
 //! sus faroles, lazareto, el campo (chacras y estancias), hornos y canteras, la aduana, y los
 //! sistemas que dependen de ellos: incendios ([`fires`]), el puerto y lo que trae
 //! ([`port`]), las epidemias ([`epidemics`]) y las grandes obras por fases: la iglesia matriz y
-//! la muralla ([`works`]). Porte de `scripts/city/{services,fires,port,wall,church,epidemics}.gd`
+//! la muralla ([`works`]); además escuelas, salud, saneamiento y seguridad de los barrios
+//! ([`barrio`]). Porte de `scripts/city/{services,fires,port,wall,church,epidemics}.gd`
 //! del prototipo; el diseño y las fuentes están en `docs/sistemas/servicios.md`.
 //!
 //! Todo vive en [`Services`] (dentro de `City`) y se engancha a la ciudad con pocos puntos:
@@ -16,6 +17,7 @@
 //! siguientes agregan tipos (bomba de incendios, red de agua corriente, comisaría…) sin tocar
 //! la lógica de cobertura.
 
+pub mod barrio;
 pub mod epidemics;
 pub mod fires;
 pub mod port;
@@ -51,6 +53,43 @@ pub enum Kind {
     Horno,
     Cantera,
     Aduana,
+    // --- Educación, salud, seguridad y saneamiento (ver [`barrio`]) ---
+    Escuela,
+    Convento,
+    Botica,
+    Medico,
+    Hospital,
+    Alcalde,
+    Carcel,
+    Basurero,
+}
+
+/// Grupos de servicios (pestañas del cajón de Servicios y capas de datos).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Grupo {
+    Agua,
+    Educacion,
+    Salud,
+    Seguridad,
+    Saneamiento,
+    /// Iglesia, campo, industria, puerto.
+    Otros,
+}
+
+impl Grupo {
+    /// Pestañas del cajón de Servicios (en este orden).
+    pub const PESTAÑAS: [Grupo; 6] = [Grupo::Agua, Grupo::Educacion, Grupo::Salud, Grupo::Seguridad, Grupo::Saneamiento, Grupo::Otros];
+
+    pub fn nombre(self) -> &'static str {
+        match self {
+            Grupo::Agua => "Agua",
+            Grupo::Educacion => "Educación",
+            Grupo::Salud => "Salud",
+            Grupo::Seguridad => "Seguridad",
+            Grupo::Saneamiento => "Saneamiento",
+            Grupo::Otros => "Iglesia",
+        }
+    }
 }
 
 type Builder = fn(&TerrainGen, &mut Edits, &Frame);
@@ -77,19 +116,37 @@ pub struct Info {
     pub size: (f32, f32),
     pub frame: (i32, i32),
     pub builder: Builder,
+    /// Grupo (pestaña del cajón).
+    pub grupo: Grupo,
+    /// Escuelas: alumnos; salud: personas que atiende; cárcel: presos. En las escuelas, la
+    /// salud y la seguridad, `quality` es lo que rinde (0 a 1) y `radius` el alcance.
+    pub plazas: i32,
 }
 
-pub const CATALOG: [Info; 10] = [
-    Info { kind: Kind::Pozo, name: "Pozo de balde", key: "pozo", desc: "Agua de pozo para unas 60 personas cercanas. Calidad regular; los talleres cercanos la ensucian.", cost: 400, ladrillos: 0.0, piedra: 20.0, upkeep: 4, cap: 60, quality: 0.7, radius: 110.0, fire_reach: 140.0, size: (5.0, 5.0), frame: (10, 10), builder: colonial::pozo },
-    Info { kind: Kind::Aljibe, name: "Aljibe público", key: "aljibe", desc: "Junta el agua de lluvia de los techos en una cisterna. Buena agua para unas 160 personas; en la sequía rinde menos.", cost: 1500, ladrillos: 60.0, piedra: 20.0, upkeep: 12, cap: 160, quality: 1.0, radius: 170.0, fire_reach: 180.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::aljibe_publico },
-    Info { kind: Kind::Aguadores, name: "Puesto de aguadores", key: "aguadores", desc: "Los aguadores llenan sus pipas en un arroyo o manantial y las reparten en carro por las calles: llegan lejos, pero solo a donde llega la calle.", cost: 2500, ladrillos: 30.0, piedra: 0.0, upkeep: 30, cap: 360, quality: 0.9, radius: 1100.0, fire_reach: 450.0, size: (14.0, 18.0), frame: (28, 36), builder: colonial::puesto_aguadores },
-    Info { kind: Kind::Serenos, name: "Puesto de serenos", key: "serenos", desc: "De noche los serenos encienden los faroles de sebo, cantan la hora y dan la voz de fuego: los incendios se atacan antes.", cost: 1200, ladrillos: 40.0, piedra: 0.0, upkeep: 25, cap: 0, quality: 0.0, radius: 260.0, fire_reach: 0.0, size: (6.0, 8.0), frame: (12, 16), builder: colonial::puesto_serenos },
-    Info { kind: Kind::Lazareto, name: "Lazareto", key: "lazareto", desc: "Cuarentena para los barcos con fiebre a bordo: la enfermedad no entra a la ciudad. Lejos de la plaza y junto a la costa.", cost: 3000, ladrillos: 150.0, piedra: 50.0, upkeep: 25, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (30.0, 24.0), frame: (60, 48), builder: colonial::lazareto },
-    Info { kind: Kind::Chacra, name: "Chacra", key: "chacra", desc: "Trigo y maíz en el ejido para el pan de la ciudad. La cosecha depende del año: la sequía y las heladas la achican.", cost: 800, ladrillos: 0.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (60.0, 80.0), frame: (120, 160), builder: colonial::chacra },
-    Info { kind: Kind::Estancia, name: "Estancia", key: "estancia", desc: "Ganado en el campo, lejos de la ciudad: carne, cueros y sebo. Las pasturas siguen al clima.", cost: 3000, ladrillos: 0.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (50.0, 45.0), frame: (100, 90), builder: colonial::estancia },
-    Info { kind: Kind::Horno, name: "Horno de ladrillos", key: "horno", desc: "Cuece ladrillos con barro de un arroyo o de la costa. Las casas de azotea, las obras y la iglesia los necesitan. Echa humo: lejos de la plaza.", cost: 2000, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 24.0), frame: (48, 48), builder: colonial::horno_ladrillos },
-    Info { kind: Kind::Cantera, name: "Cantera de piedra", key: "cantera", desc: "Saca piedra para empedrar, para los cimientos de la iglesia y para la muralla. Ruidosa: lejos de la plaza.", cost: 1800, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (28.0, 22.0), frame: (56, 44), builder: colonial::cantera },
-    Info { kind: Kind::Aduana, name: "Aduana", key: "aduana", desc: "Revisa lo que entra y sale por el muelle y cobra los derechos: sin aduana, buena parte del comercio se va por el contrabando.", cost: 4000, ladrillos: 200.0, piedra: 80.0, upkeep: 30, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 20.0), frame: (48, 40), builder: colonial::aduana },
+pub const CATALOG: [Info; 18] = [
+    Info { kind: Kind::Pozo, name: "Pozo de balde", key: "pozo", desc: "Agua de pozo para unas 60 personas cercanas. Calidad regular; los talleres cercanos la ensucian.", cost: 400, ladrillos: 0.0, piedra: 20.0, upkeep: 4, cap: 60, quality: 0.7, radius: 110.0, fire_reach: 140.0, size: (5.0, 5.0), frame: (10, 10), builder: colonial::pozo, grupo: Grupo::Agua, plazas: 0 },
+    Info { kind: Kind::Aljibe, name: "Aljibe público", key: "aljibe", desc: "Junta el agua de lluvia de los techos en una cisterna. Buena agua para unas 160 personas; en la sequía rinde menos.", cost: 1500, ladrillos: 60.0, piedra: 20.0, upkeep: 12, cap: 160, quality: 1.0, radius: 170.0, fire_reach: 180.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::aljibe_publico, grupo: Grupo::Agua, plazas: 0 },
+    Info { kind: Kind::Aguadores, name: "Puesto de aguadores", key: "aguadores", desc: "Los aguadores llenan sus pipas en un arroyo o manantial y las reparten en carro por las calles: llegan lejos, pero solo a donde llega la calle.", cost: 2500, ladrillos: 30.0, piedra: 0.0, upkeep: 30, cap: 360, quality: 0.9, radius: 1100.0, fire_reach: 450.0, size: (14.0, 18.0), frame: (28, 36), builder: colonial::puesto_aguadores, grupo: Grupo::Agua, plazas: 0 },
+    Info { kind: Kind::Serenos, name: "Puesto de serenos", key: "serenos", desc: "De noche los serenos encienden los faroles de sebo, cantan la hora y dan la voz de fuego: los incendios se atacan antes.", cost: 1200, ladrillos: 40.0, piedra: 0.0, upkeep: 25, cap: 0, quality: 0.3, radius: 260.0, fire_reach: 0.0, size: (6.0, 8.0), frame: (12, 16), builder: colonial::puesto_serenos, grupo: Grupo::Seguridad, plazas: 0 },
+    Info { kind: Kind::Lazareto, name: "Lazareto", key: "lazareto", desc: "Cuarentena para los barcos con fiebre a bordo: la enfermedad no entra a la ciudad. Lejos de la plaza y junto a la costa.", cost: 3000, ladrillos: 150.0, piedra: 50.0, upkeep: 25, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (30.0, 24.0), frame: (60, 48), builder: colonial::lazareto, grupo: Grupo::Salud, plazas: 0 },
+    Info { kind: Kind::Chacra, name: "Chacra", key: "chacra", desc: "Trigo y maíz en el ejido para el pan de la ciudad. La cosecha depende del año: la sequía y las heladas la achican.", cost: 800, ladrillos: 0.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (60.0, 80.0), frame: (120, 160), builder: colonial::chacra, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Estancia, name: "Estancia", key: "estancia", desc: "Ganado en el campo, lejos de la ciudad: carne, cueros y sebo. Las pasturas siguen al clima.", cost: 3000, ladrillos: 0.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (50.0, 45.0), frame: (100, 90), builder: colonial::estancia, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Horno, name: "Horno de ladrillos", key: "horno", desc: "Cuece ladrillos con barro de un arroyo o de la costa. Las casas de azotea, las obras y la iglesia los necesitan. Echa humo: lejos de la plaza.", cost: 2000, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 24.0), frame: (48, 48), builder: colonial::horno_ladrillos, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Cantera, name: "Cantera de piedra", key: "cantera", desc: "Saca piedra para empedrar, para los cimientos de la iglesia y para la muralla. Ruidosa: lejos de la plaza.", cost: 1800, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (28.0, 22.0), frame: (56, 44), builder: colonial::cantera, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Aduana, name: "Aduana", key: "aduana", desc: "Revisa lo que entra y sale por el muelle y cobra los derechos: sin aduana, buena parte del comercio se va por el contrabando.", cost: 4000, ladrillos: 200.0, piedra: 80.0, upkeep: 30, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 20.0), frame: (48, 40), builder: colonial::aduana, grupo: Grupo::Otros, plazas: 0 },
+    // Educación: la escuela del cabildo (gratis para los pobres si el cabildo paga al maestro) y
+    // las aulas del convento. Alumnos de 6 a 12 años; alcance a pie.
+    Info { kind: Kind::Escuela, name: "Escuela de primeras letras", key: "escuela", desc: "Un maestro enseña a leer, escribir, contar y la doctrina a unos cien niños de 6 a 12 años del barrio. Con la ordenanza de escuelas, el cabildo le paga y los pobres no pagan.", cost: 1500, ladrillos: 50.0, piedra: 10.0, upkeep: 35, cap: 0, quality: 1.0, radius: 400.0, fire_reach: 0.0, size: (12.0, 16.0), frame: (24, 32), builder: colonial::escuela, grupo: Grupo::Educacion, plazas: 100 },
+    Info { kind: Kind::Convento, name: "Convento con aulas", key: "convento", desc: "Los frailes enseñan primeras letras y latín a unos sesenta niños en el claustro; llega lejos y cuesta poco por mes, pero levantarlo es caro. Uno por ciudad.", cost: 5000, ladrillos: 250.0, piedra: 80.0, upkeep: 15, cap: 0, quality: 0.8, radius: 650.0, fire_reach: 0.0, size: (30.0, 36.0), frame: (60, 72), builder: colonial::convento, grupo: Grupo::Educacion, plazas: 60 },
+    // Salud: botica, médico y cirujano (va a las casas por la calle) y el hospital de caridad.
+    Info { kind: Kind::Botica, name: "Botica", key: "botica", desc: "El boticario prepara remedios para unas 400 personas cercanas: algo menos de enfermedad, poco alcance.", cost: 900, ladrillos: 20.0, piedra: 0.0, upkeep: 8, cap: 0, quality: 0.35, radius: 300.0, fire_reach: 0.0, size: (8.0, 12.0), frame: (16, 24), builder: colonial::botica, grupo: Grupo::Salud, plazas: 400 },
+    Info { kind: Kind::Medico, name: "Médico y cirujano", key: "medico", desc: "Casa del médico y cirujano, que sale a caballo a ver enfermos: unas 700 personas, solo por la calle (como los aguadores).", cost: 1400, ladrillos: 40.0, piedra: 0.0, upkeep: 30, cap: 0, quality: 0.5, radius: 900.0, fire_reach: 0.0, size: (12.0, 18.0), frame: (24, 36), builder: colonial::casa_medico, grupo: Grupo::Salud, plazas: 700 },
+    Info { kind: Kind::Hospital, name: "Hospital de caridad", key: "hospital", desc: "Salas de camas alrededor de un patio, capilla y botica: atiende a unas 1.500 personas de su red de calles. Baja la mortalidad, sobre todo la de los niños y los pobres.", cost: 6000, ladrillos: 300.0, piedra: 100.0, upkeep: 60, cap: 0, quality: 0.85, radius: 1200.0, fire_reach: 0.0, size: (36.0, 30.0), frame: (72, 60), builder: colonial::hospital_caridad, grupo: Grupo::Salud, plazas: 1500 },
+    // Seguridad: el alcalde de barrio (los serenos ya están) y la cárcel del cabildo.
+    Info { kind: Kind::Alcalde, name: "Garita del alcalde de barrio", key: "alcalde", desc: "El alcalde de barrio ronda su cuartel, conoce a los vecinos y prende a los ladrones: menos robos a su alrededor.", cost: 300, ladrillos: 10.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.35, radius: 220.0, fire_reach: 0.0, size: (4.0, 4.0), frame: (8, 8), builder: colonial::garita_alcalde, grupo: Grupo::Seguridad, plazas: 0 },
+    Info { kind: Kind::Carcel, name: "Cárcel del Cabildo", key: "carcel", desc: "Calabozos con cuerpo de guardia cerca de la plaza: la guardia vigila el centro y, con lugar para treinta presos, los ladrones lo piensan dos veces en toda la ciudad. Una por ciudad.", cost: 5000, ladrillos: 200.0, piedra: 120.0, upkeep: 45, cap: 0, quality: 0.3, radius: 600.0, fire_reach: 0.0, size: (24.0, 20.0), frame: (48, 40), builder: colonial::carcel, grupo: Grupo::Seguridad, plazas: 30 },
+    // Saneamiento: el hueco donde las carretillas descargan la basura.
+    Info { kind: Kind::Basurero, name: "Basurero fuera de la muralla", key: "basurero", desc: "Un hueco lejos de las casas donde las carretillas descargan la basura: con la recolección, los basurales del barrio desaparecen. Ensucia los pozos cercanos.", cost: 300, ladrillos: 0.0, piedra: 0.0, upkeep: 5, cap: 0, quality: 0.0, radius: 1600.0, fire_reach: 0.0, size: (30.0, 30.0), frame: (60, 60), builder: colonial::basurero, grupo: Grupo::Saneamiento, plazas: 0 },
 ];
 
 pub fn info(k: Kind) -> &'static Info {
@@ -151,6 +208,14 @@ pub enum Layer {
     Serenos,
     /// Riesgo de incendio (techo de paja, sin agua cerca) y lo que arde.
     Fuego,
+    /// Niños con escuela cerca y el alcance de escuelas y conventos.
+    Educacion,
+    /// Cobertura de botica, médico y hospital.
+    Salud,
+    /// Insalubridad: agua mala, pozos negros, basurales; pozos contaminados.
+    Saneamiento,
+    /// Mapa de calor del delito.
+    Delito,
 }
 
 /// Un edificio de servicio construido.
@@ -161,8 +226,12 @@ pub struct Building {
     pub c: Vec2,
     /// Frente (hacia la calle).
     pub f: Vec2,
-    /// Personas abastecidas de agua el último mes.
+    /// Personas abastecidas de agua el último mes (escuelas: alumnos; salud: personas que
+    /// atiende).
     pub served: i32,
+    /// Pozos y aljibes: cuánto se ensució el agua con los pozos negros y la basura de
+    /// alrededor (0 a 1; sube y baja de a poco, mes a mes).
+    pub contaminacion: f32,
     /// Vóxeles (para demolerlo); se regeneran al cargar.
     pub voxels: Vec<IVec3>,
 }
@@ -194,6 +263,8 @@ pub struct Services {
     pub epidemic: epidemics::Epidemic,
     /// Solares con los restos de una casa quemada (se ven hasta que se vuelve a edificar).
     pub ruins: BTreeSet<u32>,
+    /// Escuelas, salud, saneamiento y delito de cada solar (ver [`barrio`]).
+    pub barrio: barrio::Barrio,
     pub rng: Rng,
 }
 
@@ -211,6 +282,7 @@ impl Default for Services {
             fires: fires::Fires::default(),
             epidemic: epidemics::Epidemic::default(),
             ruins: BTreeSet::new(),
+            barrio: barrio::Barrio::default(),
             rng: Rng::new(1730),
         }
     }
@@ -351,7 +423,10 @@ pub fn distribute_water(s: &mut Services, lots: &mut Lots, net: &RoadNetwork, fa
             })
             .collect();
         cands.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
-        let quality = if b.kind == Kind::Pozo && contaminated(lots, b.c) { 0.35 } else { inf.quality };
+        // Los talleres grandes ensucian los pozos cercanos; los pozos negros y la basura de
+        // alrededor, de a poco (ver `barrio`): el aljibe, que junta el agua de los techos, menos.
+        let base = if b.kind == Kind::Pozo && contaminated(lots, b.c) { 0.35 } else { inf.quality };
+        let quality = base * (1.0 - b.contaminacion * if b.kind == Kind::Aljibe { 0.3 } else if b.kind == Kind::Pozo { 0.65 } else { 0.0 });
         let cap = (inf.cap as f32 * factor) as i32;
         let mut used = 0;
         for (_, id) in cands {
@@ -438,6 +513,10 @@ impl City {
             Kind::Aguadores if t.arroyo_distance(c.x, c.y) > 400.0 && !near_coast(t, c, 250.0) => return Some("Los aguadores necesitan un arroyo a menos de 400 m o la costa a 250 m".into()),
             Kind::Aduana if !self.services.port.pier.as_ref().is_some_and(|p| p.land.distance(c) < 500.0) => return Some("La aduana va junto al muelle (a menos de 500 m): primero el muelle".into()),
             Kind::Aduana if self.services.count(Kind::Aduana) > 0 => return Some("La ciudad ya tiene aduana".into()),
+            Kind::Convento if self.services.count(Kind::Convento) > 0 => return Some("La ciudad ya tiene convento".into()),
+            Kind::Carcel if self.services.count(Kind::Carcel) > 0 => return Some("La ciudad ya tiene cárcel".into()),
+            Kind::Carcel if !far(400.0) => return Some("La cárcel del Cabildo va cerca de la plaza (a menos de 400 m)".into()),
+            Kind::Basurero if far(450.0) => return Some("El basurero va fuera de la ciudad, a más de 450 m de la plaza".into()),
             _ => {}
         }
         let eco = &self.economy;
@@ -470,11 +549,12 @@ impl City {
         let seed = 0x5E41_u64 ^ (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         let b = build_rotated(t, c, f, inf.frame.0, inf.frame.1, seed, &inf.builder);
         e.extend(b.edits);
-        self.services.buildings.insert(id, Building { id, kind: k, c, f, served: 0, voxels: b.voxels });
+        self.services.buildings.insert(id, Building { id, kind: k, c, f, served: 0, contaminacion: 0.0, voxels: b.voxels });
         self.refresh_water();
         if k == Kind::Serenos {
             self.refresh_lamps(t, &mut e);
         }
+        self.refresh_barrio();
         Ok(e)
     }
 
@@ -490,6 +570,7 @@ impl City {
         if b.kind == Kind::Serenos {
             self.refresh_lamps(t, &mut e);
         }
+        self.refresh_barrio();
         self.money -= 20;
         Ok(e)
     }
@@ -503,6 +584,7 @@ impl City {
                 e.dset(v, AIR);
             }
             self.services.ruins.remove(&id);
+            self.services.barrio.basurales.remove(&id);
         }
     }
 
@@ -561,6 +643,7 @@ impl City {
         // Los solares que se volvieron a edificar ya no muestran ruinas.
         let lots = &self.lots.lots;
         self.services.ruins.retain(|id| lots.get(id).is_some_and(|l| l.level == 0));
+        self.services.barrio.basurales.retain(|id| lots.get(id).is_some_and(|l| l.level == 0));
         news
     }
 
@@ -568,7 +651,13 @@ impl City {
     /// epidemias y faroles.
     pub fn services_month(&mut self, t: &TerrainGen, e: &mut Edits) -> Vec<String> {
         let mut news = Vec::new();
+        // Saneamiento (pozos que se ensucian, basurales), el agua, y con ella escuelas, salud,
+        // insalubridad y delito de cada solar; después, los brotes y los delitos del mes.
+        news.extend(self.saneamiento_month(t, e));
         self.refresh_water();
+        self.refresh_barrio();
+        news.extend(self.salubridad_month());
+        news.extend(self.delito_month());
         news.extend(self.works_month(t, e));
         news.extend(self.port_month());
         news.extend(self.epidemic_month(t, e));
@@ -598,6 +687,7 @@ impl City {
         }
         inp.epidemic = s.epidemic.active();
         self.port_input(inp);
+        self.barrio_input(inp);
         let gates = self.services.walls.gate_duty();
         if gates > 0 {
             inp.other.push(("Derechos de los portones".into(), gates));
@@ -619,6 +709,10 @@ impl City {
         for id in ruins {
             self.ruin_edits(t, id, e);
         }
+        let basurales: Vec<u32> = self.services.barrio.basurales.iter().copied().collect();
+        for id in basurales {
+            self.basural_edits(t, id, e);
+        }
         // Los faroles tal como se guardaron (no recalculados): si las calles cambiaron después
         // del último reparto, el mes siguiente los pone al día igual que en la partida original.
         if self.services.lamps.is_empty() && self.services.count(Kind::Serenos) > 0 {
@@ -630,6 +724,8 @@ impl City {
         }
         self.port_rebuild(t, e);
         self.walls_rebuild(t, e);
+        // Escuelas, salud y delito de cada solar (derivados: no se guardan).
+        self.refresh_barrio();
     }
 
     /// Lleva un solar a ruinas (después de un incendio).
@@ -659,6 +755,9 @@ impl City {
                 if b.kind == Kind::Pozo && contaminated(&self.lots, b.c) {
                     out.push("Agua: contaminada por los talleres".into());
                 }
+                if b.kind != Kind::Aguadores {
+                    out.push(format!("Pozos negros y basura alrededor: agua {} % sucia{}", (b.contaminacion * 100.0).round() as i32, if b.contaminacion >= 0.5 { " (huele mal)" } else { "" }));
+                }
                 if self.economy.in_drought() {
                     out.push("Sequía: rinde menos".into());
                 }
@@ -673,6 +772,7 @@ impl City {
             Kind::Horno => out.push(format!("Ladrillos por mes: {}", (HORNO_LADRILLOS * self.climate.brick_factor()) as i32)),
             Kind::Cantera => out.push(format!("Piedra por mes: {}", CANTERA_PIEDRA as i32)),
             Kind::Aduana => out.push("Contrabando: baja de 35 % a 5 %".into()),
+            _ => self.barrio_lines(id, &mut out),
         }
         out.push(format!("Mantenimiento: {} pesos al mes", inf.upkeep));
         out

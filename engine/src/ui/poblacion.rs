@@ -141,7 +141,7 @@ pub fn panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f32, 
             }
             let max_h = (ctx.screen_rect().height() - 52.0 - reserved_bottom - 70.0).max(160.0);
             egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| match d {
-                Detail::Poblacion(0) => resumen(ui, p),
+                Detail::Poblacion(0) => resumen(ui, game),
                 Detail::Poblacion(1) => desigualdad(ui, game, acts),
                 Detail::Poblacion(2) => felicidad(ui, p),
                 Detail::Poblacion(_) => cronica(ui, p),
@@ -154,7 +154,8 @@ pub fn panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f32, 
     nav
 }
 
-fn resumen(ui: &mut egui::Ui, p: &Poblacion) {
+fn resumen(ui: &mut egui::Ui, game: &Game) {
+    let p = &game.city.poblacion;
     let s = &p.stats;
     let año = p.anual.last();
     egui::Grid::new("pob").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
@@ -168,6 +169,17 @@ fn resumen(ui: &mut egui::Ui, p: &Poblacion) {
             let tmi = if a.cuenta.nacimientos > 0 { a.cuenta.muertes_infantiles as f32 / a.cuenta.nacimientos as f32 * 1000.0 } else { 0.0 };
             kv(ui, "", format!("{} casamientos · {} llegados · {} se fueron · mortalidad infantil {}‰", a.cuenta.casamientos, a.cuenta.llegados, a.cuenta.emigrados, tmi.round() as i32), theme::INK_SOFT);
         }
+    });
+    section(ui, "Escuela, salud y seguridad");
+    let b = game.city.barrio_resumen();
+    egui::Grid::new("barrio").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+        let (niños, con) = b.niños;
+        let frac = if niños > 0 { con as f32 / niños as f32 } else { 0.0 };
+        kv(ui, "Niños con escuela", format!("{} de {} niños libres de 6 a 12 años ({})", fmt_thousands(con as i64), fmt_thousands(niños as i64), pct(frac)), if frac < 0.3 { theme::BAD } else { theme::INK });
+        kv(ui, "Atendidos por la salud", pct(b.salud), if b.salud < 0.3 { theme::BAD } else { theme::INK });
+        kv(ui, "Insalubridad", format!("{} · {} basurales · {} pozos sucios · {} brotes", pct(b.insalubre), b.basurales, b.pozos_sucios, b.brotes), if b.insalubre > 0.3 { theme::BAD } else { theme::INK });
+        let d = b.delitos_año;
+        kv(ui, "Delitos en el año", format!("{} robos, {} asaltos, {} contrabandos · {} presos", d[0], d[1], d[2], b.presos), if b.delito > 0.2 { theme::BAD } else { theme::INK });
     });
     section(ui, "Pirámide de edades");
     piramide(ui, &s.piramide);
