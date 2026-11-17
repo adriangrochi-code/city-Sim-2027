@@ -30,6 +30,10 @@ pub fn found(s: &mut Session) -> String {
     g.speed = 0.0; // el tiempo solo avanza con `grow` (capturas reproducibles)
     g.city.money = 200_000;
     let r = g.city.found_plaza(&t, PLAZA, 0.0);
+    if r.is_ok() {
+        // Como al fundar con el clic: la gaceta deja de pedir que se funde la ciudad.
+        g.message = "¡Fundada la ciudad!".into();
+    }
     apply(s, r)
 }
 
