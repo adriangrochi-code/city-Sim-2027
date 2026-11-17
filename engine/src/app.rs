@@ -61,6 +61,11 @@ struct App {
     fps_frames: u32,
     fps_time: Instant,
     fps: f32,
+    /// Perfil del cuadro: el peor del último medio segundo y su desglose.
+    worst: (f32, String),
+    perfil: bool,
+    /// Distancia de cámara a la que va el zoom suave.
+    zoom_goal: Option<f32>,
     fps_samples: Vec<f32>,
     error: Option<String>,
     /// Clave del último cuadro dibujado y cuándo se dibujó (para no redibujar lo mismo).
@@ -103,6 +108,9 @@ pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
         frames: 0,
         fps_frames: 0,
         fps_time: Instant::now(),
+        worst: (0.0, String::new()),
+        perfil: std::env::var("CITYSIM_PERFIL").is_ok(),
+        zoom_goal: None,
         fps: 0.0,
         fps_samples: Vec::new(),
         error: None,
@@ -144,8 +152,11 @@ pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
 impl App {
     fn frame(&mut self, el: &ActiveEventLoop) {
         let now = Instant::now();
+        // Tras un reposo (sin cambios, se redibuja cada 100 ms) el intervalo no es un tirón.
+        let frame_gap = if self.idle { 0.0 } else { (now - self.last).as_secs_f32() * 1000.0 };
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
+        let t_frame = now;
         let s = &mut self.session;
         // El menú detiene la simulación (pausa) o gira la cámara de fondo (menú principal).
         self.menu.sync_pause(s);
@@ -159,10 +170,26 @@ impl App {
         let right = k(KeyCode::KeyD) + k(KeyCode::ArrowRight) - k(KeyCode::KeyA) - k(KeyCode::ArrowLeft);
         s.cam.pan(right * speed, fwd * speed);
         s.cam.yaw += (k(KeyCode::KeyQ) - k(KeyCode::KeyE)) * 80.0 * dt;
+        if let Some(goal) = self.zoom_goal {
+            let d = s.cam.distance;
+            let step = 1.0 - (-dt * 14.0).exp();
+            let next = d * (goal / d).powf(step);
+            s.cam.zoom(next / d);
+            if (goal / s.cam.distance - 1.0).abs() < 0.002 {
+                s.cam.zoom(goal / s.cam.distance);
+                self.zoom_goal = None;
+            }
+        }
+        let t0 = Instant::now();
         s.update(dt);
+        let ms_sim = t0.elapsed().as_secs_f32() * 1000.0;
         let Some(gpu) = self.gpu.as_mut() else { return };
         s.view_h = gpu.config.height as f32;
-        s.apply_ops(&mut gpu.renderer, 400_000);
+        let t0 = Instant::now();
+        // Tope de vértices subidos por cuadro: repartir la carga entre cuadros evita tirones.
+        s.apply_ops(&mut gpu.renderer, 160_000);
+        let ms_upload = t0.elapsed().as_secs_f32() * 1000.0;
+        let t0 = Instant::now();
         gpu.renderer.time += dt;
         // Selección bajo el cursor (no durante el recorrido automático ni con el menú abierto).
         if self.tour.is_none() && !menu_open {
@@ -171,6 +198,7 @@ impl App {
             s.pick(o, d);
         }
         gpu.renderer.set_overlay(&if self.menu.in_main_menu() { Vec::new() } else { s.overlay() });
+        let ms_pick = t0.elapsed().as_secs_f32() * 1000.0;
         if let Some(t) = self.tour.as_mut() {
             if t.step(s, &mut gpu.renderer) && self.opts.frames.is_none() {
                 el.exit();
@@ -233,10 +261,26 @@ impl App {
                 cpu_ui += t0.elapsed().as_secs_f64() * 1000.0;
             }
         };
+        let t0 = Instant::now();
         if let Err(e) = renderer.render_surface(surface, config, &s.cam, s.hour, has_ui.then_some(&mut hook as crate::render::UiHook)) {
             eprintln!("{e}");
         }
         drop(hook);
+        let ms_render = t0.elapsed().as_secs_f32() * 1000.0 - cpu_ui as f32;
+        // Perfil: el cuadro más lento del medio segundo y dónde se fue el tiempo.
+        let total = t_frame.elapsed().as_secs_f32() * 1000.0;
+        let parts = [("simulación", ms_sim), ("subir mallas", ms_upload), ("selección", ms_pick), ("interfaz", cpu_ui as f32), ("dibujo", ms_render)];
+        let (who, _) = parts.iter().cloned().fold(("", 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
+        if frame_gap > self.worst.0 {
+            self.worst = (frame_gap, if total > 12.0 { who.to_string() } else { String::new() });
+        }
+        if self.perfil && frame_gap > 25.0 {
+            println!(
+                "Cuadro lento: {frame_gap:.1} ms entre cuadros · trabajo {total:.1} ms (simulación {ms_sim:.1}, subir mallas {ms_upload:.1}, selección {ms_pick:.1}, interfaz {:.1}, dibujo {ms_render:.1}) · pendientes {}",
+                cpu_ui,
+                s.streamer.pending()
+            );
+        }
         if has_ui {
             self.ui_ms.push(cpu_ui);
         }
@@ -245,6 +289,7 @@ impl App {
         if self.fps_time.elapsed().as_secs_f32() >= 0.5 {
             self.fps = self.fps_frames as f32 / self.fps_time.elapsed().as_secs_f32();
             self.fps_samples.push(self.fps);
+            self.menu.frame_worst = std::mem::take(&mut self.worst);
             self.fps_frames = 0;
             self.fps_time = Instant::now();
             let title = if s.game.is_none() && self.menu.is_open() { format!("City Sim 2027 · {:.0} FPS", self.fps) } else { s.title(self.fps, &gpu.renderer) };
@@ -474,7 +519,10 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                 };
-                self.session.cam.zoom(0.88f32.powf(y));
+                // Zoom suave: la rueda fija la distancia a la que se quiere llegar y la cámara
+                // la alcanza en unos 150 ms (de a saltos se veía como tirones).
+                let goal = self.zoom_goal.unwrap_or(self.session.cam.distance);
+                self.zoom_goal = Some((goal * 0.88f32.powf(y)).clamp(15.0, 15000.0));
             }
             WindowEvent::MouseInput { state, button, .. } => match (button, state) {
                 (MouseButton::Left, ElementState::Pressed) if ui_pointer => {}

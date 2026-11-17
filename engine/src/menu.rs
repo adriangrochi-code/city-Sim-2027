@@ -103,6 +103,8 @@ pub fn fingerprint(g: &Game) -> u64 {
 }
 
 pub struct Menu {
+    /// Peor cuadro del último medio segundo (ms) y en qué se fue: para el contador de FPS.
+    pub frame_worst: (f32, String),
     /// Pila de pantallas; vacía = jugando (menú cerrado).
     pub stack: Vec<Screen>,
     /// Carpeta de datos (opciones) y de partidas.
@@ -137,6 +139,7 @@ impl Menu {
     pub fn new(base: PathBuf, settings: Settings, levels: u32, threads: usize, main: bool) -> Menu {
         let saves_dir = save::saves_dir(&base);
         let mut m = Menu {
+            frame_worst: (0.0, String::new()),
             stack: Vec::new(),
             base,
             saves_dir,
@@ -454,7 +457,9 @@ impl Menu {
         if self.settings.mostrar_fps {
             egui::Area::new("fps".into()).order(egui::Order::Foreground).anchor(Align2::RIGHT_BOTTOM, vec2(-10.0, -10.0)).interactable(false).show(ctx, |ui| {
                 theme::paper_frame().inner_margin(egui::Margin::symmetric(8.0, 2.0)).show(ui, |ui| {
-                    ui.label(RichText::new(format!("{fps:.0} FPS")).small());
+                    let (worst, why) = &self.frame_worst;
+                    let txt = if *worst > 0.0 { format!("{fps:.0} FPS · peor cuadro {worst:.0} ms{}", if why.is_empty() { String::new() } else { format!(" ({why})") }) } else { format!("{fps:.0} FPS") };
+                    ui.label(RichText::new(txt).small());
                 });
             });
         }

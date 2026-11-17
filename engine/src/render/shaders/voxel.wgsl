@@ -118,8 +118,23 @@ fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
     return g.light_view_proj * vec4(corner(v).pos, 1.0);
 }
 
+// Azar con aritmética entera (no con sin(), que en las placas NVIDIA pierde precisión con
+// coordenadas de decenas de miles de metros y dibuja rayas en abanico en lugar de ruido).
+fn hash_u(x: u32) -> u32 {
+    var h = x;
+    h = h ^ (h >> 16u);
+    h = h * 0x7feb352du;
+    h = h ^ (h >> 15u);
+    h = h * 0x846ca68bu;
+    h = h ^ (h >> 16u);
+    return h;
+}
+
+// `p` son coordenadas ya redondeadas (celdas enteras).
 fn hash3(p: vec3<f32>) -> f32 {
-    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+    let i = vec3<i32>(floor(p));
+    let h = hash_u(bitcast<u32>(i.x) ^ hash_u(bitcast<u32>(i.y) ^ hash_u(bitcast<u32>(i.z) + 0x9e3779b9u)));
+    return f32(h & 0xffffffu) / 16777215.0;
 }
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -224,7 +239,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         // Tejas: canales cada 25 cm y filas de 25 cm, en tresbolillo.
         let a = along(v.world, n) * 4.0;
         let row = select(floor(v.world.y * 4.0), floor(v.world.z * 4.0), n.y > 0.5);
-        let canal = 0.5 + 0.5 * sin((a + row * 0.5) * 6.2832);
+        let canal = 0.5 + 0.5 * sin(fract(a + row * 0.5) * 6.2832);
         albedo *= mix(1.0, 0.82 + 0.22 * canal, near);
     } else if (mat == M_THATCH || mat == M_THATCH_DARK) {
         // Paja: hebras verticales irregulares.

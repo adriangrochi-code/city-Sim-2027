@@ -40,6 +40,10 @@ Contiene dos programas:
    rellenar: clic izq. colocar · clic der. excavar · F rellenar ·
    1-9/Tab estructura · R rotar · [ ] hora · P pausar día · F12 captura
 
+   TIRONES: ./medir-tirones.sh (Windows: medir-tirones.bat) abre el juego y anota
+   cada cuadro lento y en qué se fue el tiempo en tirones.txt. En Opciones,
+   "Mostrar FPS" muestra también el peor cuadro del último medio segundo.
+
    MEDIR FPS EN TU EQUIPO:  ./motor-voxel.sh --bench salida/
                             (Windows: medir-fps.bat)
    y enviar el archivo salida/bench.md.

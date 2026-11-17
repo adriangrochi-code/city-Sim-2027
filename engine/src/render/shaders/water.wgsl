@@ -35,8 +35,22 @@ fn vs_main(@location(0) pos: vec3<f32>) -> VOut {
     return o;
 }
 
+// Azar con aritmética entera (no con sin(), que en las placas NVIDIA pierde precisión con
+// coordenadas de decenas de miles de metros y dibuja rayas en abanico en lugar de ruido).
+fn hash_u(x: u32) -> u32 {
+    var h = x;
+    h = h ^ (h >> 16u);
+    h = h * 0x7feb352du;
+    h = h ^ (h >> 15u);
+    h = h * 0x846ca68bu;
+    h = h ^ (h >> 16u);
+    return h;
+}
+
 fn hash2(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    let i = vec2<i32>(floor(p));
+    let h = hash_u(bitcast<u32>(i.x) ^ hash_u(bitcast<u32>(i.y) + 0x9e3779b9u));
+    return f32(h & 0xffffffu) / 16777215.0;
 }
 
 // Agua en vóxeles: la superficie se divide en celdas cuadradas del tamaño del vóxel del
@@ -57,7 +71,10 @@ fn cell_shade(p: vec2<f32>, size: f32, t: f32) -> vec4<f32> {
     let to = -vec2(sin(wa), -cos(wa)); // hacia dónde va (x este, z sur)
     let amp = clamp(wspd / 8.0, 0.15, 2.0);
     let along = dot(ctr, to);
-    let swell = sin(along * 0.06 - t * (0.6 + wspd * 0.08)) * 0.7 + sin(ctr.y * 0.07 - t * 1.1 + h * 6.28) * 0.3;
+    // Fases reducidas a una vuelta antes del seno (precisión en coordenadas grandes).
+    let f1 = fract(along * 0.06 / 6.2832 - t * (0.6 + wspd * 0.08) / 6.2832);
+    let f2 = fract(ctr.y * 0.07 / 6.2832 - t * 1.1 / 6.2832 + h);
+    let swell = sin(f1 * 6.2832) * 0.7 + sin(f2 * 6.2832) * 0.3;
     let tilt = vec2(cos(t * (0.6 + h) + h2 * 6.28), sin(t * (0.5 + h2) + h * 6.28)) * 0.04 * amp + to * swell * 0.05 * amp;
     let f = fract(p / size);
     let e = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
