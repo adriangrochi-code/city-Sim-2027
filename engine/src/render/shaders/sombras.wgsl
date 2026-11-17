@@ -10,7 +10,7 @@ struct Sombras {
     vp: array<mat4x4<f32>, 4>,
     // x: lado del texel (m), y: 1 / rango de profundidad (por m), z: 1 si la cascada está activa
     info: array<vec4<f32>, 4>,
-    // x: cantidad de cascadas, y: 1 / resolución
+    // x: cantidad de cascadas, y: 1 / resolución, z: 1 = teñir cada cascada (depuración)
     misc: vec4<f32>,
 };
 @group(0) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -69,4 +69,21 @@ fn shadow(world: vec3<f32>, n: vec3<f32>) -> f32 {
         return mix(a.x, b, blend);
     }
     return 1.0;
+}
+
+// Depuración (`MOTOR_DEPURAR_SOMBRAS=1`): tinte según la cascada que cubre el punto (roja,
+// verde, azul, amarilla; magenta fuera de todas).
+fn shadow_debug_tint(world: vec3<f32>) -> vec3<f32> {
+    if (sombras.misc.z < 0.5) {
+        return vec3(1.0);
+    }
+    let colors = array<vec3<f32>, 4>(vec3(1.0, 0.6, 0.6), vec3(0.6, 1.0, 0.6), vec3(0.6, 0.6, 1.0), vec3(1.0, 1.0, 0.5));
+    for (var i = 0u; i < u32(sombras.misc.x); i++) {
+        let lp = sombras.vp[i] * vec4(world, 1.0);
+        if (sombras.info[i].z > 0.5 && max(abs(lp.x), abs(lp.y)) < 1.0 && lp.z > 0.0 && lp.z < 1.0) {
+            var c = colors;
+            return c[i];
+        }
+    }
+    return vec3(1.0, 0.6, 1.0);
 }

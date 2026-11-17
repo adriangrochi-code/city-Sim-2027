@@ -386,7 +386,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
     col = mix(col, fog_color(v.world), clamp(fog, 0.0, 0.88));
-    return vec4(curva_tonal(col), 1.0);
+    return vec4(curva_tonal(col * shadow_debug_tint(v.world)), 1.0);
 }
 
 // Curva tonal suave: hasta 0,75 de luminancia no toca nada; más arriba comprime de a poco (sin

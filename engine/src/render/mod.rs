@@ -1522,6 +1522,14 @@ impl Renderer {
             let max_lod = if p.half() < 1000.0 { SHADOW_MAX_LOD } else { SHADOW_FAR_LOD };
             draw.push((i, m, max_lod));
         }
+        // `MOTOR_DEPURAR_SOMBRAS=1`: escribe el plan de las cascadas y tiñe cada una de un color.
+        let depurar = std::env::var("MOTOR_DEPURAR_SOMBRAS").is_ok();
+        if depurar {
+            eprintln!("cascadas: ojo {eye:?} franja {ymin:.0}..{ymax:.0} cortes {:?} alcance {reach:.0} sol {sun:?}", &sp[..=n]);
+            for i in 0..n {
+                eprintln!("  {i}: quiere {:?} dibujada {:?} sucia {} dibujar {}", st.want[i], st.drawn[i].map(|d| d.0), st.dirty[i], draw.iter().any(|d| d.0 == i));
+            }
+        }
         let mut g = SombrasGpu::zeroed();
         for i in 0..n {
             if let (Some(_), Some((p, s))) = (st.want[i], st.drawn[i]) {
@@ -1529,7 +1537,7 @@ impl Renderer {
                 g.info[i] = cascades::shader_info(&p, res).into();
             }
         }
-        g.misc = [n as f32, 1.0 / res as f32, 0.0, 0.0];
+        g.misc = [n as f32, 1.0 / res as f32, if depurar { 1.0 } else { 0.0 }, 0.0];
         (g, draw)
     }
 

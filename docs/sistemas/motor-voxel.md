@@ -85,8 +85,10 @@ y la distancia que cubre:
 
 - **wgpu puro**, con Vulkan, Metal o DirectX 12 según la plataforma. Aquí se probó con el driver
   Vulkan por software (lavapipe).
-- **Pase de sombras**: mapa de 4096² ortográfico desde el sol, centrado en la cámara, con
-  PCF 3 × 3. El sol pasa por el **norte** (hemisferio sur).
+- **Sombras en cascadas** (§17): 2 a 4 mapas ortográficos desde el sol (por omisión 4 de
+  2048²), del objetivo de la cámara hasta 8 veces su distancia, estables y en caché por
+  cascada, con PCF. El sol pasa por el **norte** (hemisferio sur).
+- **Descarte de lo tapado (Hi-Z)** en la GPU, en dos pasadas por cuadro (§17).
 - **Cielo**: degradado del horizonte al cenit, disco y halo del sol, colores según la hora
   (amanecer, mediodía, atardecer y noche).
 - **Vóxeles**: color del material con variación por vóxel, bordes marcados que se
@@ -403,7 +405,7 @@ rehecho y en caché) y memoria.
 - Medir con una GPU real (FPS, tiempo de GPU con *timestamp queries*).
 - Reutilizar alturas entre columnas vecinas y re-mallados, o generar el terreno en la GPU.
 - Dibujo indirecto en un solo búfer grande (menos llamadas de dibujo con GPU).
-- Sombras en cascadas (más baratas lejos y más nítidas cerca).
+- ~~Sombras en cascadas (más baratas lejos y más nítidas cerca).~~ Hecho (§17).
 - Quitar las columnas viejas apenas su zona está cubierta por las nuevas.
 
 
@@ -538,11 +540,11 @@ La ventana bajo xvfb, `--auto-test` y `--shot` siguen funcionando. Hay 29 tests 
 
 ### Pendiente
 
-- **Hi-Z / descarte por oclusión** en el *compute shader*: necesita una GPU real para que valga
-  la pena.
+- ~~**Hi-Z / descarte por oclusión** en el *compute shader*~~: hecho (§17); falta medirlo en
+  una GPU real.
 - **Medir con una GPU real**: FPS, tiempo de GPU por pase, y los tres modos de dibujo.
 - *Timestamps* asíncronos en la ventana.
-- Sombras en cascadas y generación del terreno en la GPU (pendientes de la sección 11).
+- ~~Sombras en cascadas~~ (§17) y generación del terreno en la GPU (pendiente de la sección 11).
 
 ## 13. El juego en el motor: calles y solares
 
@@ -833,7 +835,8 @@ Todo usa el mismo papel y tinta de la interfaz (sección 14).
 - **Opciones** (se guardan en `opciones.json`): tamaño de la interfaz (75 a 150 % sobre la
   escala automática), sincronización vertical, contador de FPS, distancia de dibujo (6, 7 u
   8 niveles de detalle; se aplica al empezar o cargar una partida), suavizado de bordes
-  (automático, desactivado o 4×; al volver a abrir el juego) y autoguardado cada 6, 12 o 24
+  (automático, desactivado o 4×; al volver a abrir el juego), calidad de las sombras (Baja a
+  Muy alta, §17; se aplica enseguida) y autoguardado cada 6, 12 o 24
   meses de juego (o nunca).
 
 | Captura | Qué muestra |
@@ -957,3 +960,163 @@ De lejos no cambia nada (mismos niveles en metros). De cerca hay un anillo más,
 y flora baja con el doble de detalle). Capturas antes y después: mismos edificios y del mismo
 tamaño, calles, plaza y puentes alineados, sin grietas entre anillos.
 
+
+## 17. Descarte de lo tapado (Hi-Z) y sombras en cascadas
+
+Hoja de ruta, fase 2, ítem 7. Código en `engine/src/render/` (`hiz.rs`, `cascades.rs`,
+`shaders/hiz.wgsl`, `shaders/cull.wgsl`, `shaders/sombras.wgsl`).
+
+> **Advertencia:** medido con **lavapipe** (la CPU dibuja). Los milisegundos dicen poco de una
+> placa real; lo que vale acá es **cuánto trabajo se ahorra** (columnas, caras y texels de
+> sombra) y que **la imagen no cambie**. Medir en GPU real sigue pendiente (`medir-fps.bat`
+> ya junta las tablas nuevas).
+
+### Arreglo previo: huecos de terreno al moverse (placa real)
+
+En Windows con placa de video desaparecían bloques rectangulares de terreno al mover o hacer
+zoom (se veía el río debajo). Era el *streaming*, no el descarte en GPU:
+
+- Las columnas retiradas se borraban todas si el *streamer* parecía ocioso, pero un hilo
+  entrega la malla al canal **antes** de bajar su contador de trabajos en curso: la columna que
+  cubría el lugar podía estar todavía en el canal. También se borraban todas si había más de
+  3.000 retiradas (viaje o zoom rápidos).
+- La cobertura miraba solo ±3 niveles: un zoom rápido salta el nivel más fino de 0 a 5.
+- Ahora una columna se quita **solo cuando las que la reemplazan ya están subidas** (todos los
+  niveles; queda un tope de seguridad de 24.000). Prueba
+  `nunca_quedan_huecos_al_hacer_zoom_o_viajar_rapido` (falla con el código anterior).
+- Además, el descarte (CPU y GPU) usa la caja **con la curvatura** de la Tierra (la geometría
+  se dibuja hasta d²/2R más abajo); antes, con la cámara baja, una columna lejana podía
+  descartarse en el borde de arriba de la vista.
+
+### Hi-Z: dos pasadas en el mismo cuadro
+
+Solo en el modo de dibujo GPU (el que se usa con placa real). Cada columna tiene una marca
+"se vio en el último cuadro".
+
+1. **Primera pasada**: el *compute shader* de descarte dibuja lo marcado que está en el
+   volumen de visión.
+2. **Pirámide** (`hiz.wgsl`): con esa profundidad, nivel 0 a media resolución con el **mínimo**
+   de 2×2 píxeles y de **todas las muestras del MSAA** (con Z invertida, el mínimo es lo más
+   lejano); los niveles siguientes, mínimo de 2×2 (el último texel de un nivel impar lee
+   también el que sobra).
+3. **Segunda pasada**: se prueba todo lo que está en el volumen contra la pirámide: rectángulo
+   de la caja en pantalla (+1 píxel), el nivel donde toca a lo sumo 2×2 texels, 4 lecturas; si
+   el punto más cercano de la caja (máximo de z) queda detrás de lo más lejano, está tapada.
+   Se dibuja lo visible que faltaba y se actualizan las marcas. Si una esquina queda detrás
+   del plano cercano, se dibuja.
+
+Como la pirámide sale de lo que se dibuja **en este mismo cuadro** (con la cámara de este
+cuadro), la prueba es conservadora: nada visible se descarta, ni siquiera un cuadro al mover la
+cámara. Columna nueva: se marca visible (seguramente tapa algo). La vista principal queda en
+dos pases de render (el color con MSAA se guarda entre los dos).
+
+Si el adaptador no tiene compute o texturas R32Float de almacenamiento, o no tiene dibujo
+indirecto múltiple, queda el descarte por volumen de visión (como antes). `--hiz 0|1` lo
+fuerza; `--draw gpu` usa el modo GPU también con lavapipe.
+
+### Sombras en cascadas
+
+En lugar del mapa único de 4096² centrado en el objetivo (que cubría ±0,9 × la distancia de
+la cámara, hasta 1,5 km, con un sesgo fijo de ~4,8 m):
+
+- **2 a 4 cascadas** en un arreglo de mapas. La primera va de donde puede empezar a verse algo
+  (debajo del techo más alto) hasta **1,2 veces la distancia al objetivo**; las demás crecen en
+  progresión geométrica hasta la distancia de sombra (8 veces la de la cámara, entre 1,5 y
+  8 km, o hasta donde se deja de ver el suelo).
+- **Ajuste**: cada tramo de la vista se recorta a la franja de alturas donde puede haber algo
+  que reciba sombra (del río al techo más alto cargado) y se toma su caja en el espacio de la
+  luz; hacia el sol, la caja llega hasta donde puede haber algo que dé sombra.
+- **Estables**: rotación de la luz fija por sol, lado de una escalera fija (×2^¼), centro en la
+  grilla de texels e **histéresis** (si el lugar anterior todavía cubre lo necesario, no se
+  mueve). Pruebas `el_centro_se_ajusta_a_la_grilla_de_texels` y
+  `con_movimientos_chicos_la_cascada_no_cambia`.
+- **Caché por cascada**: se rehace si cambia su lugar o el sol (cuantizado a un minuto de juego,
+  0,25°) o si una columna nueva o quitada cae en su caja. **En la ventana, a lo sumo 2 por
+  cuadro**: las demás esperan con la matriz con la que se dibujaron (lo que se lee es
+  coherente), la que esperó 2 cuadros pasa adelante y, si quedó alguna, se dibuja otro cuadro
+  aunque la cámara no se mueva. Prueba `las_cascadas_se_rehacen_solo_cuando_hace_falta`.
+- **Sesgo en metros por texel** de cada cascada: corrimiento de 1,5 texels a lo largo de la
+  normal y sesgo de profundidad de 1 a 6 texels según lo rasante de la luz. Sin acné ni
+  sombras despegadas en las capturas (la base de las paredes y los postes de los faroles tienen
+  su sombra).
+- **Mezcla** en el último 10 % de cada cascada con la siguiente; la última se desvanece hacia
+  "sin sombra". PCF de 4 lecturas bilineales (cubre 3×3 texels con pesos en carpa).
+- Las cascadas de más de 1 km de medio lado dibujan también los niveles de 8 y 16 m (cerros
+  y montes lejanos).
+- **Opciones → Sombras**: Baja (2 × 1024², 8 MB), Media (3 × 2048², 48 MB), **Alta (4 × 2048²,
+  64 MB, por omisión: la misma memoria que el mapa de antes)** y Muy alta (4 × 4096², 256 MB).
+  Se guarda en `opciones.json` (`sombras_cascadas`, `sombras_resolucion`) y se aplica enseguida.
+- La flora baja, los vecinos y los vehículos leen las mismas cascadas (`sombras.wgsl` se
+  antepone a `voxel.wgsl`, `detail.wgsl` y `agentes.wgsl`).
+
+### Medidas (`motor --bench`, 1280×720, MSAA 4×, lavapipe)
+
+Descarte de lo tapado (modo GPU; en el segundo cuadro con la cámara quieta):
+
+| Vista | Columnas | Caras | Caras descartadas | Diferencia de imagen | Barrido de 10 cuadros |
+|---|---|---|---|---|---|
+| Calle (a nivel del suelo, frente a una pared) | 1.095 → 178 | 0,13 → 0,05 M | **62 %** | 0 % | 0 % |
+| Miguelete de cerca (monte, mapa real) | 1.127 → 909 | 0,83 → 0,74 M | 10 % | 0 % | — |
+| Ciudad de cerca, península, lejos, noche | −0 a −5 % | igual | 0 % | 0 % | — |
+| Cerro y Cerro rasante (mapa real) | −0 a −2 % | igual | 0 % | 0 % | 0 % |
+
+- La imagen **con y sin Hi-Z es idéntica** en todas las vistas, y en los barridos de cámara
+  (10 cuadros girando 4° y moviéndose 3,4 m por cuadro, cada uno comparado con y sin Hi-Z) la
+  diferencia máxima fue 0: no hay nada que aparezca tarde.
+- Gana a nivel del suelo y en el monte (lo de adelante tapa mucho). Desde arriba casi no hay
+  nada tapado: las caras que no miran a la cámara ya se descartaban (§12), y el mapa de
+  Montevideo es bastante llano, así que de lejos los cerros tapan poco.
+- Con lavapipe el cuadro a nivel de la calle bajó de 193 a 137 ms; en las demás vistas queda en
+  el ruido (±10 %: armar la pirámide y partir la vista en dos pases cuesta en la CPU).
+
+Sombras en cascadas (antes / después):
+
+| Vista | Antes: mapa único | Después: cascadas (medio lado · texel) | Pases por cuadro en movimiento | Cuadro en movimiento |
+|---|---|---|---|---|
+| Ciudad de cerca | ±135 m · 6,6 cm, nada más allá | 152 m · 15 cm / 215 m · 21 cm / 362 m · 35 cm / 512 m · 50 cm | 1 de 4096² → **0,73 de 2048²** | 326 → **292 ms** |
+| Ciudad de noche | ±405 m · 20 cm | 304 m · 30 cm / … / 609 m · 60 cm | 1 → 0,70 | 457 → 446 ms |
+| Calle | ±120 m · 5,9 cm | **32 m · 3,1 cm** / 108 m · 10 cm / 304 m · 30 cm / 1 km · 1 m | 1 → 0,43 | — → 198 ms |
+| Península | ±1,4 km · 70 cm | 1,4 km · 1,4 m … 2,4 km · 2,4 m | 1 → 0,17 | 282 → 269 ms |
+| Lejos (9 km) | ±1,5 km · 73 cm, nada más allá | 6,9 km … 13,8 km (cubre toda la vista) | 1 → 0,47 | 198 → 202 ms |
+
+- **Texels de sombra rasterizados por cuadro con la cámara en movimiento: 16,8 M → 0,7 a 3,1 M.**
+  Con la cámara quieta, 0 (caché, igual que antes).
+- La primera cascada mide lo que hace falta en la pantalla: a la distancia del objetivo un texel
+  es ~0,7 píxel (antes estaba sobrado: ~0,3 píxel). A nivel de la calle es 2× más nítida que
+  antes, y las sombras llegan **8 veces la distancia de la cámara** (antes, nada más allá de
+  ±0,9 veces).
+- Rehacer **todas** las cascadas a la vez (cambio de hora, primer cuadro) cuesta más que el
+  mapa único con lavapipe (cerca 326 → 561 ms): 4 pases y cascadas lejanas con más geometría.
+  En la ventana no pasa en un mismo cuadro (límite de 2).
+- El pase principal con la sombra en caché: 226 → 250 ms (cerca), 212 → 204 (península),
+  129 → 187 (lejos), 332 → 405 (noche). Sube donde antes no había sombra (lejos y de noche, la
+  vista entera queda ahora dentro de alguna cascada); bajó de 9 a 4 lecturas por fragmento.
+- Memoria en la GPU: mapas de sombra iguales (64 MB); +31 MB de argumentos indirectos (uno por
+  cascada y uno para la segunda pasada del Hi-Z, 7,9 MB cada uno) y ~1,2 MB de pirámide.
+  RSS del banco por vista: 667–797 MB (antes 675–754).
+
+![Antes (mapa único) y después (cascadas): la sombra de los árboles y de las paredes bajas ya no se pierde por el sesgo](../capturas/motor-cascadas-antes-despues.jpg)
+![Hi-Z: a nivel de la calle la pared tapa el 62 % de las caras; en el monte, el 10 %](../capturas/motor-hiz-calle-monte.jpg)
+
+Capturas: misma imagen de cerca (ahora con la sombra de los árboles y el rollo, que antes se
+perdían por el sesgo de ~4,8 m), sombras de lomas y cerros hasta el horizonte, sin acné en las
+copas ni en las paredes. Con el sol del mediodía y la cámara mirando al sur (sol a la espalda)
+las sombras quedan casi todas detrás de lo que las tira, igual que antes.
+
+Depuración: `MOTOR_DEPURAR_SOMBRAS=1` escribe el plan de cada cuadro (cortes, lugar de cada
+cascada, cuáles se rehacen) y tiñe la vista según la cascada que cubre cada punto (roja,
+verde, azul, amarilla).
+
+### Pendiente
+
+- **Medir en una GPU real** (Windows, DX12/Vulkan): `medir-fps.bat` corre el banco con las
+  tablas nuevas (Hi-Z con y sin, cascadas) y `medir-tirones.bat` anota las cascadas dibujadas
+  en cada cuadro lento.
+- Hi-Z también para las sombras (por cascada) y para la flora y los vecinos (hoy se dibujan
+  enteros).
+- Compactar los argumentos indirectos (`multi_draw_indexed_indirect_count`) para no mandar
+  6 dibujos vacíos por columna descartada.
+- Con lavapipe, quizás menos cascadas por omisión (la opción Baja o Media).
+- Escalones del terreno de 0,25 m: con texels finos y sesgo chico se veían líneas punteadas de
+  sombra en los bordes; lo resuelve la consulta corrida hacia el sol en el terreno
+  (`voxel.wgsl`, integrada después). Vigilarlo con sol muy bajo.
