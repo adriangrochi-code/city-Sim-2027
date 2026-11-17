@@ -1,7 +1,9 @@
 //! Niveles de detalle tipo *clipmap*: anillos concéntricos alrededor de la cámara.
 //! El nivel 0 usa vóxeles de 0,25 m; cada nivel siguiente duplica el tamaño del vóxel
-//! (0,5, 1, 2, 4 m…) y cubre el doble de distancia. Con 9 niveles ([`LEVELS`]) se cubren
-//! los 24 km del mapa (el último nivel, de 64 m por vóxel, tiene un anillo de 49 km).
+//! (0,5, 1, 2, 4 m…) y cubre el doble de distancia. Con 9 niveles se cubren los 24 km del
+//! mapa (el noveno, de 64 m por vóxel, tiene un anillo de 49 km); con los 11 de [`LEVELS`]
+//! (el último, de 256 m por vóxel, con un anillo de 197 km) se ve el entorno amplio hasta el
+//! horizonte: Colonia, Florida, Maldonado y la costa argentina (ver `terrain`, `amplio.bin`).
 //!
 //! Los edificios se diseñan en una grilla más gruesa, de [`DESIGN_VOXEL`] (0,5 m: puerta de
 //! 3 × 6 vóxeles, solar de 24 × 48): cada vóxel de diseño ocupa un bloque de
@@ -11,8 +13,27 @@ use glam::{IVec2, Vec2};
 
 pub const CHUNK: i32 = 32;
 pub const BASE_VOXEL: f32 = 0.25;
-/// Niveles de detalle por omisión (distancia de dibujo "larga": todo el mapa).
-pub const LEVELS: u32 = 9;
+/// Niveles de detalle por omisión (distancia de dibujo "larga": el entorno amplio, ~90 km
+/// alrededor de la cámara).
+pub const LEVELS: u32 = 11;
+/// Niveles que bastan para ver todo el mapa jugable (24 km): la distancia "corta".
+pub const MAP_LEVELS: u32 = 9;
+/// Desde este nivel (vóxel de 64 m) la malla del terreno se baja casi un vóxel entero (ver
+/// [`far_drop`]).
+pub const DROP_LOD: u32 = 8;
+
+/// Cuánto se baja la malla de un nivel grueso (m). Con vóxeles de 64 a 256 m, la regla de que
+/// la tierra firme quede un vóxel entero sobre el agua (`stream::top_from_height`) convertía
+/// cada costa en un acantilado de 64 a 256 m. Bajando la malla `vóxel − 3 m`, el primer vóxel
+/// de tierra queda 3 m sobre el agua (por encima de la marea) y el fondo, bajo ella; las
+/// alturas se redondean al vóxel más cercano (`stream::top_from_height_far`).
+pub fn far_drop(lod: u32) -> f32 {
+    if lod >= DROP_LOD {
+        BASE_VOXEL * (1u32 << lod) as f32 - 3.0
+    } else {
+        0.0
+    }
+}
 /// Vóxeles base por lado de un vóxel de diseño, en potencia de dos (1 → 2 × 2 × 2).
 pub const DESIGN_SHIFT: u32 = 1;
 pub const DESIGN_SCALE: i32 = 1 << DESIGN_SHIFT;
@@ -123,6 +144,49 @@ mod tests {
         assert_eq!(choose_first_level(0, edge * 1.05, 50.0, 720.0, LEVELS), 0);
         assert_eq!(choose_first_level(1, edge * 0.95, 50.0, 720.0, LEVELS), 1);
         assert_eq!(choose_first_level(1, edge * 0.8, 50.0, 720.0, LEVELS), 0);
+    }
+
+    #[test]
+    fn el_ultimo_anillo_cubre_el_entorno_amplio() {
+        // Desde cualquier punto del mapa (la cámara no sale de él), el anillo más grueso llega a
+        // por lo menos 85 km en todas las direcciones, y no pasa del borde de la grilla amplia
+        // (150 km alrededor del centro del mapa), así no se estira el borde de los datos.
+        let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod }).collect();
+        let last = levels[LEVELS as usize - 1];
+        for (cx, cz) in [(0.0, 0.0), (24000.0, 0.0), (0.0, 24000.0), (24000.0, 24000.0), (12000.0, 12000.0), (3100.0, 20500.0)] {
+            let c = Vec2::new(cx, cz);
+            let (min, max) = last.region(c);
+            let (lo, hi) = (min.as_vec2() * last.chunk_m(), max.as_vec2() * last.chunk_m());
+            let near = (c.x - lo.x).min(c.y - lo.y).min(hi.x - c.x).min(hi.y - c.y);
+            assert!(near >= 85000.0, "desde {c:?} el último anillo llega a {near} m");
+            let far = (12000.0 - lo.x).max(12000.0 - lo.y).max(hi.x - 12000.0).max(hi.y - 12000.0);
+            assert!(far <= 150000.0, "desde {c:?} el último anillo sale de la grilla amplia ({far} m)");
+            // Todas las columnas de todos los niveles: un punto en exactamente un nivel.
+            let cols = level_columns(&levels, c);
+            let total: usize = cols.iter().map(|l| l.len()).sum();
+            assert!(total < 6000, "{total} columnas");
+            for k in 0..200 {
+                let a = k as f32 * 0.7;
+                let r = 300.0 + k as f32 * 450.0;
+                let p = c + Vec2::new(a.cos(), a.sin()) * r;
+                let hits = levels
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, spec)| cols[*i].contains(&IVec2::new((p.x / spec.chunk_m()).floor() as i32, (p.y / spec.chunk_m()).floor() as i32)))
+                    .count();
+                assert_eq!(hits, 1, "el punto {p:?} está en {hits} niveles");
+            }
+        }
+    }
+
+    #[test]
+    fn la_malla_de_los_niveles_gruesos_baja_casi_un_voxel() {
+        assert_eq!(far_drop(0), 0.0);
+        assert_eq!(far_drop(DROP_LOD - 1), 0.0);
+        for lod in DROP_LOD..LEVELS {
+            let vs = BASE_VOXEL * (1u32 << lod) as f32;
+            assert_eq!(far_drop(lod), vs - 3.0);
+        }
     }
 
     #[test]

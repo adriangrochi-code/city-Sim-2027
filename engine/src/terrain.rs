@@ -169,6 +169,17 @@ const ARROYOS_CTX_JSON: &str = include_str!("../../assets/mapas/montevideo/arroy
 const BIOMAS_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/biomas.bin");
 const BIOMAS_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/biomas_contexto.bin");
 const META_JSON: &str = include_str!("../../assets/mapas/montevideo/meta.json");
+/// Entorno amplio (ver `tools/mapa_real/construir_entorno_amplio.py`): relieve de 300 × 300 km
+/// alrededor del mapa en una grilla de 500 m (metros = valor / 100 − 50) y su cobertura
+/// (bañado y monte nativo, un byte cada uno).
+const AMPLIO_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/amplio.bin");
+const AMPLIO_COB_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/amplio_cobertura.bin");
+/// Transición entre el entorno (grilla de 100 m) y el entorno amplio (500 m): los últimos
+/// metros de la grilla del entorno se mezclan con la amplia, sin escalón ni corte recto.
+pub const WIDE_BLEND: f32 = 3000.0;
+/// Fuera de la grilla amplia el relieve se funde, en esta distancia, con una llanura (o con
+/// el agua, si el borde es agua): no se estira el último valor en líneas rectas.
+pub const WIDE_FADE: f32 = 15000.0;
 /// Monte nativo reconstruido para 1726 (cobertura de copas 0..255, misma grilla que las
 /// alturas). Ver `docs/sistemas/vegetacion-historica.md`.
 const BOSQUE_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/bosque.bin");
@@ -236,9 +247,22 @@ struct Grid {
 
 impl Grid {
     fn from_u16(bytes: &[u8], n: usize, step: f32, from: f32) -> Grid {
+        Grid::from_u16_scaled(bytes, n, step, from, 200.0)
+    }
+    /// Alturas en u16 con `scale` valores por metro (metros = valor / scale − 50).
+    fn from_u16_scaled(bytes: &[u8], n: usize, step: f32, from: f32, scale: f32) -> Grid {
         assert_eq!(bytes.len(), n * n * 2, "mapa real incompleto");
-        let v = bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]]) as f32 / 200.0 - 50.0).collect();
+        let v = bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]]) as f32 / scale - 50.0).collect();
         Grid { v, n, step, from }
+    }
+    /// Último punto de la grilla (m): cubre `[from, to]` en x y en z.
+    fn to(&self) -> f32 {
+        self.from + (self.n - 1) as f32 * self.step
+    }
+    /// Distancia (m) al borde de la grilla: positiva adentro, negativa afuera.
+    fn inside(&self, x: f32, z: f32) -> f32 {
+        let to = self.to();
+        (x - self.from).min(z - self.from).min(to - x).min(to - z)
     }
     /// Valores de un byte (0..255) llevados a 0..1.
     fn from_u8(bytes: &[u8], n: usize, step: f32, from: f32) -> Grid {
@@ -402,9 +426,51 @@ struct RealMap {
     coast_l_ctx: Grid,
     /// Islotes de piedra (centro, radio, alto).
     islotes: Vec<(Vec2, f32, f32)>,
+    /// Entorno amplio (500 m): alturas, distancia al agua (m) y cobertura de bañado y de monte
+    /// nativo (0..1).
+    wide: Grid,
+    sea_wide: Grid,
+    marsh_wide: Grid,
+    forest_wide: Grid,
 }
 
 impl RealMap {
+    /// Peso de la grilla del entorno (100 m) frente a la amplia: 1 adentro, 0 afuera, con una
+    /// transición de [`WIDE_BLEND`] metros contra el borde interior del entorno.
+    fn ctx_weight(&self, x: f32, z: f32) -> f32 {
+        smoothstep(0.0, WIDE_BLEND, self.ctx.inside(x, z))
+    }
+
+    /// Relieve del entorno amplio. Fuera de su grilla (más de 150 km del mapa) se funde con una
+    /// llanura de ruido suave (o con el agua, donde el borde es agua) en [`WIDE_FADE`] metros.
+    fn wide_height(&self, x: f32, z: f32, hills: &FastNoiseLite) -> f32 {
+        let h = self.wide.cubic(x, z);
+        let out = -self.wide.inside(x, z);
+        if out <= 0.0 {
+            return h;
+        }
+        let k = smoothstep(0.0, WIDE_FADE, out);
+        let far = if h > 0.0 { 35.0 + 25.0 * hills.get_noise_2d(x * 0.3, z * 0.3) } else { -7.5 };
+        h + (far - h) * k
+    }
+
+    /// Mezcla un valor del entorno (100 m) con el del entorno amplio según [`Self::ctx_weight`].
+    fn ctx_or_wide(&self, x: f32, z: f32, ctx: impl Fn() -> f32, wide: impl Fn() -> f32) -> f32 {
+        let w = self.ctx_weight(x, z);
+        if w >= 1.0 {
+            ctx()
+        } else if w <= 0.0 {
+            wide()
+        } else {
+            ctx() * w + wide() * (1.0 - w)
+        }
+    }
+
+    /// Distancia al agua fuera del mapa jugable.
+    fn outer_sea(&self, x: f32, z: f32) -> f32 {
+        self.ctx_or_wide(x, z, || self.sea_ctx.linear(x, z), || self.sea_wide.linear(x, z))
+    }
+
     /// Código de bioma oficial en un punto. Entre las cuatro muestras vecinas gana el código
     /// con más peso bilineal: así el borde de una playa sigue una línea suave y no los
     /// escalones de la grilla.
@@ -687,6 +753,12 @@ impl TerrainGen {
         let (coast_r_ctx, coast_l_ctx) = ctx.coast_params(&sea_ctx, &land_ctx, &beach_ctx, &tramos);
         let forest_main = Grid::from_u8(BOSQUE_BIN, main_n, main_step, 0.0);
         let forest_ctx = Grid::from_u8(BOSQUE_CTX_BIN, ctx_n, ctx_step, ctx_from);
+        let wide_n = meta_num(META_JSON, "\"amplio\"", "muestras") as usize;
+        let wide_step = meta_num(META_JSON, "\"amplio\"", "paso_m");
+        let wide_from = meta_num(META_JSON, "\"amplio\"", "desde_m");
+        let wide = Grid::from_u16_scaled(AMPLIO_BIN, wide_n, wide_step, wide_from, 100.0);
+        let sea_wide = wide.sea_distance();
+        let [marsh_wide, forest_wide] = Grid::channels_u8::<2>(AMPLIO_COB_BIN, wide_n, wide_step, wide_from);
         t.real = Some(Box::new(RealMap {
             main,
             ctx,
@@ -715,6 +787,10 @@ impl TerrainGen {
             coast_l_main,
             coast_l_ctx,
             islotes: parse_islotes(COSTA_JSON),
+            wide,
+            sea_wide,
+            marsh_wide,
+            forest_wide,
         }));
         for txt in [ARROYOS_JSON, ARROYOS_CTX_JSON] {
             let (arroyos, names) = parse_arroyos(txt);
@@ -984,7 +1060,7 @@ impl TerrainGen {
         let Some(r) = &self.real else { return 0.0 };
         let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
         if edge <= 0.0 {
-            r.forest_ctx.linear(x, z)
+            r.ctx_or_wide(x, z, || r.forest_ctx.linear(x, z), || r.forest_wide.linear(x, z))
         } else if edge < 400.0 {
             let w = smoothstep(0.0, 400.0, edge);
             r.forest_ctx.linear(x, z) * (1.0 - w) + r.forest_main.linear(x, z) * w
@@ -1089,7 +1165,8 @@ impl TerrainGen {
     fn real_raw(&self, r: &RealMap, x: f32, z: f32) -> f32 {
         let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
         if edge <= 0.0 {
-            return r.ctx.cubic(x, z);
+            // Fuera del mapa: el entorno de 100 m y, más lejos, el amplio.
+            return r.ctx_or_wide(x, z, || r.ctx.cubic(x, z), || self.wide_relief(r, x, z));
         }
         let h = r.main.cubic(x, z);
         if edge < 400.0 {
@@ -1104,7 +1181,7 @@ impl TerrainGen {
         let Some(r) = &self.real else { return (self.coast_z(x) - z).max(0.0) };
         let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
         if edge <= 0.0 {
-            return r.sea_ctx.linear(x, z);
+            return r.outer_sea(x, z);
         }
         let d = r.sea_main.linear(x, z);
         if edge < 400.0 {
@@ -1235,7 +1312,28 @@ impl TerrainGen {
     }
 
     fn real_height(&self, r: &RealMap, x: f32, z: f32) -> f32 {
-        let mut h = self.real_raw(r, x, z);
+        // Entorno amplio (más allá de la grilla de 100 m): solo el relieve, con una ondulación
+        // leve. Las costas de piedra, médanos y arroyos salen de los datos del entorno, que acá
+        // no llegan (y a esa distancia el vóxel mide 64 m o más).
+        let w = r.ctx_weight(x, z);
+        if w <= 0.0 {
+            return self.wide_relief(r, x, z);
+        }
+        let raw = self.real_raw(r, x, z);
+        let h = self.real_detail(raw, x, z);
+        // En la transición al entorno amplio los detalles se apagan con el peso del entorno:
+        // la altura es continua en el borde de la grilla de 100 m.
+        if w < 1.0 {
+            raw + (h - raw) * w
+        } else {
+            h
+        }
+    }
+
+    /// Detalles del relieve sobre la grilla (restingas, islotes, piedras de la orilla, médanos,
+    /// ondulación, afloramientos y cauces de los arroyos).
+    fn real_detail(&self, raw: f32, x: f32, z: f32) -> f32 {
+        let mut h = raw;
         // Restingas: en el agua junto a las costas de piedra el fondo sube en lajas que quedan
         // entre medio metro bajo el agua y un metro sobre ella (algunas asoman en bajante).
         if h <= 0.5 {
@@ -1444,6 +1542,14 @@ impl TerrainGen {
     /// árboles, monte ribereño en las orillas de los arroyos, bañados en los bajos junto a
     /// ellos, playas de arena con médanos y puntas de piedra donde la costa es empinada.
     fn biome(&self, x: f32, z: f32, h: f32, slope: f32) -> Mat {
+        // Entorno amplio: biomas gruesos con su cobertura; en la transición se mezclan con los
+        // del entorno vóxel a vóxel (sin línea).
+        if let Some(r) = &self.real {
+            let w = r.ctx_weight(x, z);
+            if w <= 0.0 || (w < 1.0 && self.dither(x, z) + 0.5 > w) {
+                return self.wide_biome(r, x, z, h, slope);
+            }
+        }
         // Ruido de manchas (cientos de metros) y de grano fino (metros).
         let blot = self.n_hills.get_noise_2d(x * 3.0, z * 3.0);
         let fine = self.n_detail.get_noise_2d(x * 2.5, z * 2.5);
@@ -1560,6 +1666,55 @@ impl TerrainGen {
         if dry > 0.45 + dith * 0.3 {
             GRASS_DRY
         } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05 + dith * 0.3) || dry < -0.45 + dith * 0.3 || dens > 0.2 + dith * 0.2 {
+            GRASS_LUSH
+        } else {
+            GRASS
+        }
+    }
+
+    /// Relieve del entorno amplio con una ondulación leve (±6 m en kilómetros) en tierra.
+    fn wide_relief(&self, r: &RealMap, x: f32, z: f32) -> f32 {
+        let h = r.wide_height(x, z, &self.n_hills);
+        if h > 0.3 {
+            h + self.n_detail.get_noise_2d(x * 0.05, z * 0.05) * 6.0 * smoothstep(0.5, 20.0, h)
+        } else {
+            h
+        }
+    }
+
+    /// Biomas del entorno amplio (vóxeles de 16 a 512 m, a decenas de km): arena en la costa,
+    /// bañados y monte nativo según la cobertura de `amplio_cobertura.bin`, roca en las laderas
+    /// empinadas de las sierras y pradera, más seca en las cuchillas.
+    fn wide_biome(&self, r: &RealMap, x: f32, z: f32, h: f32, slope: f32) -> Mat {
+        let d = self.dither(x, z);
+        // Manchas de kilómetros (los mismos ruidos, a escala más grande).
+        let blot = self.n_hills.get_noise_2d(x * 0.6, z * 0.6);
+        let fine = self.n_detail.get_noise_2d(x * 0.05, z * 0.05);
+        if h < -0.3 {
+            return if h > -2.5 { SAND_WET } else { MUD };
+        }
+        let sd = r.outer_sea(x, z);
+        if sd < 350.0 + fine * 150.0 && h < 8.0 {
+            return SAND;
+        }
+        if slope > 0.45 + fine * 0.1 || (h > 220.0 && slope > 0.2 + d * 0.1) {
+            return ROCK;
+        }
+        let marsh = r.marsh_wide.linear(x, z);
+        if marsh > 0.35 + d * 0.4 && slope < 0.08 {
+            return if fine > 0.45 { GRASS_LUSH } else { MARSH };
+        }
+        let forest = r.forest_wide.linear(x, z);
+        if forest > 0.3 + d * 0.5 {
+            return FOREST_FLOOR;
+        }
+        if forest > 0.12 + d * 0.2 {
+            return GRASS_LUSH;
+        }
+        let dry = (h - 40.0) / 60.0 + blot * 0.6 + fine * 0.2 + slope * 0.8;
+        if dry > 0.45 + d * 0.3 {
+            GRASS_DRY
+        } else if dry < -0.45 + d * 0.3 {
             GRASS_LUSH
         } else {
             GRASS
@@ -1897,6 +2052,100 @@ mod tests {
             assert_eq!(t.arroyo_distance(x, z), slow(x, z));
             assert_eq!(t.height(x, z), t.height_with_coast(x, z, t.coast_z(x)));
         }
+    }
+
+    /// Punto local (m) de una latitud y longitud, con el origen y la escala de meta.json.
+    fn local(lat: f32, lon: f32) -> (f32, f32) {
+        let (lat0, lon0) = (meta_num(META_JSON, "origen_noroeste", "lat"), meta_num(META_JSON, "origen_noroeste", "lon"));
+        let (kx, ky) = (meta_num(META_JSON, "metros_por_grado", "lon"), meta_num(META_JSON, "metros_por_grado", "lat"));
+        ((lon - lon0) * kx, (lat0 - lat) * ky)
+    }
+
+    #[test]
+    fn el_entorno_amplio_tiene_la_geografia_real() {
+        let t = TerrainGen::montevideo();
+        let r = t.real.as_ref().unwrap();
+        assert!(r.wide.inside(12000.0, 12000.0) >= 149000.0, "la grilla amplia llega a 150 km del centro del mapa");
+        // Tierra adentro (Florida, San José, Canelones), las sierras de Maldonado, Punta del
+        // Este, la costa argentina de Punta Indio y el medio del Río de la Plata.
+        let alto = |lat: f32, lon: f32| {
+            let (x, z) = local(lat, lon);
+            assert!(r.ctx.inside(x, z) < 0.0, "({lat}, {lon}) está en el entorno de 100 m");
+            t.height(x, z)
+        };
+        assert!(alto(-34.10, -56.21) > 30.0, "Florida");
+        assert!(alto(-34.34, -56.71) > 10.0, "San José de Mayo");
+        assert!(alto(-34.742, -55.324) > 300.0, "sierra de las Ánimas: {}", alto(-34.742, -55.324));
+        assert!(alto(-34.90, -54.95) > 0.5, "Maldonado");
+        assert!(alto(-35.05, -55.40) < 0.0, "el mar frente a Piriápolis");
+        assert!(alto(-35.15, -56.60) < 0.0, "el medio del Río de la Plata");
+        assert!(alto(-35.35, -57.35) > 0.5, "Punta Indio (Argentina): {}", alto(-35.35, -57.35));
+        // Biomas del entorno amplio: hay pradera, monte o bañado, y nada de lo del entorno de
+        // 100 m estirado (las costas de piedra de costa.json no llegan hasta acá).
+        let (x, z) = local(-34.10, -56.21);
+        let m = t.surface_material(x, z, t.height(x, z), 0.02);
+        assert!(matches!(m, GRASS | GRASS_DRY | GRASS_LUSH | FOREST_FLOOR | MARSH), "material {m} en Florida");
+    }
+
+    #[test]
+    fn sin_cortes_entre_las_grillas_del_mapa_el_entorno_y_el_amplio() {
+        let t = TerrainGen::montevideo();
+        let r = t.real.as_ref().unwrap();
+        let (c_lo, c_hi, w_lo, w_hi) = (r.ctx.from, r.ctx.to(), r.wide.from, r.wide.to());
+        // Altura continua a ambos lados de cada borde (mapa / entorno / amplio / afuera), en
+        // los cuatro lados: a 1 m de distancia, menos de 1 m de diferencia.
+        let mut worst = (0.0f32, 0.0, 0.0);
+        for k in 0..120 {
+            let s = k as f32 / 119.0;
+            let along_c = c_lo + 500.0 + (c_hi - c_lo - 1000.0) * s;
+            let along_w = w_lo + 500.0 + (w_hi - w_lo - 1000.0) * s;
+            for (x, z, dx, dz) in [
+                (0.0, 300.0 + 23400.0 * s, 1.0, 0.0),
+                (MAP_SIZE, 300.0 + 23400.0 * s, 1.0, 0.0),
+                (c_lo, along_c, 1.0, 0.0),
+                (c_hi, along_c, 1.0, 0.0),
+                (along_c, c_lo, 0.0, 1.0),
+                (along_c, c_hi, 0.0, 1.0),
+                (w_lo, along_w, 1.0, 0.0),
+                (w_hi, along_w, 1.0, 0.0),
+                (along_w, w_lo, 0.0, 1.0),
+                (along_w, w_hi, 0.0, 1.0),
+            ] {
+                let (a, b) = (t.height(x - dx, z - dz), t.height(x + dx, z + dz));
+                if (a - b).abs() > worst.0 {
+                    worst = ((a - b).abs(), x, z);
+                }
+            }
+        }
+        assert!(worst.0 < 1.0, "salto de {} m en ({}, {})", worst.0, worst.1, worst.2);
+        // Cerca del borde del entorno (dentro de la transición) tampoco hay escalones.
+        for k in 0..400 {
+            let z = c_lo + 2000.0 + k as f32 * 150.0;
+            for x0 in [c_lo, c_hi - WIDE_BLEND] {
+                let mut prev = t.height(x0, z);
+                for i in 1..=60 {
+                    let h = t.height(x0 + i as f32 * 50.0, z);
+                    assert!((h - prev).abs() < 12.0, "escalón de {} m en ({}, {z})", h - prev, x0 + i as f32 * 50.0);
+                    prev = h;
+                }
+            }
+        }
+        // Más allá de la grilla amplia no se estira el borde en líneas rectas: después de
+        // WIDE_FADE el relieve es una llanura de ruido (o agua), distinto del valor del borde.
+        let mut differ = 0;
+        for k in 0..100 {
+            let z = w_lo + 3000.0 + k as f32 * 2900.0;
+            let edge = t.height(w_lo, z);
+            let far = t.height(w_lo - WIDE_FADE - 2000.0, z);
+            if edge > 0.0 {
+                assert!(far > 5.0 && far < 70.0, "llanura afuera: {far} m (borde {edge} m)");
+            } else {
+                assert!(far < 0.0, "agua afuera: {far} (borde {edge})");
+            }
+            let mid = t.height(w_lo - WIDE_FADE * 0.5, z);
+            differ += ((mid - edge).abs() > 0.5) as usize;
+        }
+        assert!(differ > 20, "afuera de la grilla amplia el relieve copia el borde ({differ} de 100 distintos)");
     }
 
     #[test]

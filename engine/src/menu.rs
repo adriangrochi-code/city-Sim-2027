@@ -792,7 +792,7 @@ impl Menu {
                 ui.label("Distancia de dibujo");
                 ui.horizontal(|ui| {
                     let l = crate::lod::LEVELS;
-                    for (v, name, tip) in [(l - 2, "Corta", "Menos detalle a lo lejos: más rápido"), (l - 1, "Media", "Un término medio"), (l, "Larga", "Se ve hasta el horizonte")] {
+                    for (v, name, tip) in [(crate::lod::MAP_LEVELS, "Corta", "Solo el mapa (24 km): más rápido"), (l - 1, "Media", "El mapa y su entorno (unos 45 km)"), (l, "Larga", "La tierra hasta el horizonte (unos 90 km)")] {
                         if ui.selectable_label(d.niveles == v, name).on_hover_text(tip).clicked() {
                             d.niveles = v;
                         }

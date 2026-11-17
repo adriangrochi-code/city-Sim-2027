@@ -1567,6 +1567,14 @@ def main():
             "fuente": "grupos CONEAT (SNIG), rocosidad aproximada por zona: ver docs/sistemas/suelos-y-roca.md",
             "grupos_en_la_ventana": rocas[2],
         }
+    # El entorno amplio (amplio.bin) lo arma construir_entorno_amplio.py: se conserva su sección.
+    try:
+        with open(os.path.join(args.salida, "meta.json")) as f:
+            viejo = json.load(f)
+        if "amplio" in viejo:
+            meta["amplio"] = viejo["amplio"]
+    except (OSError, ValueError):
+        pass
     guardar_json(os.path.join(args.salida, "meta.json"), meta, compacto=False)
     if args.fuente == "ide" and hidro and rocas is not None:
         print("Recursos del suelo (productividad, geología, materiales)…", flush=True)

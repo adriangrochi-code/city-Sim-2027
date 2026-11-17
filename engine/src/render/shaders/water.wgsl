@@ -33,10 +33,29 @@ fn vs_main(@location(0) pos: vec3<f32>, @location(1) flow: vec2<f32>) -> VOut {
     o.flow = flow;
     // El plano del río sube y baja con la marea y los temporales (extra.y); los arroyos no.
     let is_river = dot(flow, flow) < 1e-6;
-    let p = vec3(pos.x, pos.y + select(0.0, g.extra.y, is_river), pos.z);
+    var p = vec3(pos.x, pos.y + select(0.0, g.extra.y, is_river), pos.z);
+    // [entorno amplio] El plano (400 km, centrado en el mapa) sigue al centro de los anillos
+    // de detalle, de a baldosas enteras de 2 km: siempre llega más allá del terreno dibujado.
+    if (is_river && g.sun_color.w > 0.0) {
+        p.x += round((g.sky_top.w - 12000.0) / 2000.0) * 2000.0;
+        p.z += round((g.sky_horizon.w - 12000.0) / 2000.0) * 2000.0;
+    }
     o.clip = g.view_proj * vec4(curved(p), 1.0);
     o.world = p;
     return o;
+}
+
+// [entorno amplio] Fin del terreno dibujado: el círculo de radio sun_color.w alrededor del
+// centro de los anillos de detalle (sky_top.w, sky_horizon.w). Desde el 60 % de ese radio
+// todo se funde con la niebla, así el último anillo (y el agua más allá) no se ve como un
+// borde recto. 0 = sin límite.
+fn reach_fog(world: vec3<f32>) -> f32 {
+    let r = g.sun_color.w;
+    if (r <= 0.0) {
+        return 0.0;
+    }
+    let d = distance(world.xz, vec2(g.sky_top.w, g.sky_horizon.w));
+    return smoothstep(r * 0.6, r * 0.97, d);
 }
 
 // Azar con aritmética entera (no con sin(), que en las placas NVIDIA pierde precisión con
@@ -123,7 +142,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let vdir_f = normalize(v.world - g.cam_pos.xyz);
     let sun_f = pow(max(dot(vdir_f, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
     let fog_c = mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, sun_f * 0.6);
-    col = mix(col, fog_c, clamp(fog, 0.0, 0.88));
+    col = mix(col, fog_c, max(clamp(fog, 0.0, 0.88), reach_fog(v.world)));
     // El río es turbio (agua color león): casi no deja ver el fondo. Así tampoco se notan
     // los escalones del fondo entre niveles de detalle.
     return vec4(col, select(0.97, 0.88, flowing));

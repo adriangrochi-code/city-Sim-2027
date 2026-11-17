@@ -391,6 +391,11 @@ pub struct Renderer {
     pub smooth_terrain: bool,
     /// Nivel del río (m sobre el nivel medio): mareas, sudestadas, bajantes.
     pub water_level: f32,
+    /// [entorno amplio] Hasta dónde llega el terreno dibujado: centro de los anillos de detalle
+    /// (x, z) y radio (m) del círculo que cubren seguro; 0 = sin límite. Más allá, el terreno y
+    /// el agua se funden con la niebla (ver `reach_fog` en voxel.wgsl y water.wgsl) y el plano
+    /// del río sigue a la cámara: el borde del mundo no se ve como un corte recto.
+    pub reach: [f32; 3],
     /// Luz de la luna (0 nueva, 1 llena): aclara las noches.
     pub moon: f32,
     /// Viento: de dónde viene (grados) y velocidad (m/s), para las olas.
@@ -1070,6 +1075,7 @@ impl Renderer {
             adapter_name,
             smooth_terrain: true,
             water_level: 0.0,
+            reach: [0.0; 3],
             moon: 0.5,
             wind: (70.0, 4.0),
             time: 3.0,
@@ -1564,9 +1570,10 @@ impl Renderer {
             light_view_proj: sg.vp[0],
             cam_pos: cam.eye().extend(1.0).into(),
             sun_dir: l.sun_dir.extend(0.0).into(),
-            sun_color: l.sun_color.extend(0.0).into(),
-            sky_top: l.sky_top.extend(0.0).into(),
-            sky_horizon: l.sky_horizon.extend(0.0).into(),
+            // [entorno amplio] Los .w libres llevan el alcance del terreno (ver `reach`).
+            sun_color: l.sun_color.extend(self.reach[2]).into(),
+            sky_top: l.sky_top.extend(self.reach[0]).into(),
+            sky_horizon: l.sky_horizon.extend(self.reach[1]).into(),
             // Niebla: más tenue cuanto más se aleja la cámara, para que la vista del mapa no se lave.
             // Bruma: en un día claro se ven 30 a 40 km sobre el río; desde muy alto, algo más.
             params: Vec4::new(1.0 / (32000.0f32).max(cam.distance * 10.0), l.night, self.time, l.ambient).into(),
