@@ -51,7 +51,8 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real
 8. [x] Vóxel de 0,25 m con capa de detalle de 0,125 m (flora) y monte con nivel de detalle
-9. [ ] Hojas de los árboles en micro-vóxeles (sauces con ramas colgantes de cerca), curva tonal
+9. [x] Hojas sueltas de 0,125 m en la superficie de las copas (tiemblan con el viento)
+10. [ ] Ramas colgantes del sauce en micro-vóxeles, curva tonal
 
 ## Fase 3: diseño de todas las épocas
 

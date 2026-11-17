@@ -78,8 +78,14 @@ fn vs_main(v: VIn, @builtin(vertex_index) vi: u32) -> VOut {
     let fade = 1.0 - smoothstep(70.0, 92.0, dist);
     // Suelo de la planta: la base de la caja menos su altura sobre el suelo.
     let ground = v.pos.y - f32(v.info.z) * MICRO;
+    let hoja = v.info.w == 1u;
     var p = v.pos + c * size;
-    p.y = ground + (p.y - ground) * fade;
+    if (hoja) {
+        // Hoja de una copa: se achica en su lugar (no baja hacia el suelo).
+        p = v.pos + size * 0.5 + (c - vec3(0.5)) * size * fade;
+    } else {
+        p.y = ground + (p.y - ground) * fade;
+    }
     // Viento: las puntas se corren en la dirección a donde sopla, más cuanto más alto el
     // tallo y más fuerte el viento; ráfagas que recorren el campo.
     let w = g.extra.w;
@@ -90,7 +96,11 @@ fn vs_main(v: VIn, @builtin(vertex_index) vi: u32) -> VOut {
     let gust = 0.6 + 0.4 * sin(g.params.z * 1.7 + dot(v.pos.xz, to) * 0.35);
     // Altura del punto sobre el suelo.
     let hh = max(p.y - ground, 0.0);
-    let sway = min(wspd, 15.0) * 0.012 * hh * hh * gust;
+    var sway = min(wspd, 15.0) * 0.012 * hh * hh * gust;
+    if (hoja) {
+        // Las hojas de las copas tiemblan unos centímetros, desfasadas entre sí.
+        sway = min(wspd, 15.0) * 0.006 * (0.5 + 0.5 * sin(g.params.z * 3.1 + f32(v.info.y) * 0.4));
+    }
     p = vec3(p.x + to.x * sway, p.y, p.z + to.y * sway);
     var o: VOut;
     o.clip = g.view_proj * vec4(curved(p), 1.0);

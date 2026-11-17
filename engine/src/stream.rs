@@ -508,6 +508,69 @@ fn vnoise3(p: Vec3, seed: u32) -> f32 {
     l(l(x00, x10, u.y), l(x01, x11, u.y), u.z)
 }
 
+/// Hojas sueltas en la superficie de las copas: de cada cara de follaje que da al aire (arriba
+/// o a los costados) asoma, a veces, una hoja o un par de hojas de 0,125 m (micro-vóxeles,
+/// ver `trees::Micro`), con su propio tono. Así el contorno de la copa deja de ser una pared de
+/// cubos de 0,25 m. `lo`: vóxel global de la esquina de la copia con borde (`pad`).
+fn leaf_fuzz(pad: &[Mat], lo: IVec3, vs: f32, top: &[i32], out: &mut Vec<crate::trees::Micro>) {
+    const MICRO: f32 = crate::trees::MICRO;
+    let k = (vs / MICRO).round() as i32;
+    let is_leaf = |m: Mat| matches!(m, LEAF | LEAF_DARK | LEAF_OMBU | LEAF_SAUCE | LEAF_ESPINILLO | LEAF_TALA | CEIBO_FLOR);
+    let at = |i: i32, j: i32, y: i32| pad[(i + j * Q + y * Q * Q) as usize];
+    // Caras: (dx, dy, dz).
+    const FACES: [(i32, i32, i32); 5] = [(0, 1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)];
+    for y in 1..=N {
+        for j in 1..=N {
+            for i in 1..=N {
+                let m = at(i, j, y);
+                if !is_leaf(m) {
+                    continue;
+                }
+                let g = lo + IVec3::new(i, y, j);
+                let ground = (top[(i + j * Q) as usize] + 1) as f32 * vs;
+                for (f, &(dx, dy, dz)) in FACES.iter().enumerate() {
+                    if at(i + dx, j + dz, y + dy) != AIR {
+                        continue;
+                    }
+                    let h = hash3(g.x, g.y * 7 + f as i32, g.z);
+                    if h % 100 >= 30 {
+                        continue;
+                    }
+                    // Posición en la grilla de micro-vóxeles, justo afuera de la cara.
+                    let (sx, sy, sz) = (((h >> 8) & 1) as i32, ((h >> 9) & 1) as i32, ((h >> 10) & 1) as i32);
+                    let (mx, my, mz) = match (dx, dy, dz) {
+                        (0, 1, 0) => (g.x * k + sx * (k - 1), (g.y + 1) * k, g.z * k + sz * (k - 1)),
+                        (1, 0, 0) => ((g.x + 1) * k, g.y * k + sy * (k - 1), g.z * k + sz * (k - 1)),
+                        (-1, 0, 0) => (g.x * k - 1, g.y * k + sy * (k - 1), g.z * k + sz * (k - 1)),
+                        (0, 0, 1) => (g.x * k + sx * (k - 1), g.y * k + sy * (k - 1), (g.z + 1) * k),
+                        _ => (g.x * k + sx * (k - 1), g.y * k + sy * (k - 1), g.z * k - 1),
+                    };
+                    let y_m = my as f32 * MICRO;
+                    let above = ((y_m - ground) / MICRO).clamp(0.0, 255.0) as u8;
+                    // A veces dos hojas en fila (una ramita).
+                    let size = if (h >> 12) % 4 == 0 { if dy == 1 { [1, 2, 1, 0] } else { [1, 1, 2, 0] } } else { [1, 1, 1, 0] };
+                    out.push(crate::trees::Micro {
+                        pos: [mx as f32 * MICRO, y_m, mz as f32 * MICRO],
+                        size,
+                        // Material, matiz, altura sobre el suelo, y 1 = hoja (se mece poco y se
+                        // achica en el lugar al alejarse).
+                        info: [m, ((h >> 16) & 0xff) as u8, above, 1],
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[inline]
+fn hash3(x: i32, y: i32, z: i32) -> u32 {
+    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xcb1a_b31f) ^ (z as u32).wrapping_mul(0xd816_3841);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5bd1_e995);
+    h ^= h >> 15;
+    h
+}
+
 /// Niveles con árboles: hasta 4 m por vóxel (más lejos, una copa sería un solo vóxel).
 const TREE_MAX_VOXEL: f32 = 4.0;
 
@@ -912,6 +975,10 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         }
         if solid == 0 {
             continue;
+        }
+        // Hojas sueltas de 0,125 m en la superficie de las copas (solo en el nivel más fino).
+        if !trees.is_empty() && vs <= crate::trees::PLANT_MAX_VOXEL {
+            leaf_fuzz(&pad, lo, vs, &top, &mut detail);
         }
         CHUNKS.fetch_add(1, AtOrd::Relaxed);
         let tm = std::time::Instant::now();
