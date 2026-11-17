@@ -275,7 +275,7 @@ Pigmentos disponibles: **cal** (blanco), **tierras** (ocre amarillo, almagre u o
 4. **Función:** vivienda, tienda (vanos anchos), pulpería (puerta en la esquina), taller (portón ancho y patio de trabajo), almacén (nave con pocas aberturas), cuartel, iglesia o convento.
 5. **Material:** **piedra** (abundante, el granito y el gneis de la península), **ladrillo** (de fabricación local en el XVIII [F]), **adobe o terrón**, **madera** (escasa, importada del Paraguay [F]) y **cal** (relativamente abundante [F]).
 6. **Crecimiento por etapas** [E, pero muy característico]: una casa empieza con 2 cuartos al frente; se agrega una crujía lateral, después el segundo patio; después se cambia la teja por azotea en el frente, conservando la teja en el fondo; después se suma un **cuarto alto o altillo**; después un mirador. **Mezclar teja y azotea en el mismo lote** (azotea al frente, teja o galpón al fondo) es muy verosímil y da mucha variedad.
-7. **Guerra y deterioro:** sitios de 1807 (británico), 1811–1814 y la Cisplatina 1817–1828. Un pasaje de viajero (sin fecha verificada) menciona «muchas casas en ruinas» [F, débil]. Conviene incluir casas **dañadas o abandonadas**, sobre todo cerca de murallas y portones, en los escenarios de 1807 a 1814.
+7. **Guerra y deterioro:** sitios de 1807 (británico), 1811–1814 y la dominación luso-brasileña 1817–1829 (Provincia Cisplatina desde 1821). Un pasaje de viajero (sin fecha verificada) menciona «muchas casas en ruinas» [F, débil]. Conviene incluir casas **dañadas o abandonadas**, sobre todo cerca de murallas y portones, en los escenarios de 1807 a 1814.
 
 ---
 
