@@ -599,6 +599,228 @@ pub fn curtiembre(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     fence(f, e, 0, f.width, fd, f.depth - 1, 4);
 }
 
+// --- Más estilos por tipo y densidad ------------------------------------------------------
+
+/// Casa de teja: una planta encalada con techo de teja a dos aguas sobre la calle, puerta al
+/// medio y dos ventanas; huerta y pozo en el fondo.
+pub fn casa_teja(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(31);
+    let (fd, h) = (14, 8);
+    let wall = CALES[(r.next() % CALES.len() as u64) as usize];
+    f.foundation(t, e, 0, f.width, 0, fd, ZOCALO);
+    f.fill(e, 0, f.width, 0, h, 0, fd, wall);
+    zocalo(f, e, 0, f.width, 0, fd, 2, ZOCALO);
+    gable(f, e, 0, f.width, 0, fd, h, 2, 1, if r.f() < 0.5 { TILE } else { TILE_DARK }, wall, true);
+    let mid = f.width / 2;
+    opening(f, e, mid - 1, mid + 2, 0, 6, 1, SHUTTERS[(r.next() % 2) as usize]);
+    for u in [3, f.width - 6] {
+        window_reja(f, e, u, u + 3, 2, 6);
+    }
+    chimney(f, e, f.width - 4, fd - 4, 0, h + 5);
+    f.surface(e, 1, f.width - 1, fd, fd + 12, PLAZA);
+    aljibe(f, e, 3, fd + 4);
+    f.surface(e, 1, f.width - 1, fd + 12, f.depth - 2, GARDEN);
+    fence(f, e, 0, f.width, fd + 12, f.depth - 1, f.width / 2);
+}
+
+/// Casa de inquilinato (densidad alta): frente de azotea y, a lo largo de un patio angosto,
+/// una fila de piezas con su puerta cada una, hasta el fondo del solar.
+pub fn inquilinato(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(32);
+    let h = 9;
+    let wall = CALES[(r.next() % CALES.len() as u64) as usize];
+    let fd = 12;
+    f.foundation(t, e, 0, f.width, 0, fd, ZOCALO);
+    f.fill(e, 0, f.width, 0, h, 0, fd, wall);
+    f.fill(e, 1, f.width - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, f.width, h, h + 1, 0, fd, wall);
+    cornisa(f, e, 0, f.width, h - 1, wall);
+    ground_facade(f, e, 2, ZOCALO, true, SHUTTER, 3);
+    // Piezas en fila sobre un costado, de 4 m cada una, con su puerta al patio.
+    let (pu0, pu1) = (f.width - 10, f.width);
+    let w1 = f.depth - 4;
+    f.foundation(t, e, pu0, pu1, fd, w1, ZOCALO);
+    f.fill(e, pu0, pu1, 0, h - 1, fd, w1, wall);
+    f.fill(e, pu0 + 1, pu1 - 1, h - 2, h - 1, fd + 1, w1 - 1, AZOTEA);
+    ring(f, e, pu0, pu1, h - 1, h, fd, w1, wall);
+    let mut w = fd + 3;
+    while w + 4 < w1 {
+        // Puerta y ventanita hacia el patio (cara u = pu0).
+        f.clear(e, pu0 - 1, pu0 + 1, 0, 5, w, w + 2);
+        f.raw_fill(e, pu0, pu0 + 1, 0, 5, w, w + 2, WOOD_DARK);
+        f.clear(e, pu0 - 1, pu0 + 1, 2, 4, w + 4, w + 5);
+        f.raw_fill(e, pu0, pu0 + 1, 2, 4, w + 4, w + 5, WINDOW);
+        w += 8;
+    }
+    // Patio largo con piletas y ropa tendida.
+    f.surface(e, 1, pu0, fd, w1, PLAZA);
+    aljibe(f, e, 4, fd + 10);
+    for k in 0..3 {
+        let ww = fd + 20 + k * 14;
+        f.raw_fill(e, 2, 3, 0, 5, ww, ww + 1, WOOD_DARK);
+        f.raw_fill(e, pu0 - 2, pu0 - 1, 0, 5, ww, ww + 1, WOOD_DARK);
+        f.raw_fill(e, 3, pu0 - 2, 4, 5, ww, ww + 1, if r.f() < 0.5 { SACK } else { CAL });
+    }
+}
+
+/// Casa de altos de renta (densidad alta): dos plantas en todo el frente y un ala de dos
+/// plantas hasta el fondo, con galería de madera hacia el patio.
+pub fn altos_renta(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    casa_altos(t, e, f);
+    let mut r = f.rng(33);
+    let wall = CALES[(r.next() % CALES.len() as u64) as usize];
+    let (h, fd) = (17, 18);
+    let wing = if r.f() < 0.5 { 0 } else { f.width - 8 };
+    let w1 = f.depth - 6;
+    f.foundation(t, e, wing, wing + 8, fd, w1, STONE);
+    f.fill(e, wing, wing + 8, 0, h - 1, fd, w1, wall);
+    f.fill(e, wing, wing + 8, h - 2, h - 1, fd, w1, AZOTEA);
+    ring(f, e, wing, wing + 8, h - 1, h, fd, w1, wall);
+    // Galería del primer piso hacia el patio, con baranda y pies derechos.
+    let gu = if wing == 0 { 8 } else { wing - 2 };
+    f.raw_fill(e, gu, gu + 2, 8, 9, fd, w1, WOOD);
+    f.raw_fill(e, if wing == 0 { gu + 1 } else { gu }, if wing == 0 { gu + 2 } else { gu + 1 }, 9, 11, fd, w1, REJA);
+    let mut w = fd + 2;
+    while w < w1 {
+        f.raw_fill(e, if wing == 0 { gu + 1 } else { gu }, if wing == 0 { gu + 2 } else { gu + 1 }, 0, 8, w, w + 1, WOOD_DARK);
+        w += 6;
+    }
+}
+
+/// Fonda y posada: una planta con techo de teja, letrero, palenque y un patio de carretas al
+/// costado con portón.
+pub fn fonda(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(34);
+    let (fd, h) = (16, 9);
+    let wall = if r.f() < 0.5 { CAL_OCRE } else { CAL };
+    let bw = f.width - 8;
+    f.foundation(t, e, 0, bw, 0, fd, ZOCALO);
+    f.fill(e, 0, bw, 0, h, 0, fd, wall);
+    zocalo(f, e, 0, bw, 0, fd, 2, ZOCALO);
+    gable(f, e, 0, bw, 0, fd, h, 2, 1, TILE, wall, true);
+    opening(f, e, 3, 7, 0, 6, 1, WOOD);
+    window_reja(f, e, 10, 13, 2, 6);
+    f.fill(e, 2, bw - 2, 7, 8, -1, 0, WOOD_DARK); // letrero
+    for u in [1, 8] {
+        f.raw_fill(e, u, u + 1, 0, 3, -4, -3, WOOD_DARK);
+    }
+    f.raw_fill(e, 1, 9, 2, 3, -4, -3, WOOD_DARK);
+    // Patio de carretas con portón y galpón al fondo.
+    f.surface(e, bw, f.width, 0, f.depth - 2, DIRT_ROAD);
+    f.fill(e, bw, f.width, 0, 5, -1, 0, WOOD_DARK);
+    f.clear(e, bw + 1, f.width - 1, 0, 5, -1, 0);
+    let (w0, w1) = (f.depth - 22, f.depth - 4);
+    f.foundation(t, e, 1, f.width - 1, w0, w1, ADOBE);
+    f.fill(e, 1, f.width - 1, 0, 7, w0, w1, ADOBE);
+    f.clear(e, 2, f.width - 2, 0, 6, w0, w0 + 1);
+    gable(f, e, 1, f.width - 1, w0, w1, 7, 2, 1, THATCH, ADOBE, true);
+    // Una carreta en el patio.
+    f.raw_fill(e, bw + 2, bw + 6, 1, 3, fd + 4, fd + 10, WOOD);
+    f.raw_fill(e, bw + 1, bw + 2, 0, 3, fd + 5, fd + 8, WOOD_DARK);
+    f.surface(e, 1, bw, fd, w0, DIRT);
+}
+
+/// Casa de comercio con recova: dos plantas con arcos en la planta baja sobre la vereda (la
+/// recova), balcones arriba y depósito al fondo.
+pub fn recova(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(35);
+    let (h1, h, fd) = (9, 17, 20);
+    let wall = CALES[(r.next() % CALES.len() as u64) as usize];
+    f.foundation(t, e, 0, f.width, 0, fd, STONE);
+    f.fill(e, 0, f.width, 0, h, 0, fd, wall);
+    f.fill(e, 1, f.width - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, f.width, h, h + 1, 0, fd, wall);
+    cornisa(f, e, 0, f.width, h1, wall);
+    cornisa(f, e, 0, f.width, h - 1, wall);
+    // Recova: tres arcos de 3,5 m sobre una galería de 3 m de fondo.
+    for k in 0..3 {
+        let u0 = 1 + k * 8;
+        arch(f, e, u0, u0 + 7, 0, 8, 0, 6);
+    }
+    f.surface(e, 0, f.width, 0, 6, STONE);
+    for k in 0..3 {
+        let u0 = 2 + k * 8;
+        opening(f, e, u0 + 1, u0 + 4, 0, 6, 7, WOOD);
+    }
+    for k in 0..3 {
+        let wx = 3 + k * 8;
+        opening(f, e, wx, wx + 2, h1 + 1, h1 + 6, 1, WINDOW);
+        balcony(f, e, wx - 1, wx + 3, h1);
+    }
+    let (w0, w1) = (fd + 10, f.depth - 6);
+    f.foundation(t, e, 1, f.width - 1, w0, w1, STONE);
+    f.fill(e, 1, f.width - 1, 0, 8, w0, w1, BRICK);
+    gable(f, e, 1, f.width - 1, w0, w1, 8, 2, 1, TILE, BRICK, false);
+    f.surface(e, 1, f.width - 1, fd, w0, PLAZA);
+}
+
+/// Panadería: casa de adobe con el horno de barro en el patio, leña y bolsas de harina.
+pub fn panaderia(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(36);
+    let (fd, h) = (12, 8);
+    let wall = if r.f() < 0.5 { CAL } else { ADOBE };
+    f.foundation(t, e, 0, f.width, 0, fd, ZOCALO);
+    f.fill(e, 0, f.width, 0, h, 0, fd, wall);
+    f.fill(e, 1, f.width - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, f.width, h, h + 1, 0, fd, wall);
+    opening(f, e, 3, 7, 0, 6, 1, WOOD);
+    window_reja(f, e, 12, 15, 2, 6);
+    f.fill(e, 2, 10, 6, 7, -1, 0, WOOD_DARK);
+    // Horno de barro grande y su techito.
+    f.surface(e, 1, f.width - 1, fd, f.depth - 2, DIRT);
+    dome(f, e, 8.0, (fd + 10) as f32, 4.5, 0, ADOBE);
+    chimney(f, e, 7, fd + 6, 3, 9);
+    for k in 0..4 {
+        f.raw_fill(e, 15, 21, 0, 1 + k % 2, fd + 4 + k * 3, fd + 6 + k * 3, WOOD);
+    }
+    for (u, w) in [(3, fd + 18), (6, fd + 19), (4, fd + 21)] {
+        f.raw_fill(e, u, u + 2, 0, 2, w, w + 2, SACK);
+    }
+    fence(f, e, 0, f.width, fd, f.depth - 1, 4);
+}
+
+/// Velería y jabonería: galpón de ladrillo con la caldera del sebo, chimenea alta y barricas.
+pub fn veleria(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(37);
+    let (fd, h) = (22, 9);
+    f.foundation(t, e, 0, f.width, 0, fd, STONE);
+    f.fill(e, 0, f.width, 0, h, 0, fd, BRICK);
+    zocalo(f, e, 0, f.width, 0, fd, 2, STONE);
+    gable(f, e, 0, f.width, 0, fd, h, 2, 1, if r.f() < 0.5 { TILE } else { TILE_DARK }, BRICK, false);
+    opening(f, e, 8, 15, 0, 7, 1, WOOD_DARK);
+    chimney(f, e, 3, fd - 5, 0, h + 9);
+    // Patio con la caldera al aire libre y barricas de sebo.
+    f.surface(e, 1, f.width - 1, fd, f.depth - 2, DIRT);
+    cylinder(f, e, 12.0, (fd + 9) as f32, 3.0, 0, 3, BRICK_DARK);
+    cylinder(f, e, 12.0, (fd + 9) as f32, 2.0, 3, 4, IRON);
+    for k in 0..6 {
+        let (u, w) = (2 + (k % 3) * 3, fd + 18 + (k / 3) * 3);
+        cylinder(f, e, u as f32 + 1.0, w as f32 + 1.0, 1.0, 0, 3, WOOD);
+    }
+    fence(f, e, 0, f.width, fd, f.depth - 1, f.width - 5);
+}
+
+/// Depósito de frutos del país: un galpón largo de ladrillo hasta el fondo del solar, con
+/// portones laterales y fardos en la vereda.
+pub fn deposito(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(38);
+    let (h, w1) = (10, f.depth - 4);
+    f.foundation(t, e, 1, f.width - 1, 0, w1, STONE);
+    f.fill(e, 1, f.width - 1, 0, h, 0, w1, BRICK);
+    zocalo(f, e, 1, f.width - 1, 0, w1, 2, STONE);
+    gable(f, e, 1, f.width - 1, 0, w1, h, 2, 1, if r.f() < 0.5 { TILE } else { TILE_DARK }, BRICK, false);
+    opening(f, e, 8, 16, 0, 8, 1, WOOD_DARK);
+    let side = f.left_side();
+    let mut w = 10;
+    while w + 6 < w1 {
+        opening(&side, e, w, w + 4, 0, 7, 1, WOOD_DARK);
+        w += 16;
+    }
+    for (u, m) in [(2, HIDE), (6, SACK), (17, HIDE), (20, SACK)] {
+        f.raw_fill(e, u, u + 3, 0, 2, -4, -1, m);
+    }
+}
+
 /// Barraca de solar: el galpón sobre la calle y un segundo depósito al fondo, con el patio
 /// de carga lleno de fardos.
 pub fn barraca_solar(t: &TerrainGen, e: &mut Edits, f: &Frame) {
@@ -820,7 +1042,21 @@ mod tests {
                 pulperia(&t, &mut e, &frame(&t, seed, LOT_W, LOT_D), corner);
                 builds.push(("pulpería", e));
             }
-            const TRADES: [(&str, Builder); 5] = [("tienda", tienda), ("almacén", almacen), ("taller", taller), ("curtiembre", curtiembre), ("barraca", barraca_solar)];
+            const TRADES: [(&str, Builder); 13] = [
+                ("tienda", tienda),
+                ("almacén", almacen),
+                ("taller", taller),
+                ("curtiembre", curtiembre),
+                ("barraca", barraca_solar),
+                ("casa de teja", casa_teja),
+                ("inquilinato", inquilinato),
+                ("altos de renta", altos_renta),
+                ("fonda", fonda),
+                ("recova", recova),
+                ("panadería", panaderia),
+                ("velería", veleria),
+                ("depósito", deposito),
+            ];
             for (name, b) in TRADES {
                 let mut e = Edits::default();
                 b(&t, &mut e, &frame(&t, seed, LOT_W, LOT_D));

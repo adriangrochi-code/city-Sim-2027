@@ -374,10 +374,11 @@ impl Game {
         let mut out = Vec::new();
         let ok = [0.45, 0.95, 0.45, 0.55];
         let bad = [1.0, 0.35, 0.3, 0.55];
-        // Solares: zonificados vacíos en verde; con la herramienta de zonas, también los libres.
+        // Solares: el plano de zonas (los zonificados con su color y los libres) solo se ve con
+        // la herramienta de zonas; fuera de ella, el mapa queda limpio.
         let show_free = matches!(self.tool, Tool::Zone | Tool::Dezone);
         for l in self.city.lots.lots.values() {
-            if l.level > 0 {
+            if !show_free || l.level > 0 {
                 continue;
             }
             let col = match zone_of(l.zone) {

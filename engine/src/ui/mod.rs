@@ -473,11 +473,13 @@ pub struct GameUi {
     bar_h: f32,
     /// Alto del cajón abierto en el cuadro anterior (0 si está cerrado).
     drawer_h: f32,
+    /// ¿Estaba abierto el cajón de zonas el cuadro anterior? (al cerrarlo se deja de zonificar)
+    zones_were_open: bool,
 }
 
 impl Default for GameUi {
     fn default() -> Self {
-        GameUi { list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
+        GameUi { zones_were_open: false, list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
     }
 }
 
@@ -540,6 +542,14 @@ impl GameUi {
         }
         self.top_bar(ctx, game, hour, extra_status, &mut acts);
         self.category_bar(ctx, game);
+        // Al cerrar el cajón de zonas se deja la herramienta de zonas (como en el género): así
+        // el plano de colores de las zonas desaparece del mapa.
+        let zones_open = self.open == Some(Category::Zonas);
+        if self.zones_were_open && !zones_open && matches!(game.tool, Tool::Zone | Tool::Dezone) {
+            let inspect = TOOLS.iter().position(|t| t.0 == Tool::Inspect).unwrap();
+            acts.push(UiAction::Tool(inspect));
+        }
+        self.zones_were_open = zones_open;
         match self.open {
             Some(cat) => self.drawer(ctx, cat, game, &mut acts),
             None => self.drawer_h = 0.0,

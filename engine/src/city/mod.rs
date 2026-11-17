@@ -84,18 +84,29 @@ fn pulperia_r(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
     colonial::pulperia(t, e, f, false)
 }
 
-/// Constructor del catálogo de vóxeles para cada tipo de zona y nivel.
-fn builder_for(kind: ZoneKind, level: u8, seed: u64) -> Builder {
+/// Constructor del catálogo de vóxeles para cada tipo de zona, densidad y nivel. Cada solar
+/// elige un estilo con su semilla, así la cuadra no se ve repetida.
+fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64) -> Builder {
+    use lots::Density::*;
+    let pick = (seed >> 7) % 100;
     match (kind, level) {
         (ZoneKind::Residencial, 1) => &colonial::rancho,
+        (ZoneKind::Residencial, 2) if density == Alta => &colonial::inquilinato,
+        (ZoneKind::Residencial, 2) if pick < 45 => &colonial::casa_teja,
         (ZoneKind::Residencial, 2) => &colonial::casa_azotea,
+        (ZoneKind::Residencial, _) if density == Alta => &colonial::altos_renta,
         (ZoneKind::Residencial, _) => &colonial::casa_altos,
         (ZoneKind::Comercial, 1) if seed % 2 == 0 => &pulperia_l,
         (ZoneKind::Comercial, 1) => &pulperia_r,
+        (ZoneKind::Comercial, 2) if pick < 40 => &colonial::fonda,
         (ZoneKind::Comercial, 2) => &colonial::tienda,
+        (ZoneKind::Comercial, _) if density == Alta || pick < 45 => &colonial::recova,
         (ZoneKind::Comercial, _) => &colonial::almacen,
+        (ZoneKind::Industrial, 1) if pick < 45 => &colonial::panaderia,
         (ZoneKind::Industrial, 1) => &colonial::taller,
+        (ZoneKind::Industrial, 2) if pick < 45 => &colonial::veleria,
         (ZoneKind::Industrial, 2) => &colonial::curtiembre,
+        (ZoneKind::Industrial, _) if pick < 45 => &colonial::deposito,
         (ZoneKind::Industrial, _) => &colonial::barraca_solar,
     }
 }
@@ -155,10 +166,10 @@ impl City {
             e.surface.extend(r.surface);
             e.ground.extend(r.ground);
         }
-        let jobs: Vec<(u32, Vec2, Vec2, u64, ZoneKind, u8)> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, l.kind()?, l.level))).filter(|j| j.5 > 0).collect();
+        let jobs: Vec<(u32, Vec2, Vec2, u64, (ZoneKind, lots::Density), u8)> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, lots::zone_of(l.zone)?, l.level))).filter(|j| j.5 > 0).collect();
         let per = jobs.len().div_ceil(threads).max(1);
         let built: Vec<(u32, voxelize::Built)> = std::thread::scope(|sc| {
-            let hs: Vec<_> = jobs.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&(id, c, f, seed, kind, level)| (id, build_rotated(t, c, f, LOT_W, LOT_D, seed, builder_for(kind, level, seed)))).collect::<Vec<_>>())).collect();
+            let hs: Vec<_> = jobs.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&(id, c, f, seed, kind, level)| (id, build_rotated(t, c, f, LOT_W, LOT_D, seed, builder_for(kind.0, kind.1, level, seed)))).collect::<Vec<_>>())).collect();
             hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
         });
         for l in self.lots.lots.values_mut() {
@@ -393,8 +404,8 @@ impl City {
     pub fn apply_levels(&mut self, t: &TerrainGen, changes: &[LevelChange], e: &mut Edits) {
         for ch in changes {
             let Some(lot) = self.lots.lots.get(&ch.lot) else { continue };
-            let Some(kind) = lot.kind() else { continue };
-            let b = build_rotated(t, lot.c, lot.f, LOT_W, LOT_D, lot.seed, builder_for(kind, ch.level, lot.seed));
+            let Some((kind, density)) = lots::zone_of(lot.zone) else { continue };
+            let b = build_rotated(t, lot.c, lot.f, LOT_W, LOT_D, lot.seed, builder_for(kind, density, ch.level, lot.seed));
             let new: std::collections::HashSet<glam::IVec3> = b.voxels.iter().copied().collect();
             for &v in &lot.voxels {
                 if !new.contains(&v) {

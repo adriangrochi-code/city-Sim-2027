@@ -92,6 +92,7 @@ pub fn zone(s: &mut Session) -> String {
         (PLAZA - Vec2::new(0.0, 140.0), 480.0, ZoneKind::Residencial, Density::Media),
         (PLAZA, 100.0, ZoneKind::Comercial, Density::Alta),
         (PLAZA + side * (BLOCK * 2.0), 60.0, ZoneKind::Comercial, Density::Media),
+        (PLAZA - side * (BLOCK * 1.6) + f * (BLOCK * 1.2), 70.0, ZoneKind::Residencial, Density::Alta),
         (PLAZA + side * (BLOCK * 5.2) - f * (BLOCK * 0.8), 140.0, ZoneKind::Industrial, Density::Media),
     ] {
         let (k_n, k_e) = g.city.paint(c, r, zone_code(k, d));
