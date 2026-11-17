@@ -49,8 +49,12 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 10] = [
+    let views: [(&'static str, [f32; 5]); 13] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
+        // Hidrografía oficial (IDE): la playa de Pocitos y los bañados del Carrasco y el Pantanoso.
+        ("paisaje-playa-pocitos", [16500.0, 15000.0, 700.0, 200.0, 28.0]),
+        ("paisaje-banado-carrasco", [24000.0, 5000.0, 1500.0, 230.0, 30.0]),
+        ("paisaje-banado-pantanoso", [7000.0, 9000.0, 1200.0, 200.0, 32.0]),
         ("paisaje-ciudad-vieja", [11300.0, 14350.0, 900.0, 200.0, 38.0]),
         ("paisaje-medanos-carrasco", [22000.0, 13100.0, 520.0, 200.0, 30.0]),
         ("paisaje-costa-este-lejos", [21500.0, 13000.0, 2600.0, 230.0, 28.0]),
@@ -58,7 +62,8 @@ pub fn landscape_steps() -> Vec<Act> {
         ("paisaje-cerro", [5924.0, 12270.0, 1600.0, 200.0, 32.0]),
         ("paisaje-ladera-cerca", [9000.0, 9000.0, 120.0, 200.0, 30.0]),
         ("paisaje-isla-ratas", [8294.0, 12280.0, 420.0, 200.0, 32.0]),
-        ("paisaje-isla-flores", [24000.0, 16500.0, 9000.0, 270.0, 22.0]),
+        // La cámara no sale del mapa: la isla (x 36 200, z 18 400) se ve a 12 km, en el horizonte.
+        ("paisaje-isla-flores", [24000.0, 18400.0, 300.0, 270.0, 3.0]),
         ("paisaje-cenital-este", [21500.0, 13000.0, 14000.0, 230.0, 85.0]),
     ];
     let mut out = vec![Hour(10.5)];
