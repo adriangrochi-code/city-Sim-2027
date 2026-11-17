@@ -580,7 +580,7 @@ impl Renderer {
         });
         // Superficie del río: un plano enorme al nivel del mar (en cuadrícula para la precisión).
         let mut wv: Vec<[f32; 3]> = Vec::new();
-        let (c, s, n) = (12000.0f32, 6000.0f32, 20);
+        let (c, s, n) = (12000.0f32, 20000.0f32, 20); // 400 km: el río llega hasta el horizonte
         for j in 0..n {
             for i in 0..n {
                 let x0 = c - s * n as f32 / 2.0 + i as f32 * s;
@@ -984,7 +984,8 @@ impl Renderer {
             sky_top: l.sky_top.extend(0.0).into(),
             sky_horizon: l.sky_horizon.extend(0.0).into(),
             // Niebla: más tenue cuanto más se aleja la cámara, para que la vista del mapa no se lave.
-            params: Vec4::new(1.0 / (9000.0f32).max(cam.distance * 7.0), l.night, self.time, l.ambient).into(),
+            // Bruma: en un día claro se ven 30 a 40 km sobre el río; desde muy alto, algo más.
+            params: Vec4::new(1.0 / (32000.0f32).max(cam.distance * 10.0), l.night, self.time, l.ambient).into(),
             extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));

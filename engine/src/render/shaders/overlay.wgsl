@@ -19,10 +19,17 @@ struct VOut {
     @location(0) color: vec4<f32>,
 };
 
+// Curvatura de la Tierra (radio 6371 km): lo lejano baja d²/2R respecto de la cámara. A 10 km
+// son 8 m; a 24 km, 45 m: el horizonte se curva y el río se pierde detrás de él.
+fn curved(p: vec3<f32>) -> vec3<f32> {
+    let d = p.xz - g.cam_pos.xz;
+    return vec3(p.x, p.y - dot(d, d) / 12742000.0, p.z);
+}
+
 @vertex
 fn vs_main(@location(0) pos: vec3<f32>, @location(1) color: vec4<f32>) -> VOut {
     var o: VOut;
-    o.clip = g.view_proj * vec4(pos, 1.0);
+    o.clip = g.view_proj * vec4(curved(pos), 1.0);
     o.color = color;
     return o;
 }

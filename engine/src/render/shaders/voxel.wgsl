@@ -89,11 +89,18 @@ struct VOut {
 
 @group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 64>;
 
+// Curvatura de la Tierra (radio 6371 km): lo lejano baja d²/2R respecto de la cámara. A 10 km
+// son 8 m; a 24 km, 45 m: el horizonte se curva y el río se pierde detrás de él.
+fn curved(p: vec3<f32>) -> vec3<f32> {
+    let d = p.xz - g.cam_pos.xz;
+    return vec3(p.x, p.y - dot(d, d) / 12742000.0, p.z);
+}
+
 @vertex
 fn vs_main(v: VIn) -> VOut {
     var o: VOut;
     let c = corner(v);
-    o.clip = g.view_proj * vec4(c.pos, 1.0);
+    o.clip = g.view_proj * vec4(curved(c.pos), 1.0);
     o.world = c.pos;
     o.color = vec4(palette[c.mat].rgb, f32(c.mat) / 255.0);
     o.normal = dir_normal(c.dir);
@@ -274,6 +281,6 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
-    col = mix(col, g.sky_horizon.rgb, clamp(fog, 0.0, 0.92));
+    col = mix(col, g.sky_horizon.rgb, clamp(fog, 0.0, 0.88));
     return vec4(col, 1.0);
 }
