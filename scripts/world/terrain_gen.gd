@@ -16,7 +16,7 @@ const MAP_DIR := "res://assets/mapas/montevideo/"
 
 ## Mapa real: centro sugerido para la plaza mayor (Ciudad Vieja, junto a la Plaza Matriz) y
 ## cumbre del Cerro. Los mismos valores están en assets/mapas/montevideo/meta.json.
-const FOUNDING_SITE := Vector2(11297.7, 14348.9)
+const FOUNDING_SITE := Vector2(11097.7, 14308.9)
 const CERRO := Vector2(5923.7, 12269.8)
 
 ## Mapa ficticio del primer prototipo.

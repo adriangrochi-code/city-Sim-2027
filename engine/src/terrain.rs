@@ -50,7 +50,7 @@ const CTX_N: usize = 361;
 const CTX_STEP: f32 = 100.0;
 const CTX_FROM: f32 = -6000.0;
 /// Sitio de la fundación (Ciudad Vieja, junto a la Plaza Matriz) y cumbre del Cerro.
-pub const FOUNDING_REAL: Vec2 = Vec2::new(11297.7, 14348.9);
+pub const FOUNDING_REAL: Vec2 = Vec2::new(11097.7, 14308.9);
 pub const CERRO_REAL: Vec2 = Vec2::new(5923.7, 12269.8);
 /// Cauce de los arroyos: se hunde el terreno y el centro es agua.
 const CAUCE_PROFUNDIDAD: f32 = 1.6;

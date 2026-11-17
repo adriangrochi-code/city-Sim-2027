@@ -2,8 +2,12 @@
 """
 Construye el mapa real de Montevideo para el prototipo (y luego para el motor de Rust).
 
-Fuente: "Terrain Tiles" públicos de AWS (formato terrarium, Mapzen/Tilezen), que combinan
-SRTM, GMTED2010, ETOPO1, NED y otras fuentes. Ver docs/sistemas/mapa-real.md (atribución).
+Fuentes (ver docs/sistemas/mapa-real.md, atribución):
+  --fuente ide    (por omisión) el Modelo Digital del Terreno del Uruguay de 30 m de la
+                  Infraestructura de Datos Espaciales (IDE Uruguay), servicio WCS. Mide el suelo
+                  desnudo, sin edificios ni árboles: la Ciudad Vieja da 20 m y no 33.
+  --fuente aws    los "Terrain Tiles" públicos de AWS (terrarium, Mapzen/Tilezen: SRTM,
+                  GMTED2010, ETOPO1…), que miden la superficie con techos y copas.
 
 Salida en assets/mapas/montevideo/:
   altura.bin        alturas del mapa jugable: uint16 little-endian, fila por fila (norte → sur),
@@ -41,6 +45,10 @@ LAT_N = -34.778         # borde norte
 LON_W = -56.325         # borde oeste
 ZOOM = 13
 URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+
+IDE_WCS = ("https://mapas.ide.uy/geoserver-raster/wcs?service=WCS&version=2.0.1&request=GetCoverage"
+           "&coverageId=raster__mdt_pais_30m_4326&format=image/tiff"
+           "&subset=Lat({lat_s},{lat_n})&subset=Long({lon_w},{lon_e})")
 
 # Puntos de referencia (lat, lon).
 PLAZA_MATRIZ = (-34.9068, -56.2036)
@@ -128,6 +136,62 @@ def muestrear(alto, ox, oy, xs, zs):
     a = alto[i0, j0] * (1 - fx) + alto[i0, j0 + 1] * fx
     b = alto[i0 + 1, j0] * (1 - fx) + alto[i0 + 1, j0 + 1] * fx
     return a * (1 - fy) + b * fy
+
+
+# --- MDT de la IDE Uruguay -------------------------------------------------------------------
+def bajar_mdt(cache):
+    """Recorte del MDT nacional (EPSG:4326, float32, -32767 = sin dato: río y mar)."""
+    lat_s = LAT_N - (MAP_SIZE + OUTER) / KY - 0.01
+    lat_n = LAT_N + OUTER / KY + 0.01
+    lon_w = LON_W - OUTER / KX - 0.01
+    lon_e = LON_W + (MAP_SIZE + OUTER) / KX + 0.01
+    ruta = os.path.join(cache, "mdt_ide_mvd.tif")
+    if not os.path.exists(ruta):
+        url = IDE_WCS.format(lat_s=f"{lat_s:.5f}", lat_n=f"{lat_n:.5f}", lon_w=f"{lon_w:.5f}", lon_e=f"{lon_e:.5f}")
+        with urllib.request.urlopen(url, timeout=300) as r:
+            datos = r.read()
+        with open(ruta, "wb") as f:
+            f.write(datos)
+    im = Image.open(ruta)
+    a = np.asarray(im, dtype=np.float64)
+    # Georreferencia (ModelTransformationTag): lon = lon0 + j·d, lat = lat0 − i·d.
+    t = im.tag_v2[34264]
+    return a, t[3], t[7], t[0]
+
+
+def muestrear_mdt(mdt, xs, zs):
+    a, lon0, lat0, d = mdt
+    zz, xx = np.meshgrid(zs, xs, indexing="ij")
+    lat = LAT_N - zz / KY
+    lon = LON_W + xx / KX
+    fi = (lat0 - lat) / d - 0.5
+    fj = (lon - lon0) / d - 0.5
+    i0 = np.clip(np.floor(fi).astype(int), 0, a.shape[0] - 2)
+    j0 = np.clip(np.floor(fj).astype(int), 0, a.shape[1] - 2)
+    fy = np.clip(fi - i0, 0, 1)
+    fx = np.clip(fj - j0, 0, 1)
+    v = [a[i0, j0], a[i0, j0 + 1], a[i0 + 1, j0], a[i0 + 1, j0 + 1]]
+    nod = np.zeros(zz.shape, bool)
+    for k in v:
+        nod |= k < -1000
+    # Sin dato = agua. Cerca de la costa se interpola solo con las muestras de tierra.
+    w = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy]
+    num = sum(np.where(k > -1000, k, 0.0) * wk for k, wk in zip(v, w))
+    den = sum(np.where(k > -1000, wk, 0.0) for k, wk in zip(v, w))
+    h = np.where(den > 0.5, num / np.maximum(den, 1e-9), -1.0)
+    return h
+
+
+def suavizar_suave(h):
+    """Media de 3×3 solo en tierra: quita el escalonado del MDT (que viene de curvas de nivel)
+    sin aplastar el relieve ni mover la costa."""
+    from numpy.lib.stride_tricks import sliding_window_view as ventanas
+    p = np.pad(h, 1, mode="edge")
+    media = ventanas(p, (3, 3)).mean(axis=(-2, -1))
+    out = h.copy()
+    ok = (h > 0.5) & (media > 0.5)
+    out[ok] = media[ok]
+    return out
 
 
 # --- Arroyos desde el relieve ------------------------------------------------------------
@@ -344,23 +408,38 @@ def guardar_u16(ruta, h):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cache", required=True, help="carpeta vacía o con tiles ya bajados")
+    ap.add_argument("--fuente", choices=["ide", "aws"], default="ide", help="MDT de la IDE Uruguay (suelo) o Terrain Tiles de AWS (superficie)")
     ap.add_argument("--salida", default=os.path.join(os.path.dirname(__file__), "..", "..", "assets", "mapas", "montevideo"))
     args = ap.parse_args()
     os.makedirs(args.cache, exist_ok=True)
     os.makedirs(args.salida, exist_ok=True)
 
-    print("Bajando tiles…", flush=True)
-    alto, ox, oy, n = mosaico(args.cache)
-    print(f"  {n} tiles, mosaico {alto.shape}", flush=True)
-
     xs = np.arange(0.0, MAP_SIZE + STEP / 2, STEP)
-    h = muestrear(alto, ox, oy, xs, xs)
     xs_o = np.arange(-OUTER, MAP_SIZE + OUTER + OUTER_STEP / 2, OUTER_STEP)
-    h_o = muestrear(alto, ox, oy, xs_o, xs_o)
-    print(f"  mapa {h.shape} min {h.min():.1f} máx {h.max():.1f}", flush=True)
-    h = limpiar_agua(h, STEP)
-    h = suavizar_tierra(h)
-    h_o = limpiar_agua(h_o, OUTER_STEP)
+    if args.fuente == "ide":
+        print("Bajando el MDT de la IDE Uruguay…", flush=True)
+        mdt = bajar_mdt(args.cache)
+        print(f"  recorte {mdt[0].shape}, {mdt[3] * KY:.0f} m por muestra", flush=True)
+        h = muestrear_mdt(mdt, xs, xs)
+        h_o = muestrear_mdt(mdt, xs_o, xs_o)
+        print(f"  mapa {h.shape} min {h.min():.1f} máx {h.max():.1f}", flush=True)
+        h = limpiar_agua(h, STEP)
+        h = suavizar_suave(h)
+        h_o = limpiar_agua(h_o, OUTER_STEP)
+        fuente = "MDT Uruguay 30 m (IDE Uruguay), servicio WCS raster__mdt_pais_30m_4326"
+        atribucion = "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Ver docs/sistemas/mapa-real.md."
+    else:
+        print("Bajando tiles…", flush=True)
+        alto, ox, oy, n = mosaico(args.cache)
+        print(f"  {n} tiles, mosaico {alto.shape}", flush=True)
+        h = muestrear(alto, ox, oy, xs, xs)
+        h_o = muestrear(alto, ox, oy, xs_o, xs_o)
+        print(f"  mapa {h.shape} min {h.min():.1f} máx {h.max():.1f}", flush=True)
+        h = limpiar_agua(h, STEP)
+        h = suavizar_tierra(h)
+        h_o = limpiar_agua(h_o, OUTER_STEP)
+        fuente = "AWS Terrain Tiles (terrarium), zoom %d" % ZOOM
+        atribucion = "Datos de elevación: Terrain Tiles de Mapzen/Tilezen en AWS, que incluyen SRTM (NASA), GMTED2010 (USGS), ETOPO1 (NOAA) y otras fuentes. Ver docs/sistemas/mapa-real.md."
 
     print("Calculando arroyos…", flush=True)
     lineas, acc = arroyos(h, STEP)
@@ -376,8 +455,8 @@ def main():
     cx, cz = a_local(*CERRO)
     meta = {
         "nombre": "Montevideo (geografía real)",
-        "fuente": "AWS Terrain Tiles (terrarium), zoom %d" % ZOOM,
-        "atribucion": "Datos de elevación: Terrain Tiles de Mapzen/Tilezen en AWS, que incluyen SRTM (NASA), GMTED2010 (USGS), ETOPO1 (NOAA) y otras fuentes. Ver docs/sistemas/mapa-real.md.",
+        "fuente": fuente,
+        "atribucion": atribucion,
         "origen_noroeste": {"lat": LAT_N, "lon": LON_W},
         "metros_por_grado": {"lon": KX, "lat": KY},
         "tamano_m": MAP_SIZE,
