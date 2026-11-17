@@ -59,14 +59,19 @@ Parámetros: estimación de diseño.
 
 ## 4. Incendios
 
-No son al azar: dependen del **techo** de cada edificio (el mismo criterio que elige el
-edificio del catálogo):
+No son al azar: dependen del **techo** y de las **paredes** de cada edificio, es decir, de los
+materiales con que se levantó (ver [materiales de construcción](materiales-de-construccion.md);
+las partidas viejas usan el techo de su tipo de casa):
 
 | Techo | Igniciones por mes | Facilidad para que le salte el fuego |
 |---|---|---|
 | Paja (ranchos, galpones de nivel 1) | 0,15 % | 1,0 |
 | Teja | 0,03 % | 0,25 |
 | Azotea de ladrillo | 0,01 % | 0,08 |
+| Tablas | 0,10 % | 0,6 |
+| Cuero | 0,07 % | 0,4 |
+
+Las paredes multiplican: tablas ×1,8 (y +0,35 de contagio), barro y paja ×1,1, piedra ×0,8.
 
 - Los talleres arden el doble (fraguas y calderas); la sequía y el viento fuerte, más. La
   ordenanza «sin paja cerca de la plaza» baja un 70 % el riesgo de los ranchos a menos de 400 m.

@@ -7,7 +7,7 @@
 
 use super::icons::Icon;
 use super::{Card, Category, UiAction};
-use crate::city::economy::{ord_info, Ordinance, Res};
+use crate::city::economy::{ord_info, Ordinance};
 use crate::city::game::{fmt_thousands, Game, InspectKind, Tool};
 use crate::city::services::barrio::{numero_epoca, FUTUROS};
 use crate::city::services::{self, port, works, Grupo, Kind, Layer, Order, Placeable};
@@ -149,10 +149,15 @@ pub fn place_card_pub(game: &Game, k: Kind) -> Card {
 
 fn place_card(game: &Game, k: Kind) -> Card {
     let i = services::info(k);
-    let eco = &game.city.economy;
     let mut cost = format!("{} pesos", fmt_thousands(i.cost));
-    if i.ladrillos > 0.0 {
-        cost += &format!(" · {} lad.", i.ladrillos as i32);
+    // Materiales: si falta el preferido, la tarjeta dice con qué se hará (nunca se bloquea).
+    let previa = game.city.vista_previa_servicio(k);
+    if let Some((o, _)) = &previa {
+        if o.faltas != 0 {
+            cost += &format!(" · de {}", o.paredes.nombre());
+        } else if i.ladrillos > 0.0 {
+            cost += &format!(" · {} lad.", i.ladrillos as i32);
+        }
     }
     let disabled = if game.city.plaza.is_none() {
         Some("Falta la plaza")
@@ -162,10 +167,6 @@ fn place_card(game: &Game, k: Kind) -> Card {
         Some("Ya hay una")
     } else if game.city.money < i.cost {
         Some("Sin fondos")
-    } else if eco.stock(Res::Ladrillos).amount < i.ladrillos {
-        Some("Faltan ladrillos")
-    } else if eco.stock(Res::Piedra).amount < i.piedra {
-        Some("Falta piedra")
     } else if k == Kind::Aduana && game.city.services.port.pier.is_none() {
         Some("Falta el muelle")
     } else if k == Kind::Aduana && game.city.services.count(Kind::Aduana) > 0 {
@@ -181,12 +182,13 @@ fn place_card(game: &Game, k: Kind) -> Card {
         name: nombre_corto(k),
         cost,
         tip: format!(
-            "{}: {}{}{} Mantenimiento: {} pesos al mes.",
+            "{}: {}{}{} Mantenimiento: {} pesos al mes.{}",
             i.name,
             i.desc,
             if i.radius > 0.0 { format!(" Alcance: {} m.", i.radius as i32) } else { String::new() },
             if i.plazas > 0 { format!(" Capacidad: {}.", fmt_thousands(i.plazas as i64)) } else { String::new() },
-            i.upkeep
+            i.upkeep,
+            previa.map_or(String::new(), |(_, t)| format!("\n{t}"))
         ),
         action: Some(UiAction::Servicio(Act::Place(p))),
         disabled: disabled.map(str::to_string),

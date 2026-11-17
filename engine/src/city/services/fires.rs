@@ -21,6 +21,10 @@ pub enum Roof {
     Teja,
     /// Azotea de ladrillo: casi no arde.
     Azotea,
+    /// Techo de tablas: arde bastante (ver `materiales`).
+    Tablas,
+    /// Techo de cueros: arde menos que la paja, más que la teja.
+    Cuero,
 }
 
 impl Roof {
@@ -30,6 +34,8 @@ impl Roof {
             Roof::Paja => 0.0015,
             Roof::Teja => 0.0003,
             Roof::Azotea => 0.0001,
+            Roof::Tablas => 0.0010,
+            Roof::Cuero => 0.0007,
         }
     }
     /// Facilidad para que le salte el fuego de un vecino.
@@ -38,6 +44,8 @@ impl Roof {
             Roof::Paja => 1.0,
             Roof::Teja => 0.25,
             Roof::Azotea => 0.08,
+            Roof::Tablas => 0.6,
+            Roof::Cuero => 0.4,
         }
     }
     pub fn name(self) -> &'static str {
@@ -45,12 +53,25 @@ impl Roof {
             Roof::Paja => "techo de paja",
             Roof::Teja => "techo de teja",
             Roof::Azotea => "azotea de ladrillo",
+            Roof::Tablas => "techo de tablas",
+            Roof::Cuero => "techo de cuero",
         }
     }
 }
 
-/// Techo de lo que hay en un solar (el mismo criterio que elige el edificio del catálogo).
+/// Techo de lo que hay en un solar: el de sus materiales (ver `materiales`) o, si no los
+/// tiene, el que dibuja el catálogo para su tipo.
 pub fn roof_of(l: &Lot) -> Roof {
+    use super::super::materiales::Techo;
+    if let Some(o) = l.obra.filter(|_| l.level > 0) {
+        return match o.techo {
+            Techo::Paja => Roof::Paja,
+            Techo::Teja => Roof::Teja,
+            Techo::Azotea => Roof::Azotea,
+            Techo::Tablas => Roof::Tablas,
+            Techo::Cuero => Roof::Cuero,
+        };
+    }
     let pick = (l.seed >> 7) % 100;
     let alta = l.density() == Some(super::super::lots::Density::Alta);
     match (l.kind(), l.level) {
@@ -58,6 +79,18 @@ pub fn roof_of(l: &Lot) -> Roof {
         (Some(ZoneKind::Residencial), 2) if !alta && pick < 45 => Roof::Teja,
         (Some(ZoneKind::Comercial), 2) if pick < 40 => Roof::Teja,
         _ => Roof::Azotea,
+    }
+}
+
+/// Igniciones por mes y facilidad de contagio de un edificio: el techo y las paredes de sus
+/// materiales (las tablas arden; ver `materiales`).
+pub fn fuego_de(l: &Lot) -> (f32, f32) {
+    match l.obra.filter(|_| l.level > 0) {
+        Some(o) => (Roof::Paja.ignition_month() * o.fuego(), o.contagio()),
+        None => {
+            let r = roof_of(l);
+            (r.ignition_month(), r.catch())
+        }
     }
 }
 
@@ -134,7 +167,7 @@ impl City {
                 continue;
             }
             let roof = roof_of(l);
-            let mut p = roof.ignition_month() / STEPS_PER_MONTH * dry;
+            let mut p = fuego_de(l).0 / STEPS_PER_MONTH * dry;
             if l.kind() == Some(ZoneKind::Industrial) {
                 p *= 2.0; // fraguas, calderas y hornos
             }
@@ -192,7 +225,7 @@ impl City {
                     if o.level == 0 {
                         continue;
                     }
-                    let p = spread_chance(o.c - c, i, roof_of(o).catch(), to, speed);
+                    let p = spread_chance(o.c - c, i, fuego_de(o).1, to, speed);
                     if p > 0.0 && self.services.rng.f() < p {
                         spread.push(oid);
                     }
@@ -216,6 +249,7 @@ impl City {
             let l = self.lots.lots.get_mut(&id).unwrap();
             l.level = 0;
             l.age = 0;
+            l.obra = None;
             self.services.ruins.insert(id);
             self.services.water.remove(&id);
         }
@@ -235,7 +269,13 @@ impl City {
             Roof::Paja => 0.7,
             Roof::Teja => 0.3,
             Roof::Azotea => 0.1,
+            Roof::Tablas => 0.5,
+            Roof::Cuero => 0.45,
         };
+        // Las paredes de tablas también arden.
+        if l.obra.is_some_and(|o| o.paredes == super::super::materiales::Pared::Tablas) {
+            r += 0.1;
+        }
         if self.services.fire_source(l.c).is_none() {
             r += 0.3;
         }
@@ -291,9 +331,10 @@ mod tests {
                 let (wc, wf) = free_site(&city, &t, Kind::Aljibe, c);
                 city.place_service(&t, Kind::Aljibe, wc, wf).unwrap();
             }
-            // Arde el rancho con más vecinos edificados cerca (en el centro de una hilera).
+            // Arde el rancho con más vecinos edificados al este y al oeste (en el centro de una
+            // hilera que corre a lo largo del viento).
             let built: Vec<&Lot> = city.lots.lots.values().filter(|l| l.level > 0).collect();
-            let start = (*built.iter().max_by_key(|l| (built.iter().filter(|o| o.c.distance(l.c) < 16.0).count(), -(l.c.distance(c) as i32))).unwrap()).clone();
+            let start = (*built.iter().max_by_key(|l| (built.iter().filter(|o| o.c.distance(l.c) < 16.0 && (o.c.y - l.c.y).abs() < 4.0).count(), -(l.c.distance(c) as i32))).unwrap()).clone();
             assert!(city.ignite(start.id));
             let mut e = Edits::default();
             let mut ever = std::collections::BTreeSet::new();

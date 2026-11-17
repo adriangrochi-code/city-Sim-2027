@@ -130,6 +130,8 @@ pub struct Lot {
     pub seed: u64,
     /// Vóxeles del edificio actual (para reemplazarlo o demolerlo).
     pub voxels: Vec<IVec3>,
+    /// Con qué materiales está hecho el edificio (ver `materiales`); `None` en un solar vacío.
+    pub obra: Option<super::materiales::Obra>,
 }
 
 impl Lot {
@@ -195,6 +197,9 @@ pub fn growth_blockers(lots: &Lots, lot: &Lot, net: &RoadNetwork, pool: i32, dem
     }
     if (next == 3 || d == Density::Alta) && !stone {
         why.push("Necesita una calle empedrada.".into());
+    }
+    if next == 3 && k != ZoneKind::Industrial && lots.sin_altos {
+        why.push("Faltan materiales para los altos: ladrillo o piedra, y cal para el mortero.".into());
     }
     why
 }
@@ -285,6 +290,10 @@ pub struct Lots {
     /// Valor del suelo de cada solar (ver [`ValorLote`]); sin entrada, el valor simple por la
     /// distancia a la plaza y los talleres cercanos.
     pub valor: HashMap<u32, ValorLote>,
+    /// No hay materiales para levantar altos (ladrillo o piedra, y cal para el mortero): las
+    /// casas no pasan de una planta hasta que lleguen (ver `materiales`). Lo pone la ciudad
+    /// antes de cada paso de crecimiento.
+    pub sin_altos: bool,
     next: u32,
     hash: HashMap<IVec2, Vec<u32>>,
 }
@@ -461,7 +470,7 @@ impl Lots {
         self.next += 1;
         let id = self.next;
         let seed = (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((c.x as i64 as u64) << 20) ^ (c.y as i64 as u64);
-        self.lots.insert(id, Lot { id, c, f, zone: 0, level: 0, age: 0, seed, voxels: Vec::new() });
+        self.lots.insert(id, Lot { id, c, f, zone: 0, level: 0, age: 0, seed, voxels: Vec::new(), obra: None });
         self.hash.entry(cell(c)).or_default().push(id);
         id
     }
@@ -553,7 +562,9 @@ impl Lots {
             let age_ok = l.age >= [0, 4, 8, 8][l.level as usize];
             let value_ok = k == ZoneKind::Industrial || next < 2 || value > LEVEL_VALUE[k as usize][next as usize];
             let street_ok = (next < 3 && d != Density::Alta) || stone;
-            if !(age_ok && value_ok && street_ok) {
+            // Dos plantas no se levantan con adobe ni barro (ver `materiales`).
+            let material_ok = next < 3 || k == ZoneKind::Industrial || !self.sin_altos;
+            if !(age_ok && value_ok && street_ok && material_ok) {
                 continue;
             }
             let mut need = 0;

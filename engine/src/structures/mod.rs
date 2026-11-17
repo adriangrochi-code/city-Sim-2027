@@ -57,6 +57,66 @@ pub fn weather(m: Mat, p: IVec3, y: i32, seed: u64) -> Mat {
     }
 }
 
+/// Variante de un edificio del catálogo: los parámetros con que se dibuja distinto de su
+/// forma de siempre. Hoy son los materiales reales de la obra (ver `city::materiales`); está
+/// pensada para sumar después parámetros de estilo (proporciones, fachadas, colores de cal).
+/// Se elige de forma determinista (de la obra y la semilla del solar) y se aplica sobre lo
+/// que dibujó el constructor, con [`aplicar_variante`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Variante {
+    /// Material de las paredes (claro, oscuro); `None` = las del catálogo.
+    pub paredes: Option<(Mat, Mat)>,
+    /// Paredes revocadas: los revoques de cal del dibujo se conservan (con su color) y el
+    /// adobe o el ladrillo del dibujo se encalan.
+    pub revoque: bool,
+    /// Con revoque, las piezas de ladrillo visto del dibujo (chimeneas, galpones) quedan.
+    pub ladrillo_visto: bool,
+    /// Material del techo (claro, oscuro); `None` = el del catálogo.
+    pub techo: Option<(Mat, Mat)>,
+    /// Lleva rejas de hierro (si no, las ventanas enrejadas pasan a ventanas simples).
+    pub rejas: bool,
+    /// Semilla del solar (desgaste de cada vóxel).
+    pub seed: u64,
+}
+
+fn es_cal(m: Mat) -> bool {
+    matches!(m, CAL | CAL_OCRE | CAL_ROSA | CAL_AZUL | CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA)
+}
+
+fn es_pared(m: Mat) -> bool {
+    es_cal(m) || matches!(m, ADOBE | ADOBE_DARK | BRICK | BRICK_DARK | ZOCALO)
+}
+
+fn es_techo(m: Mat) -> bool {
+    matches!(m, TILE | TILE_DARK | TILE_LIGHT | THATCH | THATCH_DARK | AZOTEA)
+}
+
+fn es_oscuro(m: Mat) -> bool {
+    matches!(m, CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA | ADOBE_DARK | BRICK_DARK | ZOCALO | TILE_DARK | THATCH_DARK)
+}
+
+/// Aplica una [`Variante`] a lo que dibujó un constructor del catálogo.
+pub fn aplicar_variante(e: &mut Edits, v: &Variante) {
+    for (p, m) in e.design.iter_mut() {
+        let dark = es_oscuro(*m) || hash(*p, v.seed ^ 0x3A7E) < 0.25;
+        let elegir = |(a, b): (Mat, Mat)| if dark { b } else { a };
+        if es_pared(*m) {
+            if let Some(par) = v.paredes {
+                let ladrillo = matches!(*m, BRICK | BRICK_DARK);
+                if !((v.revoque && es_cal(*m)) || (v.ladrillo_visto && ladrillo)) {
+                    *m = elegir(par);
+                }
+            }
+        } else if es_techo(*m) {
+            if let Some(t) = v.techo {
+                *m = elegir(t);
+            }
+        } else if *m == REJA && !v.rejas {
+            *m = WINDOW;
+        }
+    }
+}
+
 /// Marco de un solar o edificio: `u` a lo largo del frente, `w` hacia el fondo
 /// (0 = línea de la calle; negativo = sobre la vereda), `y` hacia arriba desde `base`.
 /// Los ejes son siempre cardinales: en vóxeles los edificios no se giran en ángulos libres.

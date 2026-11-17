@@ -551,7 +551,9 @@ impl Game {
             let l = &self.city.lots.lots[&id];
             let front = self.city.lots.frontage(l, &self.city.net);
             let value = self.city.lots.land_value(l);
-            let mut i = Inspect { title: capitalize(l.name()), kind: InspectKind::Lot, lot: Some(id), ..Default::default() };
+            // El nombre sigue a los materiales («rancho de adobe», «casa de tablas»).
+            let nombre = self.city.obra_de(l).and_then(|o| super::materiales::ciudad::nombre_con_obra(l, &o)).unwrap_or_else(|| l.name().to_string());
+            let mut i = Inspect { title: capitalize(&nombre), kind: InspectKind::Lot, lot: Some(id), ..Default::default() };
             i.lines.push(format!("Zona: {}", zone_name(l.zone)));
             let pob = &self.city.poblacion;
             i.vecinos = pob.habitantes_de_lote(id).count();
@@ -576,6 +578,10 @@ impl Game {
             if l.level > 0 {
                 let w = self.city.services.water_of(l.id);
                 i.lines.push(format!("Agua: {}", if w <= 0.0 { "no tiene (acarrean del arroyo)" } else if w < 0.6 { "mala" } else if w < 0.95 { "regular" } else { "buena" }));
+                // Con qué está hecho y lo que eso significa (ver `materiales`).
+                if let Some(o) = self.city.obra_de(l) {
+                    i.lines.extend(self.city.lineas_obra(&o));
+                }
                 i.lines.push(format!("Techo: {} · riesgo de fuego {} %", super::services::fires::roof_of(l).name(), (self.city.fire_risk(l) * 100.0) as i32));
                 if self.city.services.fires.burning.contains_key(&l.id) {
                     i.lines.push("¡Está ardiendo!".into());
@@ -667,7 +673,11 @@ impl Game {
                 Placeable::Building(k) => {
                     let (c, f) = self.city.service_site(k, h);
                     let i = services::info(k);
-                    help = format!("{help}\nCosto: {} pesos{}{}", fmt_thousands(i.cost), if i.ladrillos > 0.0 { format!(" · {} ladrillos", i.ladrillos as i32) } else { String::new() }, if i.piedra > 0.0 { format!(" · {} de piedra", i.piedra as i32) } else { String::new() });
+                    help = format!("{help}\nCosto: {} pesos", fmt_thousands(i.cost));
+                    // La receta y lo que se sustituye con lo que hay hoy (ver `materiales`).
+                    if let Some((_, txt)) = self.city.vista_previa_servicio(k) {
+                        help = format!("{help}\n{txt}");
+                    }
                     if matches!(k, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera) {
                         let r = super::recursos::Recursos::de(t).en_area(c, f, i.size.0, i.size.1);
                         let (que, x) = match k {

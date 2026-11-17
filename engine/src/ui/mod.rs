@@ -10,6 +10,7 @@
 
 pub mod desarrollo;
 pub mod icons;
+pub mod materiales;
 pub mod paint;
 pub mod services;
 pub mod poblacion;
@@ -298,6 +299,7 @@ pub fn chips(game: &Game) -> Vec<(Icon, String, String)> {
         weather_chip(game),
         (Icon::Ladrillo, fmt_thousands(st(Res::Ladrillos).amount.round() as i64), stock_tip(Res::Ladrillos)),
         (Icon::Piedra, fmt_thousands(st(Res::Piedra).amount.round() as i64), stock_tip(Res::Piedra)),
+        materiales::chip(game),
         (Icon::Pan, fmt_dec(e.price(Res::Pan), 2), format!("Precio del pan (1,00 es el normal). {}", stock_tip(Res::Pan))),
         (Icon::Vecinos, v0, t0),
         (Icon::Comercio, v1, t1),
@@ -1030,11 +1032,13 @@ pub enum Detail {
     Persona(u32),
     /// Panel de Desarrollo (pestaña: tecnologías, saberes, industria, fomento, comercio).
     Desarrollo(u8),
+    /// Materiales de construcción: existencias, puerto, demanda y sustituciones.
+    Materiales,
 }
 
 /// A qué panel lleva cada ficha de `chips()` (mismo orden).
-pub fn chip_details() -> [Detail; 8] {
-    [Detail::Clima, Detail::Recurso(Res::Ladrillos), Detail::Recurso(Res::Piedra), Detail::Recurso(Res::Pan), Detail::Opinion(0), Detail::Opinion(1), Detail::Opinion(2), Detail::Poblacion(0)]
+pub fn chip_details() -> [Detail; 9] {
+    [Detail::Clima, Detail::Recurso(Res::Ladrillos), Detail::Recurso(Res::Piedra), Detail::Materiales, Detail::Recurso(Res::Pan), Detail::Opinion(0), Detail::Opinion(1), Detail::Opinion(2), Detail::Poblacion(0)]
 }
 
 /// Gráfico de barras simple (los últimos meses, el más reciente a la derecha). `marks` dibuja
@@ -1090,6 +1094,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                 // Los de la población se dibujan en `poblacion::panel`.
                 Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) => (Icon::Familia, "Población".to_string()),
                 Detail::Desarrollo(_) => (Icon::Desarrollo, "Desarrollo".to_string()),
+                Detail::Materiales => (Icon::Materiales, "Materiales de construcción".to_string()),
             };
             ui.horizontal(|ui| {
                 icons::show(ui, icon, 22.0, theme::INK);
@@ -1124,8 +1129,8 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                             (c.climate.maiz.last_yield * 100.0).round() as i32,
                             if e.is_on(crate::city::economy::Ordinance::Posito) { format!(" El pósito guarda {} raciones para los años malos.", fmt_thousands(e.posito.round() as i64)) } else { " Con el pósito (Ordenanzas) se guarda grano para los años malos.".into() }
                         ),
-                        Res::Ladrillos => format!("Los hornos del ejido y los talleres de las zonas industriales. Con lluvia y frío el adobe no seca: este mes rinden al {} %. Los piden las casas de azotea y de altos.", (c.climate.brick_factor() * 100.0).round() as i32),
-                        Res::Piedra => "Por ahora llega por el puerto (las canteras todavía no están en el motor). La usan las calles empedradas y, más adelante, la muralla.".into(),
+                        Res::Ladrillos => format!("Los hornos del ejido y los talleres de las zonas industriales. Con lluvia y frío el adobe no seca: este mes rinden al {} %. Los piden las paredes de las casas de una planta y de altos y las azoteas; si faltan, se levanta de adobe o de tablas (ver Materiales).", (c.climate.brick_factor() * 100.0).round() as i32),
+                        Res::Piedra => "Las canteras sobre el basamento y, si faltan, el puerto. La usan las calles empedradas, la muralla, la iglesia y las paredes de las casas de altos (las de más prestigio).".into(),
                         Res::Carne => format!("Las estancias del campo: dependen de las pasturas, hoy al {} %.", (c.climate.pasture * 100.0).round() as i32),
                         _ => String::new(),
                     };
@@ -1195,6 +1200,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                     ui.label(RichText::new("Si los viajes en carreta o a caballo tardan mucho más de lo previsto, los vecinos se quejan. Inspeccioná una calle para ver su tránsito.").small().color(theme::INK_SOFT));
                 }
                 Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) | Detail::Desarrollo(_) => {}
+                Detail::Materiales => materiales::panel(ui, game),
                 Detail::Clima => {
                     let m = (c.month % 12) as usize;
                     let w = &c.climate.last;
@@ -1484,14 +1490,15 @@ mod tests {
         assert_eq!(stats(&g, 9.5, Some(-1500)).balance, "-1.500/mes");
         assert_eq!(stats(&g, 9.5, Some(320)).balance, "+320/mes");
         let ch = chips(&g);
-        assert_eq!(ch.len(), 8);
+        assert_eq!(ch.len(), 9);
         assert!(ch[0].2.contains("INUMET") && ch[0].2.contains("Trigo"), "{}", ch[0].2);
         assert!(ch[0].1.starts_with("21 °C"), "marzo, con la normal del INUMET: {}", ch[0].1);
         assert!(ch[0].2.starts_with("Otoño de marzo"), "{}", ch[0].2);
         assert!(ch[0].2.contains("Viento:"), "{}", ch[0].2);
         assert_eq!(ch[1].1, "200", "ladrillos de la fundación");
-        assert_eq!(ch[3].1, "1,00", "precio normal del pan");
-        assert!(ch[4].2.contains("vecinos"), "{}", ch[4].2);
+        assert_eq!(ch[3].1, "al día", "materiales de la fundación");
+        assert_eq!(ch[4].1, "1,00", "precio normal del pan");
+        assert!(ch[5].2.contains("vecinos"), "{}", ch[5].2);
         assert_eq!(month_balance(&g), None, "sin mes cerrado todavía");
     }
 

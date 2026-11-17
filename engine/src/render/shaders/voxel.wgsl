@@ -87,7 +87,7 @@ struct VOut {
     @location(5) smooth_n: vec3<f32>,
 };
 
-@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 64>;
+@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 80>;
 
 // Curvatura de la Tierra (radio 6371 km): lo lejano baja d²/2R respecto de la cámara. A 10 km
 // son 8 m; a 24 km, 45 m: el horizonte se curva y el río se pierde detrás de él.
@@ -191,6 +191,12 @@ const M_HIDE: u32 = 38u;
 const M_DOME: u32 = 41u;
 const M_STREAM: u32 = 52u;
 const M_MARSH: u32 = 48u;
+const M_TABLAS: u32 = 64u;
+const M_TABLAS_GRIS: u32 = 65u;
+const M_QUINCHA: u32 = 66u;
+const M_QUINCHA_DARK: u32 = 67u;
+const M_MAMPOSTERIA: u32 = 68u;
+const M_MAMPOSTERIA_DARK: u32 = 69u;
 
 // Materiales del terreno (deben coincidir con palette.rs).
 fn is_terrain(m: u32) -> bool {
@@ -202,7 +208,7 @@ fn is_terrain(m: u32) -> bool {
 // vóxeles del mundo. Sus bordes y su tinte van por vóxel de diseño, no por vóxel del mundo.
 const DESIGN_VOXEL: f32 = 0.5;
 fn is_built(m: u32) -> bool {
-    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u);
+    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u) || (m >= 64u && m <= 69u);
 }
 
 // Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
@@ -312,6 +318,23 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         // Bañado: matas de junco más oscuras y espejos de agua entre ellas.
         let c = hash3(floor(v.world * vec3(1.5, 1.0, 1.5)));
         albedo *= mix(1.0, 0.75 + 0.4 * c, near * 0.8 + 0.2);
+    } else if (mat == M_TABLAS || mat == M_TABLAS_GRIS) {
+        // Tablas verticales de 20 cm con la junta oscura y la veta.
+        let a = fract(along(v.world, n) * 5.0);
+        let joint = 1.0 - step(0.08, a);
+        let grain = 0.94 + 0.08 * sin(v.world.y * 23.0 + floor(along(v.world, n) * 5.0) * 1.7);
+        albedo *= mix(1.0, (1.0 - 0.35 * joint) * grain, near);
+    } else if (mat == M_QUINCHA || mat == M_QUINCHA_DARK) {
+        // Barro con paja: pajitas claras sueltas en la masa.
+        let s = hash3(floor(v.world * 12.0));
+        albedo *= mix(1.0, select(0.92, 1.25, s > 0.86), near);
+    } else if (mat == M_MAMPOSTERIA || mat == M_MAMPOSTERIA_DARK) {
+        // Piedras irregulares: celdas de ~25 cm con juntas de barro.
+        let q = v.world * 4.0 + vec3(0.0, 0.0, floor(v.world.y * 4.0) * 0.37);
+        let c = fract(q);
+        let j = min(min(c.x, 1.0 - c.x), min(c.y, 1.0 - c.y));
+        let tone = 0.85 + 0.25 * hash3(floor(q));
+        albedo *= mix(1.0, tone * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.1, j))), near);
     } else if (mat == M_DOME) {
         // Azulejos de la cúpula: damero fino.
         let c = floor(along(v.world, n) * 6.0) + floor(v.world.y * 6.0);

@@ -245,6 +245,10 @@ pub struct MonthInput {
     pub production: [f32; 6],
     /// Ladrillos y piedra que pidieron las obras este mes (se descuentan si hay).
     pub construction: [f32; 6],
+    /// Demanda de materiales de las casas y edificios nuevos (ver `materiales`): ya se sacó
+    /// del depósito al construir, así que no se descuenta otra vez, pero mueve el precio y lo
+    /// que se encarga al puerto.
+    pub pedidos: [f32; 6],
     /// Depósitos (barracas, pósito): capacidad extra por recurso.
     pub storage: [f32; 6],
     /// ¿Hay muelle? Sin él no se importa ni exporta.
@@ -581,8 +585,9 @@ impl Economy {
                 let s = &mut self.stocks[r.idx()];
                 let world = r.base_price() * if r == Res::Cueros { inp.world_hides } else { 1.0 };
                 if r.is_food() || matches!(r, Res::Ladrillos | Res::Piedra) {
-                    // Importa hasta cubrir un mes y medio de necesidad.
-                    let want = (need * 1.5 - s.amount).max(0.0).min(hold * 0.25);
+                    // Importa hasta cubrir un mes y medio de necesidad (con lo que piden las
+                    // obras nuevas).
+                    let want = ((need + inp.pedidos[r.idx()]) * 1.5 - s.amount).max(0.0).min(hold * 0.25);
                     if want > 0.0 {
                         s.amount += want;
                         s.imported = want;
@@ -618,7 +623,8 @@ impl Economy {
             if matches!(r, Res::Ladrillos | Res::Piedra) {
                 rep.delivered[r.idx()] = used;
             }
-            // Precio según cuántos meses de reserva quedan después de comer.
+            // Precio según cuántos meses de reserva quedan después de comer (o de las obras).
+            let need = need + inp.pedidos[r.idx()];
             let cover = if need > 0.5 { (s.amount + used) / need } else { 3.0 };
             let target = (1.5 / cover.max(0.2)).powf(0.8).clamp(0.6, 3.0);
             s.price = s.price + (target - s.price) * 0.6;

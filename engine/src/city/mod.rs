@@ -12,6 +12,7 @@ pub mod economy;
 pub mod game;
 pub mod game_demo;
 pub mod lots;
+pub mod materiales;
 pub mod poblacion;
 pub mod recursos;
 pub mod roads;
@@ -76,6 +77,9 @@ pub struct City {
     /// Recursos del suelo, molestias de la industria y valor del suelo de cada solar
     /// (derivado; ver `recursos`).
     pub suelo: recursos::valor::SueloCiudad,
+    /// Materiales de construcción: existencias, demanda, importación y con qué se hizo cada
+    /// servicio (las casas lo guardan en su solar; ver `materiales`).
+    pub materiales: materiales::ciudad::Materiales,
     /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
     mejoras: Vec<(u32, u8)>,
     rng: Rng,
@@ -86,7 +90,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -107,14 +111,20 @@ fn pulperia_r(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
 }
 
 /// Constructor del catálogo de vóxeles para cada tipo de zona, densidad y nivel. Cada solar
-/// elige un estilo con su semilla, así la cuadra no se ve repetida.
-fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64) -> Builder {
+/// elige un estilo con su semilla, así la cuadra no se ve repetida; la casa de una planta
+/// sigue su techo real si lo tiene (azotea plana o techo a dos aguas; ver `materiales`).
+fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64, techo: Option<materiales::Techo>) -> Builder {
     use lots::Density::*;
     let pick = (seed >> 7) % 100;
+    let teja = match techo {
+        Some(materiales::Techo::Azotea) => false,
+        Some(_) => true,
+        None => pick < 45,
+    };
     match (kind, level) {
         (ZoneKind::Residencial, 1) => &colonial::rancho,
         (ZoneKind::Residencial, 2) if density == Alta => &colonial::inquilinato,
-        (ZoneKind::Residencial, 2) if pick < 45 => &colonial::casa_teja,
+        (ZoneKind::Residencial, 2) if teja => &colonial::casa_teja,
         (ZoneKind::Residencial, 2) => &colonial::casa_azotea,
         (ZoneKind::Residencial, _) if density == Alta => &colonial::altos_renta,
         (ZoneKind::Residencial, _) => &colonial::casa_altos,
@@ -130,6 +140,24 @@ fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64) -> 
         (ZoneKind::Industrial, 2) => &colonial::curtiembre,
         (ZoneKind::Industrial, _) if pick < 45 => &colonial::deposito,
         (ZoneKind::Industrial, _) => &colonial::barraca_solar,
+    }
+}
+
+/// Edificio de un solar en vóxeles, con los materiales de su obra (si no tiene, los del
+/// catálogo).
+#[allow(clippy::too_many_arguments)]
+fn build_lot(t: &TerrainGen, c: Vec2, f: Vec2, seed: u64, kind: ZoneKind, density: lots::Density, level: u8, obra: Option<materiales::Obra>) -> voxelize::Built {
+    let techo = obra.map(|o| o.techo);
+    let b = builder_for(kind, density, level, seed, techo);
+    match obra {
+        Some(o) => {
+            let nom = materiales::ciudad::nominal(kind, density, level, seed, techo);
+            build_rotated(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
+                b(t, e, fr);
+                materiales::ciudad::remapear(e, &o, &nom, seed);
+            })
+        }
+        None => build_rotated(t, c, f, LOT_W, LOT_D, seed, b),
     }
 }
 
@@ -191,10 +219,11 @@ impl City {
         for r in roads {
             e.extend(r);
         }
-        let jobs: Vec<(u32, Vec2, Vec2, u64, (ZoneKind, lots::Density), u8)> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, lots::zone_of(l.zone)?, l.level))).filter(|j| j.5 > 0).collect();
+        type Job = (u32, Vec2, Vec2, u64, (ZoneKind, lots::Density), u8, Option<materiales::Obra>);
+        let jobs: Vec<Job> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, lots::zone_of(l.zone)?, l.level, l.obra))).filter(|j| j.5 > 0).collect();
         let per = jobs.len().div_ceil(threads).max(1);
         let built: Vec<(u32, voxelize::Built)> = std::thread::scope(|sc| {
-            let hs: Vec<_> = jobs.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&(id, c, f, seed, kind, level)| (id, build_rotated(t, c, f, LOT_W, LOT_D, seed, builder_for(kind.0, kind.1, level, seed)))).collect::<Vec<_>>())).collect();
+            let hs: Vec<_> = jobs.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&(id, c, f, seed, kind, level, obra)| (id, build_lot(t, c, f, seed, kind.0, kind.1, level, obra))).collect::<Vec<_>>())).collect();
             hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
         });
         for l in self.lots.lots.values_mut() {
@@ -233,7 +262,8 @@ impl City {
                     Some(ZoneKind::Industrial) => lots::JOBS_I[l.level as usize],
                     _ => 0,
                 },
-                valor: self.lots.land_value(l),
+                // Las casas de buenos materiales valen más (prestigio; ver `materiales`).
+                valor: (self.lots.land_value(l) * self.obra_de(l).map_or(1.0, |o| 0.85 + 0.3 * o.prestigio())).min(1.0),
                 distancia: self.lots.plaza_center.map_or(0.0, |p| l.c.distance(p)),
             })
             .collect()
@@ -267,7 +297,9 @@ impl City {
         for l in self.lots.lots.values().filter(|l| l.level > 0) {
             // Las molestias de la industria: el agua sucia del arroyo y el olor también enferman.
             let m = self.suelo.molestia_de(l.id);
-            let insalubre = (br.insalubre_de(l.id) + 0.3 * m.agua + 0.1 * (m.olor + m.humo)).min(1.0);
+            // La humedad de las paredes de barro y adobe también (ver `materiales`).
+            let humedad = self.obra_de(l).map_or(0.0, |o| o.humedad());
+            let insalubre = (br.insalubre_de(l.id) + 0.3 * m.agua + 0.1 * (m.olor + m.humo) + 0.25 * humedad).min(1.0);
             v[l.id as usize] = poblacion::ServiciosLote { escuela: br.escuela_de(l.id), salud: br.salud_de(l.id), insalubre, delito: br.delito_de(l.id), vigilancia: br.vigilancia_de(l.id), molestia: m.total() };
         }
         v
@@ -283,6 +315,7 @@ impl City {
     /// valor del suelo, densidad, antigüedad); la falta de pobladores no las frena.
     fn aplicar_mejoras(&mut self, t: &TerrainGen, e: &mut Edits) {
         let pedidas = std::mem::take(&mut self.mejoras);
+        self.lots.sin_altos = !self.altos_posibles();
         let mut hechas = Vec::new();
         for (id, nivel) in pedidas {
             let Some(l) = self.lots.lots.get(&id) else { continue };
@@ -525,25 +558,49 @@ impl City {
             let lot = self.lots.lots.get_mut(&id).unwrap();
             clear_voxels(&mut e, lot);
             lot.voxels.clear();
+            lot.obra = None;
         }
         (n, e)
     }
 
-    /// Lleva a vóxeles los cambios de nivel: el edificio nuevo reemplaza al viejo en el solar.
+    /// Lleva a vóxeles los cambios de nivel: el edificio nuevo se levanta con los materiales
+    /// que hay (los saca del depósito; ver `materiales`) y reemplaza al viejo en el solar.
+    /// Si no alcanzan para unos altos, la casa se queda en una planta.
     pub fn apply_levels(&mut self, t: &TerrainGen, changes: &[LevelChange], e: &mut Edits) {
         for ch in changes {
             let Some(lot) = self.lots.lots.get(&ch.lot) else { continue };
-            let Some((kind, density)) = lots::zone_of(lot.zone) else { continue };
-            let b = build_rotated(t, lot.c, lot.f, LOT_W, LOT_D, lot.seed, builder_for(kind, density, ch.level, lot.seed));
-            let new: std::collections::HashSet<glam::IVec3> = b.voxels.iter().copied().collect();
-            for &v in &lot.voxels {
-                if !new.contains(&v) {
-                    e.dset(v, AIR);
+            let Some(mut plan) = self.plan_de_solar(lot, ch.level) else { continue };
+            if plan.pisos >= 2 && materiales::elegir(&plan, &self.vista_materiales()).pisos_max() < 2 {
+                let l = self.lots.lots.get_mut(&ch.lot).unwrap();
+                l.level = ch.level - 1;
+                if l.obra.is_some() && !l.voxels.is_empty() {
+                    continue;
                 }
+                let Some(p) = self.plan_de_solar(&self.lots.lots[&ch.lot], ch.level - 1) else { continue };
+                plan = p;
             }
-            e.extend(b.edits);
-            self.lots.lots.get_mut(&ch.lot).unwrap().voxels = b.voxels;
+            let obra = self.construir_obra(&plan);
+            self.lots.lots.get_mut(&ch.lot).unwrap().obra = Some(obra);
+            self.revoxelizar(t, ch.lot, e);
         }
+    }
+
+    /// Vuelve a dibujar el edificio de un solar con su nivel y sus materiales.
+    pub fn revoxelizar(&mut self, t: &TerrainGen, id: u32, e: &mut Edits) {
+        let Some(lot) = self.lots.lots.get(&id) else { return };
+        let Some((kind, density)) = lots::zone_of(lot.zone) else { return };
+        if lot.level == 0 {
+            return;
+        }
+        let b = build_lot(t, lot.c, lot.f, lot.seed, kind, density, lot.level, lot.obra);
+        let new: std::collections::HashSet<glam::IVec3> = b.voxels.iter().copied().collect();
+        for &v in &lot.voxels {
+            if !new.contains(&v) {
+                e.dset(v, AIR);
+            }
+        }
+        e.extend(b.edits);
+        self.lots.lots.get_mut(&id).unwrap().voxels = b.voxels;
     }
 
     /// Avanza el tiempo de juego `dt` segundos: meses (pobladores, impuestos) y crecimiento.
@@ -557,6 +614,7 @@ impl City {
             self.month_acc -= MONTH_SECONDS;
             news.extend(self.services_month(t, e));
             news.extend(self.desarrollo_month(t, e));
+            news.extend(self.materiales_mes(t, e));
             news.extend(self.month_tick());
             self.aplicar_mejoras(t, e);
         }
@@ -577,6 +635,7 @@ impl City {
         while self.growth_acc >= 0.5 {
             self.growth_acc -= 0.5;
             let demand = self.demand();
+            self.lots.sin_altos = !self.altos_posibles();
             let (used, changes) = self.lots.grow_step(self.pool, demand, &self.net, &mut self.rng);
             self.pool -= used;
             self.apply_levels(t, &changes, e);
@@ -616,8 +675,9 @@ impl City {
         // El grano de la cosecha se guarda en las casas y graneros hasta la próxima.
         let mut storage = [0.0f32; 6];
         storage[Res::Pan as usize] = pop as f32 * 12.0;
-        let mut construction = [0.0f32; 6];
-        construction[Res::Ladrillos as usize] = houses[1] as f32 * 0.4 + houses[2] as f32 * 0.8;
+        // Las casas ya no gastan ladrillos por mes: al construirlas sacan del depósito lo que
+        // piden y los arreglos se hacen con los materiales de cada una (ver `materiales`).
+        let construction = [0.0f32; 6];
         let mut inp = economy::MonthInput {
             pop,
             houses,
@@ -627,6 +687,7 @@ impl City {
             jobs_i,
             production,
             construction,
+            pedidos: self.materiales.pedidos_economia(),
             storage,
             ships: if self.month % 4 == 0 { 1 } else { 0 },
             water_ratio: (0.4 + self.climate.soil / climate::SUELO_MAX * 0.4).min(0.8),
@@ -671,7 +732,8 @@ impl City {
             if under {
                 wet += 1;
                 mojados.push(l.id);
-                if l.level == 1 {
+                // El agua se lleva las paredes de barro y de adobe (ver `materiales`).
+                if self.obra_de(l).map_or(l.level == 1, |o| o.paredes.se_lava()) {
                     lost.push(l.id);
                 }
             }
@@ -685,14 +747,15 @@ impl City {
             lot.voxels.clear();
             lot.level = 0;
             lot.age = 0;
+            lot.obra = None;
         }
         if wet == 0 {
             return None;
         }
         let muertos = if ahogados > 0 { format!(" · {ahogados} muertos") } else { String::new() };
         Some(match f {
-            Flood::Rio(level) => format!("La sudestada subió el río {:.1} m: {} solares bajo el agua, {} ranchos perdidos{muertos}", level, wet, lost.len()),
-            Flood::Arroyos => format!("Crecieron los arroyos: {} solares inundados en los bajos, {} ranchos perdidos{muertos}", wet, lost.len()),
+            Flood::Rio(level) => format!("La sudestada subió el río {:.1} m: {} solares bajo el agua, {} casas de barro o adobe perdidas{muertos}", level, wet, lost.len()),
+            Flood::Arroyos => format!("Crecieron los arroyos: {} solares inundados en los bajos, {} casas de barro o adobe perdidas{muertos}", wet, lost.len()),
         })
     }
 

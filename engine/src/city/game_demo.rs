@@ -824,3 +824,117 @@ pub fn desarrollo(s: &mut Session) -> String {
         out.join(" · ")
     )
 }
+
+// --- Materiales de construcción (ver `city::materiales`) ------------------------------------
+
+/// La hilera de casas de muestra: centro, frente y solares (de un extremo al otro).
+pub static MUESTRA: std::sync::Mutex<Option<(Vec2, Vec2, Vec<u32>)>> = std::sync::Mutex::new(None);
+
+/// Una cuadra levantada durante una falta de cal y de ladrillos: seis casas vecinas que se
+/// rehacen una tras otra, cada una con lo que había en el depósito en ese momento (de todo;
+/// sin cal; sin ladrillos; solo madera; nada; solo piedra y cal). Usa el mismo camino que el
+/// juego (`construir_obra`): elige, sustituye y gasta. Después el depósito vuelve a lo que era.
+pub fn materiales(s: &mut Session) -> String {
+    use super::lots::ZoneKind;
+    use super::materiales::Material as M;
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    let plaza = c.lots.plaza_center.unwrap_or(PLAZA);
+    // La hilera más larga de casas de una planta con el mismo frente, cerca de la plaza.
+    let casas: Vec<(u32, Vec2, Vec2)> = c.lots.lots.values().filter(|l| l.kind() == Some(ZoneKind::Residencial) && l.level == 2).map(|l| (l.id, l.c, l.f)).collect();
+    let mut mejor: Option<(usize, f32, Vec<(f32, u32)>, Vec2)> = None;
+    for &(_, p, f) in &casas {
+        let side = Vec2::new(f.y, -f.x);
+        let mut fila: Vec<(f32, u32)> = casas.iter().filter(|o| o.2.dot(f) > 0.99 && (o.1 - p).dot(f).abs() < 1.0 && (o.1 - p).dot(side).abs() < 38.0).map(|o| ((o.1 - p).dot(side), o.0)).collect();
+        fila.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Solo solares contiguos (cada 12 m).
+        let k = fila.iter().position(|x| x.0.abs() < 0.5).unwrap_or(0);
+        let mut a = k;
+        while a > 0 && fila[a].0 - fila[a - 1].0 < 13.0 {
+            a -= 1;
+        }
+        let mut b = k;
+        while b + 1 < fila.len() && fila[b + 1].0 - fila[b].0 < 13.0 {
+            b += 1;
+        }
+        let fila: Vec<(f32, u32)> = fila[a..=b].to_vec();
+        let d = p.distance(plaza);
+        let n = fila.len().min(6);
+        if mejor.as_ref().is_none_or(|m| n > m.0 || (n == m.0 && d < m.1)) {
+            mejor = Some((n, d, fila, f));
+        }
+    }
+    let Some((_, _, fila, f)) = mejor else { return "no hay casas de una planta".into() };
+    let ids: Vec<u32> = fila.iter().take(6).map(|x| x.1).collect();
+    // Lo que había en el depósito al levantar cada casa.
+    let escenarios: [(&str, &[(M, f32)]); 6] = [
+        ("de todo", &[(M::Ladrillo, 400.0), (M::Cal, 60.0), (M::Teja, 80.0), (M::Madera, 60.0), (M::Arena, 40.0), (M::Hierro, 6.0)]),
+        ("sin cal", &[(M::Ladrillo, 400.0), (M::Teja, 80.0), (M::Madera, 60.0), (M::Arena, 40.0)]),
+        ("sin ladrillos", &[(M::Adobe, 200.0), (M::Teja, 80.0), (M::Madera, 60.0)]),
+        ("solo madera", &[(M::Madera, 80.0)]),
+        ("nada", &[]),
+        ("piedra y cal", &[(M::Piedra, 400.0), (M::Cal, 60.0), (M::Teja, 80.0), (M::Madera, 60.0), (M::Arena, 40.0), (M::Hierro, 6.0)]),
+    ];
+    let guardado = (c.economy.stocks.clone(), c.materiales.ex.clone());
+    let mut out = Vec::new();
+    for (&id, (nombre, hay)) in ids.iter().zip(escenarios) {
+        for m in M::TODOS {
+            let q = hay.iter().find(|x| x.0 == m).map_or(0.0, |x| x.1);
+            match m.de_la_economia() {
+                Some(r) => c.economy.stocks[r as usize].amount = q,
+                None => c.materiales.ex[m.idx()].cantidad = q,
+            }
+        }
+        let l = &c.lots.lots[&id];
+        let Some(plan) = c.plan_de_solar(l, l.level) else { continue };
+        let o = c.construir_obra(&plan);
+        c.lots.lots.get_mut(&id).unwrap().obra = Some(o);
+        out.push(format!("{nombre}: {}", o.nombre().to_lowercase()));
+    }
+    (c.economy.stocks, c.materiales.ex) = guardado;
+    let mut e = crate::buildings::Edits::default();
+    for &id in &ids {
+        c.revoxelizar(&t, id, &mut e);
+    }
+    let centro = ids.iter().map(|id| c.lots.lots[id].c).sum::<Vec2>() / ids.len().max(1) as f32;
+    *MUESTRA.lock().unwrap() = Some((centro, f, ids));
+    let r = apply(s, Ok(e));
+    format!("{} · {r}", out.join(" · "))
+}
+
+/// Cámara de frente a la hilera de muestra, desde la calle.
+pub fn view_materiales(_s: &Session) -> Option<[f32; 5]> {
+    let (c, f, _) = MUESTRA.lock().unwrap().clone()?;
+    let p = c + f * 6.0;
+    Some([p.x, p.y, 56.0, f.x.atan2(f.y).to_degrees() + 12.0, 34.0])
+}
+
+/// Ladrillos y piedra guardados mientras se muestra una obra sin ellos.
+static LADRILLOS: std::sync::Mutex<Option<(f32, f32)>> = std::sync::Mutex::new(None);
+
+/// Deja la ciudad sin ladrillos ni piedra (para la captura de la tarjeta que sustituye).
+pub fn guardar_ladrillos(s: &mut Session) {
+    use super::economy::Res;
+    let eco = &mut s.game.as_mut().unwrap().city.economy;
+    *LADRILLOS.lock().unwrap() = Some((eco.stock(Res::Ladrillos).amount, eco.stock(Res::Piedra).amount));
+    eco.stocks[Res::Ladrillos as usize].amount = 0.0;
+    eco.stocks[Res::Piedra as usize].amount = 0.0;
+}
+
+/// Devuelve los ladrillos y la piedra guardados.
+pub fn devolver_ladrillos(s: &mut Session) -> String {
+    use super::economy::Res;
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.inspected = None;
+    let eco = &mut g.city.economy;
+    match LADRILLOS.lock().unwrap().take() {
+        Some((l, p)) => {
+            eco.stocks[Res::Ladrillos as usize].amount = l;
+            eco.stocks[Res::Piedra as usize].amount = p;
+            format!("{l} ladrillos y {p} de piedra de vuelta")
+        }
+        None => "nada que devolver".into(),
+    }
+}

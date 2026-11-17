@@ -73,7 +73,19 @@ pub const FLOR_VIOLETA: Mat = 60;
 pub const FLOR_BLANCA: Mat = 61;
 pub const PASTO_MATA: Mat = 62;
 pub const JUNCO: Mat = 63;
-pub const COUNT: usize = 64;
+// Materiales de construcción que faltaban (ver docs/sistemas/materiales-de-construccion.md):
+// la paleta del render se amplió a 80 lugares.
+/// Tablas de madera nuevas (casas y techos de tablas).
+pub const TABLAS: Mat = 64;
+/// Tablas grises, curtidas por la intemperie.
+pub const TABLAS_GRIS: Mat = 65;
+/// Barro con paja (chorizo, quincha o terrón): las paredes de los ranchos más pobres.
+pub const QUINCHA: Mat = 66;
+pub const QUINCHA_DARK: Mat = 67;
+/// Mampostería de piedra sin labrar asentada en barro (sin cal para la sillería).
+pub const MAMPOSTERIA: Mat = 68;
+pub const MAMPOSTERIA_DARK: Mat = 69;
+pub const COUNT: usize = 70;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -141,6 +153,12 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [232, 228, 212], // flor blanca (margarita, verbena blanca)
     [146, 146, 84],  // mata de paja (flechilla, paja brava, espartillo)
     [82, 104, 56],   // junco y totora
+    [150, 116, 78],  // tablas de madera
+    [128, 118, 102], // tablas grises (intemperie)
+    [138, 110, 72],  // barro con paja
+    [112, 90, 62],   // barro con paja húmedo
+    [132, 124, 110], // mampostería de piedra
+    [106, 100, 90],  // mampostería oscura
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)
