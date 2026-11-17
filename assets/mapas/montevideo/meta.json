@@ -1,7 +1,7 @@
 {
   "nombre": "Montevideo (geografía real)",
   "fuente": "MDT Uruguay 30 m (IDE Uruguay), servicio WCS raster__mdt_pais_30m_4326",
-  "atribucion": "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Hidrografía (cursos de agua, playas, bañados, áreas húmedas, bancos de arena, lagunas e islas), cerros y cuchillas: IDE Uruguay, servicio WFS (hidrografía nacional 1:50.000 y urbana). Licencia de Datos Abiertos del Uruguay. Ver docs/sistemas/mapa-real.md.",
+  "atribucion": "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Hidrografía (cursos de agua, playas, bañados, áreas húmedas, bancos de arena, lagunas e islas), cerros y cuchillas: IDE Uruguay, servicio WFS (hidrografía nacional 1:50.000 y urbana). Licencia de Datos Abiertos del Uruguay. Monte nativo: Cartografía de Bosque Nativo 2021, Dirección General Forestal (MGAP), servicio del SNIG; reconstrucción de 1726 propia (docs/sistemas/vegetacion-historica.md). Ver docs/sistemas/mapa-real.md.",
   "origen_noroeste": {
     "lat": -34.778,
     "lon": -56.325
@@ -115,6 +115,16 @@
       "capa": "ideuy:cuchillas_y_sierras",
       "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
       "uso": "cuchillas"
+    },
+    {
+      "capa": "DGF/Monte_Nativo_2021 (capa 1, Monte Nativo)",
+      "servicio": "ArcGIS REST https://web.snig.gub.uy/arcgisserver/rest/services/DGF/Monte_Nativo_2021/MapServer/1/query",
+      "uso": "bosque"
+    },
+    {
+      "capa": "ideuy:areas_urbanizadas_3",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "bosque (excluir la ciudad actual de la calibración)"
     }
   ],
   "biomas": {
@@ -142,5 +152,542 @@
     "cerros": 1,
     "cuchillas": 3
   },
-  "islas_a_mano": []
+  "islas_a_mano": [],
+  "bosque": {
+    "archivo": "bosque.bin",
+    "archivo_entorno": "bosque_contexto.bin",
+    "archivo_actual": "bosque_actual.bin",
+    "codificacion": "uint8, misma grilla y orden que altura.bin / contexto.bin; cobertura de copas = valor / 255",
+    "bosque.bin": "monte nativo reconstruido para 1726 (lo usa el motor)",
+    "bosque_actual.bin": "monte nativo de hoy (cartografía DGF 2021), solo como referencia",
+    "modelo": {
+      "ganancia": 2.5,
+      "tope": 0.9,
+      "distancia_max_m": 350.0,
+      "margen_urbano_m": 300.0
+    },
+    "monte_hoy_ha": 648,
+    "monte_1726_ha": 1445,
+    "monte_1726_en_la_ciudad_actual_ha": 861,
+    "monte_hoy_en_la_ciudad_actual_ha": 310,
+    "tierra_ha": 32671,
+    "poligonos_dgf": 1818,
+    "calibracion_rural_ha": 148975,
+    "calibracion_monte_rural_pct": 6.0,
+    "fondo_lejos_de_cauces_pct": 4.37,
+    "perfil_altura": {
+      "alturas_m": [
+        1.5,
+        3,
+        5,
+        8
+      ],
+      "filas": [
+        {
+          "ancho_m": [
+            0,
+            3
+          ],
+          "por_altura": [
+            [
+              0.049,
+              395517
+            ],
+            [
+              0.037,
+              26207
+            ],
+            [
+              0.07,
+              2893
+            ],
+            [
+              0.111,
+              173
+            ],
+            [
+              0.039,
+              12
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            3,
+            5
+          ],
+          "por_altura": [
+            [
+              0.1,
+              88592
+            ],
+            [
+              0.072,
+              3254
+            ],
+            [
+              0.084,
+              348
+            ],
+            [
+              0.074,
+              27
+            ],
+            [
+              0.064,
+              3
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            5,
+            8
+          ],
+          "por_altura": [
+            [
+              0.141,
+              102410
+            ],
+            [
+              0.083,
+              4068
+            ],
+            [
+              0.12,
+              528
+            ],
+            [
+              0.086,
+              68
+            ],
+            [
+              0.081,
+              3
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            8,
+            14
+          ],
+          "por_altura": [
+            [
+              0.214,
+              110021
+            ],
+            [
+              0.189,
+              5010
+            ],
+            [
+              0.191,
+              814
+            ],
+            [
+              0.157,
+              101
+            ],
+            [
+              0.15,
+              15
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            14,
+            25
+          ],
+          "por_altura": [
+            [
+              0.325,
+              58468
+            ],
+            [
+              0.366,
+              2908
+            ],
+            [
+              0.291,
+              428
+            ],
+            [
+              0.269,
+              41
+            ],
+            [
+              0.267,
+              3
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            25,
+            1000
+          ],
+          "por_altura": [
+            [
+              0.294,
+              20123
+            ],
+            [
+              0.323,
+              877
+            ],
+            [
+              0.295,
+              204
+            ],
+            [
+              0.295,
+              65
+            ],
+            [
+              0.294,
+              20
+            ]
+          ]
+        }
+      ],
+      "nota": "[cobertura rural de hoy a menos de 50 m del agua, celdas]"
+    },
+    "perfil": {
+      "distancias_m": [
+        0,
+        15,
+        30,
+        50,
+        75,
+        105,
+        140,
+        190,
+        260,
+        350
+      ],
+      "filas": [
+        {
+          "ancho_m": [
+            0,
+            3
+          ],
+          "por_distancia": [
+            [
+              0.06,
+              0.041,
+              73456
+            ],
+            [
+              0.052,
+              0.02,
+              203880
+            ],
+            [
+              0.038,
+              0.0,
+              147466
+            ],
+            [
+              0.031,
+              0.0,
+              144191
+            ],
+            [
+              0.026,
+              0.0,
+              281650
+            ],
+            [
+              0.021,
+              0.0,
+              243362
+            ],
+            [
+              0.02,
+              0.0,
+              305639
+            ],
+            [
+              0.019,
+              0.0,
+              305938
+            ],
+            [
+              0.019,
+              0.0,
+              225939
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            3,
+            5
+          ],
+          "por_distancia": [
+            [
+              0.142,
+              0.246,
+              17045
+            ],
+            [
+              0.107,
+              0.157,
+              44824
+            ],
+            [
+              0.064,
+              0.05,
+              30355
+            ],
+            [
+              0.048,
+              0.009,
+              37929
+            ],
+            [
+              0.042,
+              0.0,
+              42412
+            ],
+            [
+              0.036,
+              0.0,
+              46555
+            ],
+            [
+              0.034,
+              0.0,
+              47186
+            ],
+            [
+              0.034,
+              0.0,
+              55120
+            ],
+            [
+              0.034,
+              0.0,
+              42265
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            5,
+            8
+          ],
+          "por_distancia": [
+            [
+              0.201,
+              0.392,
+              19898
+            ],
+            [
+              0.154,
+              0.275,
+              52280
+            ],
+            [
+              0.08,
+              0.091,
+              34899
+            ],
+            [
+              0.053,
+              0.023,
+              44628
+            ],
+            [
+              0.036,
+              0.0,
+              48377
+            ],
+            [
+              0.029,
+              0.0,
+              49500
+            ],
+            [
+              0.023,
+              0.0,
+              51790
+            ],
+            [
+              0.019,
+              0.0,
+              56467
+            ],
+            [
+              0.017,
+              0.0,
+              43486
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            8,
+            14
+          ],
+          "por_distancia": [
+            [
+              0.291,
+              0.619,
+              43671
+            ],
+            [
+              0.187,
+              0.357,
+              34078
+            ],
+            [
+              0.146,
+              0.257,
+              38212
+            ],
+            [
+              0.124,
+              0.2,
+              50915
+            ],
+            [
+              0.1,
+              0.142,
+              45773
+            ],
+            [
+              0.103,
+              0.149,
+              47479
+            ],
+            [
+              0.089,
+              0.112,
+              49192
+            ],
+            [
+              0.084,
+              0.101,
+              53935
+            ],
+            [
+              0.081,
+              0.093,
+              42935
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            14,
+            25
+          ],
+          "por_distancia": [
+            [
+              0.372,
+              0.821,
+              29779
+            ],
+            [
+              0.32,
+              0.691,
+              10258
+            ],
+            [
+              0.268,
+              0.56,
+              21811
+            ],
+            [
+              0.224,
+              0.45,
+              18264
+            ],
+            [
+              0.196,
+              0.38,
+              17368
+            ],
+            [
+              0.198,
+              0.385,
+              17270
+            ],
+            [
+              0.205,
+              0.402,
+              17948
+            ],
+            [
+              0.214,
+              0.426,
+              16432
+            ],
+            [
+              0.229,
+              0.464,
+              12634
+            ]
+          ]
+        },
+        {
+          "ancho_m": [
+            25,
+            1000
+          ],
+          "por_distancia": [
+            [
+              0.292,
+              0.62,
+              12257
+            ],
+            [
+              0.305,
+              0.654,
+              3703
+            ],
+            [
+              0.297,
+              0.632,
+              5329
+            ],
+            [
+              0.288,
+              0.611,
+              6058
+            ],
+            [
+              0.303,
+              0.648,
+              5154
+            ],
+            [
+              0.312,
+              0.671,
+              5324
+            ],
+            [
+              0.28,
+              0.591,
+              5355
+            ],
+            [
+              0.265,
+              0.554,
+              4965
+            ],
+            [
+              0.271,
+              0.567,
+              4008
+            ]
+          ]
+        }
+      ],
+      "nota": "[cobertura rural de hoy, cobertura de 1726, celdas de 20 m]"
+    }
+  }
 }
