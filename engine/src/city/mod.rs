@@ -242,22 +242,35 @@ impl City {
         if let Some(&(a, b)) = spans.iter().find(|&&(a, b)| b - a > voxelize::MAX_BRIDGE) {
             return Some(format!("El cruce de agua mide {} m: los puentes de esta época llegan a {} m", (b - a) as i32, voxelize::MAX_BRIDGE as i32));
         }
-        let mut s = 0.0;
-        for (i, p) in pts.iter().enumerate() {
-            if i > 0 {
-                s += pts[i - 1].distance(*p);
-            }
-            if spans.iter().any(|&(a, b)| s >= a - 1.0 && s <= b + 1.0) {
-                continue; // tablero del puente: no sigue el terreno
-            }
-            let h = t.height(p.x, p.y);
-            if i > 0 {
-                let q = pts[i - 1];
-                let dist = q.distance(*p);
-                if dist > 0.5 && (h - t.height(q.x, q.y)).abs() / dist > 0.2 {
-                    return Some("Demasiado empinado".into());
+        // Pendiente de la calle: en tramos de 10 m y con la altura promediada en unos metros a
+        // la redonda (la calzada se nivela con cortes y rellenos: una bocha de piedra o la
+        // ondulación fina del suelo no la hacen "empinada"). Máximo 20 %.
+        let ground = |p: Vec2| {
+            let o = [Vec2::ZERO, Vec2::new(3.0, 0.0), Vec2::new(-3.0, 0.0), Vec2::new(0.0, 3.0), Vec2::new(0.0, -3.0)];
+            o.iter().map(|d| t.height(p.x + d.x, p.y + d.y)).sum::<f32>() / o.len() as f32
+        };
+        let total = polyline_length(pts);
+        // Punto a `d` metros a lo largo de la polilínea.
+        let at = |d: f32| {
+            let mut acc = 0.0;
+            for w in pts.windows(2) {
+                let l = w[0].distance(w[1]);
+                if acc + l >= d {
+                    return w[0].lerp(w[1], ((d - acc) / l.max(1e-6)).clamp(0.0, 1.0));
                 }
+                acc += l;
             }
+            *pts.last().unwrap()
+        };
+        let step = 10.0f32.min(total);
+        let mut d = 0.0;
+        while d + step <= total + 0.01 {
+            let (a, b) = (d, (d + step).min(total));
+            let on_bridge = spans.iter().any(|&(s0, s1)| b >= s0 - 1.0 && a <= s1 + 1.0);
+            if !on_bridge && (ground(at(b)) - ground(at(a))).abs() / (b - a).max(0.5) > 0.2 {
+                return Some("Demasiado empinado".into());
+            }
+            d += step;
         }
         if self.lots.obstacles.iter().any(|o| {
             let cs = corners_of(o.c, o.f, o.w - 1.0, o.d - 1.0);

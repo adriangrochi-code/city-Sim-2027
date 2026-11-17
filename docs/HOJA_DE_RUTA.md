@@ -46,7 +46,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 4. [x] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
 5. [x] Servicios, agua, incendios, puerto, muralla, campo e iglesia (primera versión; ver [sistemas/servicios.md](sistemas/servicios.md))
 5b. [ ] *(en curso)* Población: personas con personalidad e historial, familias y linajes, llegadas por época, economía de cada hogar, desigualdad y felicidad por grupo
-5c. [ ] En el mapa real el damero de la demostración queda cortado por cuadras "demasiado empinadas": revisar la pendiente máxima de las calles (con vóxel de 0,25 m) y que las calles bajen en rampa
+5c. [x] Pendiente de las calles medida en tramos de 10 m con la altura promediada (antes, una bocha de piedra o la ondulación fina cortaba el damero del mapa real: la ciudad de la demostración pasa de ~450 a ~1.600 vecinos y nadie queda sin poder salir)
 6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real
 8. [x] Vóxel de 0,25 m con capa de detalle de 0,125 m (flora) y monte con nivel de detalle
