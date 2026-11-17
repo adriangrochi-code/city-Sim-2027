@@ -37,6 +37,23 @@ pub const TOOLS: [(Tool, &str); 8] = [
     (Tool::Inspect, "inspeccionar"),
 ];
 
+/// Cuánto se marcan las capas del mapa (menú de visibilidad).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Visibilidad {
+    /// 0: apagadas (solo las que el jugador elige a mano), 1: suaves, 2: marcadas.
+    pub intensidad: u8,
+    /// Mostrar sola la capa que corresponde a la herramienta (zonas, servicios, campo).
+    pub auto: bool,
+    /// Concentrar las capas alrededor del cursor (se desvanecen lejos).
+    pub foco: bool,
+}
+
+impl Default for Visibilidad {
+    fn default() -> Self {
+        Visibilidad { intensidad: 1, auto: true, foco: true }
+    }
+}
+
 /// Trazado de una calle con sus enganches (ver [`Game::draft`]).
 pub struct Draft {
     /// Punto final (enganchado).
@@ -84,6 +101,10 @@ pub struct Game {
     /// Grilla de la capa de terreno ya calculada (clave, vértices): se rehace solo cuando
     /// cambia la capa, la ventana o el mes.
     capa_terreno: Mutex<Option<CapaTerreno>>,
+    /// Menú de visibilidad de las capas.
+    pub vis: Visibilidad,
+    /// Aptitud de los solares vacíos para la zona elegida (zona, mes, solares → aptitud).
+    aptitud_cache: Mutex<Option<((u8, u32, usize), std::collections::HashMap<u32, f32>)>>,
 }
 
 type CapaTerreno = ((u8, i32, i32, u32, usize), Vec<OverlayVertex>);
@@ -142,6 +163,8 @@ impl Default for Game {
             grupo: services::Grupo::Agua,
             orders: Vec::new(),
             capa_terreno: Mutex::new(None),
+            vis: Visibilidad::default(),
+            aptitud_cache: Mutex::new(None),
             plaza_angle: 0.0,
             free_draw: false,
             painting: false,
@@ -307,6 +330,26 @@ impl Game {
         d.end = if s2.node.is_some() || s2.edge.is_some() { s2.pos } else { end };
         d.guides.push((from - dir * 30.0, end + dir * 30.0));
         d
+    }
+
+    /// Al zonificar: aptitud del solar vacío bajo el cursor para la zona elegida.
+    pub fn zona_label(&self) -> Option<String> {
+        if self.tool != Tool::Zone {
+            return None;
+        }
+        let id = self.city.lots.lot_at(self.hover?)?;
+        if self.city.lots.lots[&id].level > 0 {
+            return None;
+        }
+        let c = self.aptitud_cache.lock().unwrap();
+        let a = *c.as_ref()?.1.get(&id)?;
+        let que = match a {
+            x if x < 0.25 => "mala",
+            x if x < 0.45 => "regular",
+            x if x < 0.65 => "buena",
+            _ => "muy buena",
+        };
+        Some(format!("Aptitud para {}: {} ({} %)", self.zone_kind.name().to_lowercase(), que, (a * 100.0).round() as i32))
     }
 
     /// Texto junto al cursor mientras se traza una calle: largo, ángulo y enganche.
@@ -711,19 +754,33 @@ impl Game {
         // Solares: el plano de zonas (los zonificados con su color y los libres) solo se ve con
         // la herramienta de zonas; fuera de ella, el mapa queda limpio.
         let show_free = matches!(self.tool, Tool::Zone | Tool::Dezone);
+        let capas0 = out.len();
+        // Al zonificar, los solares vacíos se tiñen según su aptitud para la zona elegida (de
+        // rojo, mala, a verde, buena), sin abrir ninguna capa.
+        let aptitud = (self.tool == Tool::Zone && self.vis.auto && self.vis.intensidad > 0).then(|| {
+            let clave = (self.zone_kind as u8, self.city.month, self.city.lots.lots.len());
+            let mut c = self.aptitud_cache.lock().unwrap();
+            if c.as_ref().is_none_or(|x| x.0 != clave) {
+                *c = Some((clave, self.city.aptitud_zona(self.zone_kind)));
+            }
+            c.as_ref().unwrap().1.clone()
+        });
         for l in self.city.lots.lots.values() {
             if !show_free || l.level > 0 {
                 continue;
             }
             let col = match zone_of(l.zone) {
                 Some((k, d)) => zone_color(k, d),
-                None if show_free => [1.0, 0.97, 0.85, 0.18],
-                None => continue,
+                None => match aptitud.as_ref().and_then(|a| a.get(&l.id)) {
+                    Some(&a) => aptitud_color(a),
+                    None => [1.0, 0.97, 0.85, 0.18],
+                },
             };
             quad(&mut out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
         // Capa de datos (o la que corresponde al servicio que se está colocando).
-        let layer = self.layer.or(match (self.tool, self.service) {
+        let auto = self.vis.auto && self.vis.intensidad > 0;
+        let layer = self.layer.or(if !auto { None } else { match (self.tool, self.service) {
             (Tool::Service, Placeable::Building(Kind::Pozo | Kind::Aljibe | Kind::Aguadores)) => Some(Layer::Agua),
             (Tool::Service, Placeable::Building(Kind::Serenos)) => Some(Layer::Serenos),
             (Tool::Service, Placeable::Building(Kind::Escuela | Kind::Convento)) => Some(Layer::Educacion),
@@ -735,12 +792,31 @@ impl Game {
             (Tool::Service, Placeable::Building(Kind::Horno)) => Some(Layer::Arcilla),
             (Tool::Service, Placeable::Building(Kind::Cantera)) => Some(Layer::Piedra),
             _ => None,
-        });
+        } });
         if let Some(layer) = layer {
             if layer.es_de_terreno() {
                 self.terrain_layer(&mut out, t, layer);
             }
             self.layer_overlay(&mut out, t, layer);
+        }
+        // Visibilidad: las capas (y el plano de zonas) se marcan según el menú y, si se pide, se
+        // concentran alrededor del cursor. Una capa elegida a mano se ve aunque estén apagadas.
+        let elegida = self.layer.is_some();
+        let k = match self.vis.intensidad {
+            0 if elegida => 0.6,
+            0 => 0.0,
+            1 => 0.6,
+            _ => 1.0,
+        };
+        let (r0, r1) = if elegida { (700.0, 1600.0) } else { (220.0, 600.0) };
+        let foco = if self.vis.foco { self.hover } else { None };
+        for v in &mut out[capas0..] {
+            let mut a = k;
+            if let Some(h) = foco {
+                let d = Vec2::new(v.pos[0], v.pos[2]).distance(h);
+                a *= 1.0 - 0.85 * ((d - r0) / (r1 - r0)).clamp(0.0, 1.0);
+            }
+            v.color[3] *= a;
         }
         // Lo inspeccionado queda marcado mientras la ficha está abierta.
         if let Some(p) = self.inspected {
@@ -1041,6 +1117,16 @@ impl Game {
     fn road_preview(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, pts: &[Vec2]) {
         let good = self.city.road_problem(t, pts, self.kind).is_none() && City::road_cost(t, pts, self.kind) <= self.city.money;
         ribbon(out, t, pts, self.kind.width(), if good { [0.45, 0.95, 0.45, 0.55] } else { [1.0, 0.35, 0.3, 0.55] });
+    }
+}
+
+/// Color de la aptitud de un solar para una zona: rojo (mala), amarillo, verde (buena).
+fn aptitud_color(a: f32) -> [f32; 4] {
+    let a = a.clamp(0.0, 1.0);
+    if a < 0.5 {
+        [0.9, 0.35 + a * 1.0, 0.25, 0.42]
+    } else {
+        [0.9 - (a - 0.5) * 1.3, 0.85, 0.3, 0.42]
     }
 }
 

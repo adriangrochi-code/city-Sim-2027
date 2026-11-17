@@ -16,7 +16,7 @@ pub mod poblacion;
 pub mod theme;
 
 use crate::city::game::fmt_thousands;
-use crate::city::game::{stage_name, Game, Inspect, InspectKind, Tool, TOOLS};
+use crate::city::game::{stage_name, Game, Inspect, InspectKind, Tool, Visibilidad, TOOLS};
 use crate::city::economy::{Economy, Res, Sector, Tax, ORDINANCES, TAX_MAX, TOGGLE_COST};
 use crate::city::roads::RoadKind;
 use crate::city::lots::{Demand, Density, ZoneKind};
@@ -483,6 +483,8 @@ pub enum UiAction {
     Abrir(Detail),
     /// Tecnologías e incentivos del panel de Desarrollo.
     Desarrollo(desarrollo::Act),
+    /// Menú de visibilidad de las capas del mapa.
+    Visibilidad(Visibilidad),
 }
 
 /// Estado propio de la interfaz entre cuadros.
@@ -587,6 +589,7 @@ impl GameUi {
             None => self.drawer_h = 0.0,
         }
         self.hint(ctx, game, terrain);
+        self.visibilidad(ctx, game, &mut acts);
         // Junto al cursor, mientras se traza una calle: largo, ángulo respecto del damero y costo.
         if let (Some(txt), Some(pos)) = (game.draft_label(terrain), ctx.pointer_hover_pos()) {
             egui::Area::new(egui::Id::new("trazado"))
@@ -796,6 +799,31 @@ impl GameUi {
         self.drawer_h = r.response.rect.height();
     }
 
+    /// Menú de visibilidad, chico, abajo a la derecha: cuánto se marcan las capas del mapa, si
+    /// aparece sola la que corresponde a la herramienta y si se concentran cerca del cursor.
+    fn visibilidad(&self, ctx: &egui::Context, game: &Game, acts: &mut Vec<UiAction>) {
+        let mut v = game.vis;
+        egui::Area::new("visibilidad".into()).anchor(Align2::RIGHT_BOTTOM, vec2(-10.0, -10.0)).show(ctx, |ui| {
+            theme::paper_frame().inner_margin(egui::Margin::symmetric(8.0, 5.0)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Capas").small().color(theme::INK_SOFT));
+                    for (i, (name, tip)) in [("No", "Sin capas (solo la que elijas a mano en Capas de datos)"), ("Suaves", "Capas tenues, que no tapan la ciudad"), ("Marcadas", "Capas con todo su color")].iter().enumerate() {
+                        if ui.selectable_label(v.intensidad == i as u8, RichText::new(*name).small()).on_hover_text(*tip).clicked() {
+                            v.intensidad = i as u8;
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut v.auto, RichText::new("Según la herramienta").small()).on_hover_text("Al zonificar, colocar un servicio o el campo, se ve sola la capa que sirve (aptitud del solar, alcance, recurso del suelo)");
+                    ui.checkbox(&mut v.foco, RichText::new("Cerca del cursor").small()).on_hover_text("Las capas se concentran alrededor del cursor y se desvanecen lejos");
+                });
+            });
+        });
+        if v != game.vis {
+            acts.push(UiAction::Visibilidad(v));
+        }
+    }
+
     fn hint(&self, ctx: &egui::Context, game: &Game, terrain: &TerrainGen) {
         let (help, err) = game.hint(terrain);
         // Primera línea: qué hace; el resto (costo, tipo) va aparte y más chico.
@@ -809,6 +837,9 @@ impl GameUi {
                 ui.label(RichText::new(first).small());
                 for l in rest {
                     ui.label(RichText::new(l).small().strong());
+                }
+                if let Some(z) = game.zona_label() {
+                    ui.label(RichText::new(z).small().strong().color(theme::INK));
                 }
                 if let Some(d) = game.draft_label(terrain) {
                     ui.label(RichText::new(d).small().strong().color(theme::INK));
@@ -1346,6 +1377,7 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
                 game.zone_kind = *k;
             }
             UiAction::Density(d) => game.density = *d,
+            UiAction::Visibilidad(v) => game.vis = *v,
             UiAction::Brush(b) => game.brush = b.clamp(10.0, 150.0),
             UiAction::Speed(v) => game.speed = *v,
             UiAction::Hour(d) => hour_delta += d,

@@ -189,6 +189,22 @@ impl City {
         self.lots.valor = valores;
     }
 
+    /// Aptitud de cada solar vacío para una zona (0 a 1): el valor del suelo que tendría si se
+    /// zonificara de ese tipo (industria: talleres juntos, puerto, materia prima; comercio: paso
+    /// de la gente; casas: plaza, servicios y sin molestias). Para teñir los solares al zonificar.
+    pub fn aptitud_zona(&self, k: ZoneKind) -> HashMap<u32, f32> {
+        let cerca = Cerca::new(&self.lots.lots);
+        let mut out = HashMap::new();
+        for l in self.lots.lots.values().filter(|l| l.level == 0) {
+            let mut l2 = l.clone();
+            l2.zone = super::super::lots::zone_code(k, super::super::lots::Density::Baja);
+            let ind = k == ZoneKind::Industrial;
+            let m = self.suelo.campo.en(l.c, ind.then_some(l.c));
+            out.insert(l.id, self.desglose_valor(&l2, &m, &cerca).valor);
+        }
+        out
+    }
+
     /// Valor del suelo de un solar con sus componentes.
     fn desglose_valor(&self, l: &Lot, m: &Molestia, cerca: &Cerca) -> Desglose {
         let est = self.suelo.estatico.get(&l.id).copied().unwrap_or_default();
