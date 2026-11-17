@@ -1,4 +1,501 @@
 {
- "descripcion": "Tramos de la costa: tipo, fracción de roca de la orilla (0-1) y largo de las restingas que se meten en el agua (m). Coordenadas en metros del mapa (x este, z sur). Ver docs/sistemas/costa.md.",
- "tramos": []
+ "descripcion": "Tramos de la costa del mapa (ver docs/sistemas/costa.md): tipo natural (antes de ramblas, muelles y rellenos), fracción de roca de la orilla (0-1) y largo de las restingas emergidas que se meten en el agua (m, rango). Coordenadas en metros del mapa (x este, z sur), convertidas de lat/lon con el origen y la escala de meta.json. Fuente: investigación de noviembre de 2026 (OSM natural=bare_rock, playas IDE e Intendencia de Montevideo, ortoimagen, Carta Geológica de Montevideo).",
+ "tramos": [
+  {
+   "nombre": "Desembocadura del Santa Lucía (banco de arena)",
+   "tipo": "arena",
+   "rocas": 0.0,
+   "restinga_m": [
+    0,
+    0
+   ],
+   "a": [
+    -21189.9,
+    -2063.5
+   ],
+   "b": [
+    -9653.4,
+    5602.4
+   ],
+   "calidad": "DESCRITO"
+  },
+  {
+   "nombre": "Punta Espinillo",
+   "tipo": "roca",
+   "rocas": 0.6,
+   "restinga_m": [
+    10,
+    40
+   ],
+   "a": [
+    -9653.4,
+    5602.4
+   ],
+   "b": [
+    -8227.3,
+    6878.2
+   ],
+   "calidad": "ESTIMADO, IMAGEN"
+  },
+  {
+   "nombre": "Espinillo → La Colorada",
+   "tipo": "mixta",
+   "rocas": 0.5,
+   "restinga_m": [
+    10,
+    50
+   ],
+   "a": [
+    -8227.3,
+    6811.6
+   ],
+   "b": [
+    -4662.1,
+    8986.0
+   ],
+   "calidad": "ESTIMADO; arena MEDIDA"
+  },
+  {
+   "nombre": "La Colorada → Pajas Blancas",
+   "tipo": "mixta",
+   "rocas": 0.6,
+   "restinga_m": [
+    10,
+    30
+   ],
+   "a": [
+    -4662.1,
+    8986.0
+   ],
+   "b": [
+    -1462.6,
+    10206.3
+   ],
+   "calidad": "ESTIMADO; IMAGEN"
+  },
+  {
+   "nombre": "Pajas Blancas → Zabala",
+   "tipo": "arena",
+   "rocas": 0.3,
+   "restinga_m": [
+    10,
+    30
+   ],
+   "a": [
+    -1462.6,
+    10206.3
+   ],
+   "b": [
+    -914.1,
+    10761.0
+   ],
+   "calidad": "ESTIMADO; arena MEDIDA"
+  },
+  {
+   "nombre": "Zabala → Los Cilindros",
+   "tipo": "roca",
+   "rocas": 0.8,
+   "restinga_m": [
+    20,
+    50
+   ],
+   "a": [
+    -914.1,
+    10761.0
+   ],
+   "b": [
+    -566.8,
+    12158.9
+   ],
+   "calidad": "ESTIMADO"
+  },
+  {
+   "nombre": "Los Cilindros → Punta Yeguas",
+   "tipo": "mixta",
+   "rocas": 0.6,
+   "restinga_m": [
+    20,
+    80
+   ],
+   "a": [
+    -566.8,
+    12158.9
+   ],
+   "b": [
+    1133.5,
+    14000.4
+   ],
+   "calidad": "ESTIMADO; IMAGEN"
+  },
+  {
+   "nombre": "Punta Yeguas → Santa Catalina",
+   "tipo": "roca",
+   "rocas": 0.58,
+   "restinga_m": [
+    30,
+    80
+   ],
+   "a": [
+    1133.5,
+    14000.4
+   ],
+   "b": [
+    2651.0,
+    12757.9
+   ],
+   "calidad": "MEDIDO (OSM)"
+  },
+  {
+   "nombre": "Santa Catalina → Pta. del Tigre → Pta. de Sayago",
+   "tipo": "roca",
+   "rocas": 0.77,
+   "restinga_m": [
+    20,
+    70
+   ],
+   "a": [
+    2651.0,
+    12757.9
+   ],
+   "b": [
+    4497.6,
+    13712.0
+   ],
+   "calidad": "MEDIDO (OSM)"
+  },
+  {
+   "nombre": "Pta. de Sayago → Pta. de Lobos",
+   "tipo": "mixta",
+   "rocas": 0.6,
+   "restinga_m": [
+    30,
+    60
+   ],
+   "a": [
+    4497.6,
+    13712.0
+   ],
+   "b": [
+    6051.6,
+    14189.0
+   ],
+   "calidad": "MEDIDO (OSM)"
+  },
+  {
+   "nombre": "Playa del Cerro",
+   "tipo": "arena",
+   "rocas": 0.2,
+   "restinga_m": [
+    40,
+    100
+   ],
+   "a": [
+    6307.6,
+    13479.0
+   ],
+   "b": [
+    7221.7,
+    12757.9
+   ],
+   "calidad": "MEDIDO; IMAGEN"
+  },
+  {
+   "nombre": "Costa E del Cerro → Capurro (natural)",
+   "tipo": "mixta",
+   "rocas": 0.3,
+   "restinga_m": [
+    10,
+    30
+   ],
+   "a": [
+    7221.7,
+    12757.9
+   ],
+   "b": [
+    8684.4,
+    10206.3
+   ],
+   "calidad": "ESTIMADO"
+  },
+  {
+   "nombre": "Bahía interior: Pantanoso → La Aguada (natural)",
+   "tipo": "arena",
+   "rocas": 0.0,
+   "restinga_m": [
+    0,
+    0
+   ],
+   "a": [
+    8684.4,
+    10206.3
+   ],
+   "b": [
+    10512.7,
+    13645.4
+   ],
+   "calidad": "DESCRITO"
+  },
+  {
+   "nombre": "Península: Pta. San José / Pta. Sarandí (natural)",
+   "tipo": "roca",
+   "rocas": 0.8,
+   "restinga_m": [
+    60,
+    130
+   ],
+   "a": [
+    10512.7,
+    13645.4
+   ],
+   "b": [
+    11609.6,
+    14821.4
+   ],
+   "calidad": "ESTIMADO; banco MEDIDO (OSM)"
+  },
+  {
+   "nombre": "Pta. Sarandí → Pta. Pérez (natural)",
+   "tipo": "mixta",
+   "rocas": 0.5,
+   "restinga_m": [
+    10,
+    40
+   ],
+   "a": [
+    11609.6,
+    14821.4
+   ],
+   "b": [
+    13968.1,
+    15165.3
+   ],
+   "calidad": "ESTIMADO"
+  },
+  {
+   "nombre": "Playa Ramírez",
+   "tipo": "arena",
+   "rocas": 0.22,
+   "restinga_m": [
+    20,
+    60
+   ],
+   "a": [
+    13968.1,
+    15165.3
+   ],
+   "b": [
+    14233.2,
+    15609.0
+   ],
+   "calidad": "MEDIDO"
+  },
+  {
+   "nombre": "Pta. Ramírez → Pta. Brava / Pta. Carretas",
+   "tipo": "mixta",
+   "rocas": 0.32,
+   "restinga_m": [
+    10,
+    40
+   ],
+   "a": [
+    14041.3,
+    15753.3
+   ],
+   "b": [
+    15074.3,
+    17683.6
+   ],
+   "calidad": "MEDIDO"
+  },
+  {
+   "nombre": "Pta. Brava → Pta. Trouville",
+   "tipo": "roca",
+   "rocas": 0.95,
+   "restinga_m": [
+    10,
+    40
+   ],
+   "a": [
+    15074.3,
+    17683.6
+   ],
+   "b": [
+    16354.1,
+    15720.0
+   ],
+   "calidad": "MEDIDO (OSM)"
+  },
+  {
+   "nombre": "Pocitos",
+   "tipo": "arena",
+   "rocas": 0.04,
+   "restinga_m": [
+    0,
+    10
+   ],
+   "a": [
+    16216.9,
+    15720.0
+   ],
+   "b": [
+    16911.7,
+    14599.5
+   ],
+   "calidad": "MEDIDO 0,11 contando el extremo de Trouville (que es su propio tramo); el arco, ~0,04"
+  },
+  {
+   "nombre": "Pocitos E → Pta. del Buceo",
+   "tipo": "roca",
+   "rocas": 0.82,
+   "restinga_m": [
+    40,
+    100
+   ],
+   "a": [
+    17094.5,
+    14599.5
+   ],
+   "b": [
+    18374.3,
+    14089.2
+   ],
+   "calidad": "MEDIDO (OSM)"
+  },
+  {
+   "nombre": "Playa del Buceo",
+   "tipo": "arena",
+   "rocas": 0.14,
+   "restinga_m": [
+    20,
+    40
+   ],
+   "a": [
+    18456.6,
+    13845.1
+   ],
+   "b": [
+    19315.9,
+    13345.9
+   ],
+   "calidad": "MEDIDO"
+  },
+  {
+   "nombre": "Malvín",
+   "tipo": "arena",
+   "rocas": 0.2,
+   "restinga_m": [
+    20,
+    60
+   ],
+   "a": [
+    19315.9,
+    13345.9
+   ],
+   "b": [
+    20504.3,
+    13479.0
+   ],
+   "calidad": "MEDIDO; IMAGEN"
+  },
+  {
+   "nombre": "Playa Honda",
+   "tipo": "arena",
+   "rocas": 0.15,
+   "restinga_m": [
+    40,
+    70
+   ],
+   "a": [
+    20504.3,
+    13479.0
+   ],
+   "b": [
+    21665.2,
+    13024.2
+   ],
+   "calidad": "MEDIDO; IMAGEN"
+  },
+  {
+   "nombre": "Playa de los Ingleses → Punta Gorda",
+   "tipo": "roca",
+   "rocas": 0.7,
+   "restinga_m": [
+    10,
+    30
+   ],
+   "a": [
+    21875.5,
+    13024.2
+   ],
+   "b": [
+    22259.4,
+    13545.6
+   ],
+   "calidad": "ESTIMADO; IMAGEN"
+  },
+  {
+   "nombre": "Playa Verde, La Mulata → Punta Mansa",
+   "tipo": "mixta",
+   "rocas": 0.25,
+   "restinga_m": [
+    20,
+    50
+   ],
+   "a": [
+    22488.0,
+    13423.6
+   ],
+   "b": [
+    23786.1,
+    13490.1
+   ],
+   "calidad": "MEDIDO; DESCRITO"
+  },
+  {
+   "nombre": "Carrasco",
+   "tipo": "arena",
+   "rocas": 0.0,
+   "restinga_m": [
+    0,
+    0
+   ],
+   "a": [
+    23786.1,
+    13490.1
+   ],
+   "b": [
+    26875.9,
+    11537.6
+   ],
+   "calidad": "MEDIDO"
+  },
+  {
+   "nombre": "Ciudad de la Costa",
+   "tipo": "arena",
+   "rocas": 0.0,
+   "restinga_m": [
+    0,
+    0
+   ],
+   "a": [
+    26875.9,
+    11537.6
+   ],
+   "b": [
+    42507.7,
+    1886.0
+   ],
+   "calidad": "MEDIDO"
+  }
+ ],
+ "islotes": [
+  {
+   "nombre": "Isla de las Gaviotas",
+   "x": 20175.2,
+   "z": 13822.9,
+   "radio_m": 100,
+   "alto_m": 4.0,
+   "calidad": "VERIFICADO (OSM; Decreto 680/990)"
+  }
+ ]
 }

@@ -102,7 +102,7 @@ fn patch_threshold(c: f32) -> f32 {
         (0.005, 0.74), (0.01, 0.714), (0.05, 0.658), (0.10, 0.626),
         (0.15, 0.603), (0.20, 0.584), (0.30, 0.552), (0.50, 0.498),
     ];
-    if c >= 0.5 {
+    if c > 0.5 {
         // Más de la mitad: simétrico respecto de la media.
         return 1.0 - patch_threshold(1.0 - c);
     }
@@ -126,6 +126,20 @@ struct Tramo {
     b: Vec2,
     rocas: f32,
     restinga: f32,
+}
+
+/// Islotes de piedra que el MDT no tiene (centro, radio y alto, m).
+fn parse_islotes(txt: &str) -> Vec<(Vec2, f32, f32)> {
+    let v: serde_json::Value = serde_json::from_str(txt).expect("costa.json inválido");
+    v["islotes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|i| {
+            let f = |k: &str| i[k].as_f64().unwrap_or(0.0) as f32;
+            (Vec2::new(f("x"), f("z")), f("radio_m"), f("alto_m"))
+        })
+        .collect()
 }
 
 fn parse_costa(txt: &str) -> Vec<Tramo> {
@@ -347,6 +361,8 @@ struct RealMap {
     coast_r_ctx: Grid,
     coast_l_main: Grid,
     coast_l_ctx: Grid,
+    /// Islotes de piedra (centro, radio, alto).
+    islotes: Vec<(Vec2, f32, f32)>,
 }
 
 impl RealMap {
@@ -651,6 +667,7 @@ impl TerrainGen {
             coast_r_ctx,
             coast_l_main,
             coast_l_ctx,
+            islotes: parse_islotes(COSTA_JSON),
         }));
         for txt in [ARROYOS_JSON, ARROYOS_CTX_JSON] {
             let (arroyos, names) = parse_arroyos(txt);
@@ -1009,6 +1026,22 @@ impl TerrainGen {
         d
     }
 
+    /// Islote en este punto: 0 afuera, 1 en el centro (borde irregular de ruido).
+    fn islote(&self, x: f32, z: f32) -> (f32, f32) {
+        let Some(r) = &self.real else { return (0.0, 0.0) };
+        for &(c, rad, alto) in &r.islotes {
+            let d = Vec2::new(x, z).distance(c);
+            if d < rad * 1.4 {
+                let n = self.n_detail.get_noise_2d(x * 6.0 + 3.0, z * 6.0 - 8.0);
+                let k = 1.0 - d / (rad * (0.9 + 0.35 * n));
+                if k > 0.0 {
+                    return (k.min(1.0), alto);
+                }
+            }
+        }
+        (0.0, 0.0)
+    }
+
     /// Muestra un par de grillas (mapa / entorno) con la transición del borde.
     fn blend(&self, main: &Grid, ctx: &Grid, x: f32, z: f32) -> f32 {
         let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
@@ -1126,6 +1159,12 @@ impl TerrainGen {
                     h += (top - h) * rf;
                 }
             }
+        }
+        // Islotes de piedra que el MDT no tiene (la isla de las Gaviotas).
+        let (ik, alto) = self.islote(x, z);
+        if ik > 0.0 {
+            let bump = self.n_detail.get_noise_2d(x * 15.0, z * 15.0) * 0.5 + 0.5;
+            h = h.max(-0.8 + (alto + 0.8) * smoothstep(0.0, 0.45, ik) * (0.75 + 0.25 * bump));
         }
         // Piedras de la orilla: lajas y bochas que levantan entre 0,3 y 1,5 m sobre la arena.
         let sd0 = self.sea_distance(x, z);
@@ -1322,6 +1361,11 @@ impl TerrainGen {
         let fine = self.n_detail.get_noise_2d(x * 2.5, z * 2.5);
         let sd = self.sea_distance(x, z);
         let (da, hw, class) = self.arroyo_info(x, z);
+        // Islote: piedra desnuda con manchas de pasto arriba.
+        let (ik, _) = self.islote(x, z);
+        if ik > 0.0 && h > -0.5 {
+            return if ik > 0.45 && fine > 0.0 + self.dither(x, z) * 0.3 { GRASS } else { COAST_ROCK };
+        }
         // Costa de piedra (costa.json): lajas de la orilla y restingas que se meten en el agua.
         if sd < 70.0 && h > -1.5 && da > hw + 3.0 {
             let d = self.dither(x, z);
@@ -1806,20 +1850,22 @@ mod tests {
         // Playas (Pocitos, Carrasco, el oeste) y bañados (Pantanoso, Santa Lucía) de la IDE.
         assert!(cuenta(BIO_PLAYA) > 1000, "playas: {}", cuenta(BIO_PLAYA));
         assert!(cuenta(BIO_BANADO) > 5000, "bañados: {}", cuenta(BIO_BANADO));
-        // Playa de Pocitos: arena en la orilla.
-        let mut pocitos = 0;
+        // Playa de Pocitos: arena en la orilla, con alguna piedra (11 % de roca medido, del lado
+        // de Trouville; ver costa.json).
+        let (mut pocitos, mut arena) = (0, 0);
         for k in 0..400 {
             let (x, z) = (15400.0 + (k % 20) as f32 * 60.0, 15200.0 + (k / 20) as f32 * 60.0);
             if t.official_biome(x, z) == BIO_PLAYA {
-                pocitos += 1;
                 let h = t.height(x, z);
                 if h > -0.3 {
+                    pocitos += 1;
                     let m = t.surface_material(x, z, h, 0.05);
-                    assert!(m == SAND || m == SAND_WET || m == STREAM || m == MUD, "material {m} en la playa ({x}, {z})");
+                    arena += matches!(m, SAND | SAND_WET | STREAM | MUD) as i32;
                 }
             }
         }
         assert!(pocitos > 0, "sin playa en Pocitos");
+        assert!(arena as f32 >= pocitos as f32 * 0.8, "Pocitos: {arena} de {pocitos} con arena");
         // Sin árboles en los bañados.
         let mut trees = Vec::new();
         t.trees_in(0.0, 0.0, 3000.0, 3000.0, &mut trees);
