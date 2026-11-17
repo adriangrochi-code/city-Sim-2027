@@ -1,7 +1,7 @@
 //! Economía de cada hogar: vivienda (dónde vive, si es dueño o inquilino), trabajo (solares
 //! comerciales e industriales, el campo, el puerto, el servicio), ingresos y gastos (comida al
 //! precio del mercado, alquiler, impuestos), ahorro, deuda, compra de solares y mejoras de la
-//! casa, clase social y el camino a la libertad de las personas esclavizadas.
+//! casa y clase social.
 //!
 //! Montos en pesos de plata por mes. Son ESTIMACIONES de orden de magnitud para el Río de la
 //! Plata colonial (ver la tabla de calibración en `docs/sistemas/poblacion.md`).
@@ -13,10 +13,6 @@ use crate::city::economy::Ordinance;
 pub const SUBSISTENCIA: f32 = 2.0;
 /// Valor de una cabeza de ganado (para el patrimonio).
 pub const PRECIO_GANADO: f32 = 2.0;
-/// Suma que la ley exigía para la carta de libertad por ahorro (estimación de orden de
-/// magnitud). No es el "precio" de nadie: en el modelo ese dinero no lo cobra ningún hogar
-/// (sale como costo del trámite y de la compensación legal, ver la documentación).
-pub const CARTA_DE_LIBERTAD: f32 = 200.0;
 
 /// Valor de un solar con su edificio, por nivel (vacío, rancho, azotea, altos).
 pub const VALOR_SOLAR: [f32; 4] = [20.0, 40.0, 450.0, 1500.0];
@@ -292,16 +288,6 @@ impl Poblacion {
                 continue;
             }
             let Some(k) = zona_de_trabajo(p.oficio) else { continue };
-            // Quien está esclavizado (o bajo patronato) no elige patrón: trabaja donde lo
-            // mande el hogar, si el hogar tiene un comercio o taller; si no, en la casa.
-            if p.sujeta() {
-                let propio = p.hogar.and_then(|h| self.hogares[h as usize].solares.iter().copied().find(|s| info.get(s).is_some_and(|i| i.tipo == Some(k) && i.empleos > *ocupados.get(s).unwrap_or(&0))));
-                if let Some(s) = propio {
-                    *ocupados.en(s) += 1;
-                    self.personas[id as usize].trabajo = Some(s);
-                }
-                continue;
-            }
             if let Some(l) = vacantes[k as usize].pop() {
                 *ocupados.en(l) += 1;
                 self.personas[id as usize].trabajo = Some(l);
@@ -388,25 +374,7 @@ impl Poblacion {
                     p.riqueza += (w - SUBSISTENCIA * (0.45 * pan + 0.15 * carne + 0.4)).max(0.0) * 0.3;
                     continue;
                 }
-                if p.condicion == Condicion::Esclavizada {
-                    // Su trabajo beneficia al hogar; guarda un peculio para su libertad: parte
-                    // del jornal cuando la conchaban afuera y lo que gana por su cuenta los
-                    // domingos y días de fiesta (desde fines del siglo XVIII). Las mujeres
-                    // lavaban, planchaban y vendían pan y dulces: compraban su libertad el doble
-                    // de veces que los varones (67 % de las compras de 1790–1820; Frega et al.,
-                    // 2020, cap. 4).
-                    let fiestas = if p.sexo == Sexo::Mujer { 0.6 } else { 0.2 } * (0.5 + p.rasgos.laboriosidad());
-                    let peculio = (w * 0.06 + fiestas) * (0.5 + p.rasgos.prudencia());
-                    p.riqueza += peculio;
-                    salarios += (w * 0.85 - peculio).max(0.0);
-                } else if p.patronato.is_some() {
-                    // Bajo patronato: sirve a cambio de techo, comida y ropa; casi todo lo que
-                    // rinde queda en el hogar.
-                    p.riqueza += w * 0.05;
-                    salarios += w * 0.8;
-                } else {
-                    salarios += w;
-                }
+                salarios += w;
             }
             if colectivo {
                 let h = &mut self.hogares[hi];
@@ -532,9 +500,6 @@ impl Poblacion {
         if ent.vigente(Ordinance::RepartoSolares) {
             inf.lineas.push(("Reparto de solares (mensura y escrituras)".into(), -25));
         }
-        if ent.vigente(Ordinance::FondoManumision) {
-            inf.lineas.push(("Fondo de manumisión".into(), -40));
-        }
     }
 
     /// El cabildo aplicó la mejora de la casa: el dueño la paga.
@@ -584,261 +549,6 @@ impl Poblacion {
             if p.estamento != Estamento::Militar && p.estamento != Estamento::Clero {
                 p.estamento = if vecino || p.estamento == Estamento::Vecino && en_solar { Estamento::Vecino } else { Estamento::Morador };
             }
-        }
-    }
-
-    // --- Libertad -----------------------------------------------------------------------
-
-    /// Caminos a la libertad durante la vida: el peculio ahorrado (con o sin el fondo del
-    /// cabildo, la colecta de la cofradía o la ayuda de la familia libre) y, rara vez, la carta
-    /// que otorgaba quien la sometía. La suma de la carta sale del patrimonio de las familias
-    /// (`legados`): ningún hogar del modelo la cobra.
-    pub(crate) fn manumisiones(&mut self, rng: &mut Rng, ent: &Entorno, noticias: &mut Vec<String>) {
-        let fondo = ent.vigente(Ordinance::FondoManumision);
-        let mut presupuesto_fondo = if fondo { 40.0 + std::mem::take(&mut self.fondo_libertad) } else { 0.0 };
-        let candidatos: Vec<PersonaId> = self.idx.vivos.iter().copied().filter(|&p| self.personas[p as usize].condicion == Condicion::Esclavizada && self.personas[p as usize].edad(ent.mes) >= 14).collect();
-        let cofradias = self.hay_cofradias() && candidatos.iter().any(|&p| self.personas[p as usize].riqueza >= CARTA_DE_LIBERTAD * 0.75);
-        let asc = if cofradias { self.ascendencias() } else { Vec::new() };
-        // El fondo ayuda primero a quien más cerca está de juntar la suma.
-        let mut orden = candidatos.clone();
-        orden.sort_by(|a, b| self.personas[*b as usize].riqueza.total_cmp(&self.personas[*a as usize].riqueza).then(a.cmp(b)));
-        for p in orden {
-            let r = self.personas[p as usize].riqueza;
-            let falta = (CARTA_DE_LIBERTAD - r).max(0.0);
-            if falta == 0.0 {
-                self.personas[p as usize].riqueza -= CARTA_DE_LIBERTAD;
-                self.legados += CARTA_DE_LIBERTAD as f64;
-                self.liberar(p, ViaLibertad::Ahorro, noticias);
-            } else if fondo && falta <= presupuesto_fondo && r >= CARTA_DE_LIBERTAD * 0.35 {
-                // El fondo pone lo que falta (dinero del cabildo, fuera del patrimonio de las
-                // familias); la persona pone todo su peculio.
-                presupuesto_fondo -= falta;
-                self.personas[p as usize].riqueza = 0.0;
-                self.legados += r as f64;
-                self.liberar(p, ViaLibertad::Fondo, noticias);
-            } else if let Some(h) = self.familia_que_ayuda(p, falta, rng) {
-                // La familia libre pone lo que falta (primero para la esposa y madre).
-                self.hogares[h as usize].ahorro -= falta;
-                self.personas[p as usize].riqueza = 0.0;
-                self.legados += (r + falta) as f64;
-                self.liberar(p, ViaLibertad::Familia, noticias);
-            } else if cofradias && r >= CARTA_DE_LIBERTAD * 0.75 && rng.f() < 0.015 && self.colecta(p, falta, &asc) {
-                // La colecta completó la suma: la persona la paga entera.
-                self.personas[p as usize].riqueza -= CARTA_DE_LIBERTAD;
-                self.legados += CARTA_DE_LIBERTAD as f64;
-                self.liberar(p, ViaLibertad::Colecta, noticias);
-            } else {
-                // Rara vez, por decisión de quien la sometía (devoción, años de servicio).
-                let jefe_dev = self.personas[p as usize].hogar.map_or(0.0, |h| self.personas[self.hogares[h as usize].jefe as usize].rasgos.devocion());
-                if rng.f() < 0.0002 * (1.0 + 2.0 * jefe_dev) {
-                    self.liberar(p, ViaLibertad::Otorgada, noticias);
-                }
-            }
-        }
-        // Lo que el fondo no usó este mes se acumula para los meses siguientes (hasta un tope).
-        if fondo {
-            self.fondo_libertad = (self.fondo_libertad + presupuesto_fondo).min(400.0);
-        }
-    }
-
-    /// El hogar libre del cónyuge, si puede y quiere poner lo que falta para la carta. Las
-    /// familias juntaban recursos para liberar primero a la esposa y madre (la condición se
-    /// heredaba por vía materna): por eso pesa más para las mujeres.
-    fn familia_que_ayuda(&self, p: PersonaId, falta: f32, rng: &mut Rng) -> Option<HogarId> {
-        let q = &self.personas[p as usize];
-        if q.riqueza < CARTA_DE_LIBERTAD * 0.25 {
-            return None;
-        }
-        let c = q.conyuge.filter(|&c| self.personas[c as usize].viva() && !self.personas[c as usize].sujeta())?;
-        let h = self.personas[c as usize].hogar.filter(|&h| self.hogares[h as usize].activo && !Self::colectivo(&self.hogares[h as usize]) && Some(h) != q.hogar)?;
-        let hg = &self.hogares[h as usize];
-        if hg.ahorro - hg.deuda < falta + 20.0 {
-            return None;
-        }
-        let ganas = if q.sexo == Sexo::Mujer { 0.12 } else { 0.04 };
-        (rng.f() < ganas).then_some(h)
-    }
-
-    /// Colecta de la cofradía o de la sala de nación: los hogares libres de africanos y
-    /// afrodescendientes que pueden ponen unos pesos cada uno hasta completar la suma. Si no
-    /// alcanza, no se toca nada.
-    fn colecta(&mut self, p: PersonaId, falta: f32, asc: &[u8]) -> bool {
-        let propio = self.personas[p as usize].hogar;
-        let mut aportan: Vec<HogarId> = Vec::new();
-        let mut junto = 0.0f32;
-        for h in &self.hogares {
-            if junto >= falta {
-                break;
-            }
-            if !h.activo || Self::colectivo(h) || Some(h.id) == propio || h.ahorro - h.deuda < 40.0 {
-                continue;
-            }
-            if !self.personas[h.jefe as usize].sujeta() && asc.get(h.jefe as usize).is_some_and(|a| a & historia::ASC_AFRICANA != 0) {
-                aportan.push(h.id);
-                junto += 5.0;
-            }
-        }
-        if junto < falta {
-            return false;
-        }
-        let mut resta = falta;
-        for h in aportan {
-            let x = resta.min(5.0);
-            self.hogares[h as usize].ahorro -= x;
-            self.personas[p as usize].riqueza += x;
-            resta -= x;
-        }
-        true
-    }
-
-    /// Da la libertad a una persona: cambia su condición, toma apellido si no tenía y, si es
-    /// adulta, arma su propio hogar (o se reúne con su familia).
-    pub(crate) fn liberar(&mut self, p: PersonaId, via: ViaLibertad, noticias: &mut Vec<String>) {
-        self.liberar_con(p, via, noticias, None);
-    }
-
-    /// Como `liberar`; con `patronato: Some(mes)`, la persona es libre por ley pero sigue
-    /// sirviendo en la misma casa hasta ese mes (no se muda). Quien obtiene la libertad por las
-    /// armas no arma hogar: va al cuartel (`historia::alistar`).
-    pub(crate) fn liberar_con(&mut self, p: PersonaId, via: ViaLibertad, noticias: &mut Vec<String>, patronato: Option<i32>) {
-        let mes = self.mes;
-        if self.personas[p as usize].condicion != Condicion::Esclavizada {
-            return;
-        }
-        let antes = self.personas[p as usize].hogar;
-        {
-            let pp = &mut self.personas[p as usize];
-            pp.condicion = Condicion::Liberta;
-            pp.evento(mes, TipoEvento::Libertad(via), NADIE);
-        }
-        self.mes_actual.libertades += 1;
-        if self.personas[p as usize].apellidos == [NADIE, NADIE] {
-            // Toma un apellido: muchas veces el de la casa donde vivió (que solía figurar ya
-            // desde el bautismo), si no uno común.
-            let mut rng = Rng::from_state(self.azar ^ (p as u64).wrapping_mul(0x9E37));
-            let ap = if rng.f() < 0.6 { antes.map(|h| self.personas[self.hogares[h as usize].jefe as usize].apellidos[0]).unwrap_or(NADIE) } else { NADIE };
-            let ap = if ap == NADIE { self.apellido_al_azar(&mut rng, Cultura::Hispana) } else { ap };
-            let pp = &mut self.personas[p as usize];
-            pp.apellidos = [ap, NADIE];
-            pp.evento(mes, TipoEvento::TomoApellido, NADIE);
-            // Sus hijos sin apellido toman el mismo.
-            for c in self.personas[p as usize].hijos.clone() {
-                let cp = &mut self.personas[c as usize];
-                if cp.apellidos == [NADIE, NADIE] {
-                    cp.apellidos = [ap, NADIE];
-                }
-            }
-        }
-        if let Some(hasta) = patronato.filter(|&m| m > mes) {
-            let pp = &mut self.personas[p as usize];
-            pp.patronato = Some(hasta);
-            pp.evento(mes, TipoEvento::Patronato, NADIE);
-        } else if via != ViaLibertad::Armas {
-            self.armar_hogar_propio(p, antes);
-        }
-        let quien = self.nombre_completo(p);
-        let oficio = self.personas[p as usize].oficio.nombre(self.personas[p as usize].sexo);
-        let la = if self.personas[p as usize].sexo == Sexo::Mujer { "la" } else { "lo" };
-        let años = (mes - self.personas[p as usize].historial.iter().find(|e| matches!(e.tipo, TipoEvento::LlegoForzada(_) | TipoEvento::Nacio)).map_or(mes, |e| e.mes)) / 12;
-        let t = match via {
-            ViaLibertad::Ahorro => format!("{quien}, {oficio}, obtiene su carta de libertad con lo que ahorró durante {años} años"),
-            ViaLibertad::Fondo => format!("{quien}, {oficio}, obtiene su libertad con su ahorro y la ayuda del fondo del cabildo"),
-            ViaLibertad::Familia => format!("{quien}, {oficio}, obtiene su carta de libertad: su familia juntó lo que le faltaba"),
-            ViaLibertad::Colecta => format!("{quien}, {oficio}, obtiene su carta de libertad con su ahorro y la colecta de su cofradía"),
-            ViaLibertad::Testamento => format!("{quien}, {oficio}, recibe la libertad por testamento"),
-            ViaLibertad::SinHerederos => format!("{quien}, {oficio}, queda libre: quien {la} sometía murió sin herederos"),
-            ViaLibertad::Otorgada => format!("{quien}, {oficio}, recibe su carta de libertad de quien {la} sometía"),
-            ViaLibertad::Armas => format!("{quien} obtiene la libertad al pasar a las armas"),
-            ViaLibertad::Abolicion | ViaLibertad::Vientres => format!("{quien} es libre por ley"),
-        };
-        if matches!(via, ViaLibertad::Ahorro | ViaLibertad::Fondo | ViaLibertad::Familia | ViaLibertad::Colecta) {
-            noticias.push(t.clone());
-        }
-        // En la crónica, cada libertad (salvo las de una ley o una leva, que se cuentan juntas, y
-        // las de los niños de una misma casa, que van con la de los adultos).
-        let niño = self.personas[p as usize].edad(mes) < 14 && matches!(via, ViaLibertad::Testamento | ViaLibertad::SinHerederos);
-        if !matches!(via, ViaLibertad::Abolicion | ViaLibertad::Armas) && !niño {
-            self.anotar(mes, t);
-        }
-    }
-
-    /// Una persona que acaba de ser libre (o de terminar su patronato): si es adulta, se reúne
-    /// con su cónyuge libre o arma su hogar, y los hijos chicos libres van con su madre.
-    pub(crate) fn armar_hogar_propio(&mut self, p: PersonaId, antes: Option<HogarId>) {
-        let mes = self.mes;
-        if self.personas[p as usize].edad(mes) < 16 {
-            return;
-        }
-        // Se reúne con su cónyuge libre, o arma su hogar.
-        let cony = self.personas[p as usize].conyuge.filter(|&c| self.personas[c as usize].viva() && !self.personas[c as usize].sujeta());
-        let destino = cony.and_then(|c| self.personas[c as usize].hogar).filter(|&h| self.hogares[h as usize].activo && !Self::colectivo(&self.hogares[h as usize]) && Some(h) != antes);
-        match destino {
-            Some(h) => self.unir_a_hogar(p, h),
-            None => {
-                let o = self.personas[p as usize].origen;
-                let h = self.crear_hogar(p, o, Alojamiento::SinCasa);
-                let r = std::mem::take(&mut self.personas[p as usize].riqueza);
-                self.hogares[h as usize].ahorro = r;
-                let o = self.personas[p as usize].oficio;
-                if o == Oficio::Ninguno {
-                    self.personas[p as usize].oficio = Oficio::Peon;
-                }
-            }
-        }
-        // Los hijos chicos libres van con su madre.
-        if self.personas[p as usize].sexo == Sexo::Mujer {
-            let h = self.personas[p as usize].hogar.unwrap();
-            for c in self.personas[p as usize].hijos.clone() {
-                let hc = &self.personas[c as usize];
-                if hc.viva() && hc.edad(mes) < 14 && !hc.sujeta() && hc.hogar == antes {
-                    self.unir_a_hogar(c, h);
-                }
-            }
-        }
-    }
-
-    /// Leyes de libertad: por ordenanza del jugador o, en el modo fiel a la historia, en sus
-    /// fechas. La libertad de vientres y la prohibición del tráfico de la ley de la Florida
-    /// (7 de setiembre de 1825) no rigieron en Montevideo, ocupada por el Imperio del Brasil,
-    /// hasta que la Asamblea General Constituyente la extendió a todo el territorio (20 de enero
-    /// de 1830; art. 131 de la Constitución de 1830). La abolición en Montevideo es la ley del
-    /// Gobierno de la Defensa (12 de diciembre de 1842), con leva de los varones aptos y
-    /// patronato para los demás (ver `historia.rs`); la del Cerrito (1846) rigió fuera de la
-    /// ciudad. Fuente: Frega et al. (2020), pp. 136-137. En la historia alternativa llegan con
-    /// la época de la Ciudad Nueva; por ordenanza, la abolición es inmediata y sin patronato.
-    pub(crate) fn leyes_de_libertad(&mut self, ent: &Entorno, noticias: &mut Vec<String>) {
-        let por_ordenanza = ent.vigente(Ordinance::LibertadVientres) || ent.vigente(Ordinance::Abolicion);
-        let fiel = self.fiel_historia && ent.mes >= historia::VIENTRES_MONTEVIDEO;
-        let vientres = por_ordenanza || fiel || (!self.fiel_historia && self.epoca >= Epoca::CiudadNueva);
-        if vientres && self.leyes.vientres.is_none() {
-            self.leyes.vientres = Some(ent.mes);
-            let t = if fiel && !por_ordenanza {
-                "La Asamblea General Constituyente extiende a todo el territorio la ley de 1825: desde hoy, quien nace en Montevideo nace libre y se prohíbe el tráfico de personas esclavizadas. La esclavitud de quienes ya lo son sigue".to_string()
-            } else {
-                "Se declara la libertad de vientres y se prohíbe el tráfico de personas esclavizadas: desde hoy, quien nace en la ciudad nace libre".to_string()
-            };
-            noticias.push(t.clone());
-            self.anotar(ent.mes, t);
-        }
-        let por_ordenanza = ent.vigente(Ordinance::Abolicion);
-        let fiel = self.fiel_historia && ent.mes >= historia::ABOLICION_DEFENSA;
-        let abolir = por_ordenanza || fiel || (!self.fiel_historia && self.leyes.vientres.is_some_and(|m| ent.mes >= m + 17 * 12));
-        if abolir && self.leyes.abolicion.is_none() {
-            self.leyes.abolicion = Some(ent.mes);
-            if fiel && !por_ordenanza {
-                self.abolicion_de_1842(noticias);
-            } else {
-                let todas: Vec<PersonaId> = self.idx.vivos.iter().copied().filter(|&p| self.personas[p as usize].condicion == Condicion::Esclavizada).collect();
-                let n = todas.len();
-                let mut basura = Vec::new();
-                for p in todas {
-                    self.liberar(p, ViaLibertad::Abolicion, &mut basura);
-                }
-                let t = format!("Se abolió la esclavitud: {n} personas recuperan la libertad. Muchas arman su hogar y buscan casa y trabajo");
-                noticias.push(t.clone());
-                self.anotar(ent.mes, t);
-            }
-            self.reindexar();
         }
     }
 }

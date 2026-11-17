@@ -1,6 +1,6 @@
 //! Felicidad de cada persona (0 a 1), como en los juegos de ciudad pero con causas que se
-//! pueden leer: sale de sus condiciones (comida, casa, agua, salud, trabajo, familia, libertad,
-//! cómo vive frente a sus vecinos, la fe y las fiestas, las ordenanzas) y su personalidad
+//! pueden leer: sale de sus condiciones (comida, casa, agua, salud, trabajo, familia, cómo vive
+//! frente a sus vecinos, la fe y las fiestas, las ordenanzas, la seguridad, la escuela) y su personalidad
 //! decide cuánto pesa cada cosa. Alimenta la opinión de los sectores de la economía (no la
 //! reemplaza), la emigración, la natalidad, la productividad y las protestas.
 
@@ -8,10 +8,13 @@ use super::*;
 use crate::city::economy::Ordinance;
 
 /// Factores de la felicidad (el orden de los motivos).
-pub const FACTORES: [&str; 12] = ["Comida", "Vivienda", "Agua", "Salud", "Trabajo", "Familia", "Libertad", "Comparación con los vecinos", "Fe y fiestas", "Ordenanzas", "Seguridad", "Educación"];
+pub const FACTORES: [&str; N] = ["Comida", "Vivienda", "Agua", "Salud", "Trabajo", "Familia", "Comparación con los vecinos", "Fe y fiestas", "Ordenanzas", "Seguridad", "Educación"];
+
+/// Cantidad de factores.
+pub const N: usize = 11;
 
 /// Pesos base de cada factor (la personalidad los mueve).
-const PESOS: [f32; 12] = [1.6, 1.0, 0.6, 0.8, 0.9, 0.8, 2.5, 0.5, 0.5, 0.4, 0.6, 0.6];
+const PESOS: [f32; N] = [1.6, 1.0, 0.6, 0.8, 0.9, 0.8, 0.5, 0.5, 0.4, 0.6, 0.6];
 
 /// Sin motivo de queja.
 pub const SIN_MOTIVO: u8 = 255;
@@ -38,16 +41,14 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
         20 => "está de duelo",
         21 => "enviudó",
         22 => "está solo, sin familia",
-        24 => "vive sin libertad",
-        25 => "vive bajo patronato: libre por ley, pero obligado a servir",
-        28 => "ve que sus vecinos viven mejor",
-        32 => "extraña la misa y las fiestas",
-        36 => "le molestan las ordenanzas del cabildo",
-        40 => "teme por su seguridad",
-        41 => "perdió su casa en un incendio o una inundación",
-        42 => "teme a los ladrones del barrio",
-        44 => "no hay escuela para sus hijos",
-        45 => "no puede pagar la escuela de sus hijos",
+        24 => "ve que sus vecinos viven mejor",
+        28 => "extraña la misa y las fiestas",
+        32 => "le molestan las ordenanzas del cabildo",
+        36 => "teme por su seguridad",
+        37 => "perdió su casa en un incendio o una inundación",
+        38 => "teme a los ladrones del barrio",
+        40 => "no hay escuela para sus hijos",
+        41 => "no puede pagar la escuela de sus hijos",
         _ => "—",
     }
 }
@@ -55,8 +56,8 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
 /// Felicidad desglosada de una persona (para la ficha).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Desglose {
-    pub valores: [f32; 12],
-    pub pesos: [f32; 12],
+    pub valores: [f32; N],
+    pub pesos: [f32; N],
     pub total: f32,
     pub motivos: [u8; 2],
 }
@@ -82,11 +83,8 @@ impl Poblacion {
             e.1 += 1.0;
         }
         let vivos = self.idx.vivos.clone();
-        // Ascendencia africana (cofradías y salas de nación), solo si ya existen.
-        let asc = if self.hay_cofradias() { self.ascendencias() } else { Vec::new() };
         for id in vivos {
-            let afro = asc.get(id as usize).is_some_and(|a| a & historia::ASC_AFRICANA != 0);
-            let d = self.desglose_con(id, ent, &info, &ing, &barrio, &origen, afro);
+            let d = self.desglose_con(id, ent, &info, &ing, &barrio, &origen);
             let p = &mut self.personas[id as usize];
             // La felicidad cambia de a poco (memoria de los meses anteriores).
             p.felicidad += (d.total - p.felicidad) * 0.35;
@@ -123,20 +121,17 @@ impl Poblacion {
             e.0 += v;
             e.1 += 1.0;
         }
-        let afro = self.hay_cofradias() && self.afrodescendiente(id);
-        self.desglose_con(id, ent, &info, &ing, &barrio, &origen, afro)
+        self.desglose_con(id, ent, &info, &ing, &barrio, &origen)
     }
 
-    /// `afro`: tiene ascendencia africana y ya existen cofradías (ver `historia.rs`).
-    #[allow(clippy::too_many_arguments)]
-    fn desglose_con(&self, id: PersonaId, ent: &Entorno, info: &Lotes, ing: &[f32], barrio: &[(f32, f32); 5], origen: &[(f32, f32); 8], afro: bool) -> Desglose {
+    fn desglose_con(&self, id: PersonaId, ent: &Entorno, info: &Lotes, ing: &[f32], barrio: &[(f32, f32); 5], origen: &[(f32, f32); 8]) -> Desglose {
         let mes = ent.mes;
         let p = &self.personas[id as usize];
         let edad = p.edad(mes);
         let h = p.hogar.map(|h| &self.hogares[h as usize]);
         let r = &p.rasgos;
-        let mut v = [0.7f32; 12];
-        let mut var = [0u8; 12];
+        let mut v = [0.7f32; N];
+        let mut var = [0u8; N];
         // 0 Comida: lo que gana el hogar frente a lo que cuesta comer.
         if let Some(h) = h {
             if Self::colectivo(h) {
@@ -236,38 +231,18 @@ impl Poblacion {
         } else {
             0.65
         };
-        // 6 Libertad: la esclavitud pesa como ninguna otra cosa.
-        v[6] = match p.condicion {
-            Condicion::Esclavizada => 0.03,
-            Condicion::Liberta if p.patronato.is_some() => {
-                var[6] = 1;
-                0.3
-            }
-            Condicion::Liberta => 0.9,
-            Condicion::Libre if p.patronato.is_some() => {
-                var[6] = 1;
-                0.25
-            }
-            Condicion::Libre => 0.8,
-        };
-        // 7 Comparación con el barrio y con los de su mismo origen.
+        // 6 Comparación con el barrio y con los de su mismo origen.
         if let Some(h) = h.filter(|h| !Self::colectivo(h)) {
             let mio = ing[h.id as usize].max(0.1);
             let media = |x: (f32, f32)| if x.1 > 0.0 { x.0 / x.1 } else { mio };
             let mb = media(barrio[self.barrio_de(h, info) as usize]).max(0.1);
             let mo = media(origen[h.origen.grupo() as usize]).max(0.1);
             let rel = (mio / mb).ln() * 0.6 + (mio / mo).ln() * 0.4;
-            v[7] = (0.66 + 0.2 * rel).clamp(0.0, 1.0);
+            v[6] = (0.66 + 0.2 * rel).clamp(0.0, 1.0);
         }
-        // 8 Fe y fiestas.
-        v[8] = r.devocion() * if ent.iglesia { 0.85 } else { 0.35 } + (1.0 - r.devocion()) * 0.65;
-        if afro {
-            // Las cofradías y las salas de nación: ayuda mutua, sus fiestas, sus reyes y el
-            // candombe (Frega et al., 2020, cap. 7).
-            let salas = if self.hito(historia::HITO_SALAS) { 0.08 } else { 0.0 };
-            v[8] = v[8].max(0.62 + salas + 0.2 * r.sociabilidad());
-        }
-        // 9 Ordenanzas que lo tocan.
+        // 7 Fe y fiestas.
+        v[7] = r.devocion() * if ent.iglesia { 0.85 } else { 0.35 } + (1.0 - r.devocion()) * 0.65;
+        // 8 Ordenanzas que lo tocan.
         let clase = h.map_or(Clase::Pobre, |h| h.clase);
         let mut o = 0.65f32;
         let vig = |x: Ordinance| ent.vigente(x);
@@ -294,45 +269,42 @@ impl Poblacion {
         if vig(Ordinance::PrestamosCabildo) && clase <= Clase::Modesta && h.is_some_and(|h| h.deuda > 0.0) {
             o += 0.1;
         }
-        if vig(Ordinance::FondoManumision) && p.condicion == Condicion::Esclavizada {
-            o += 0.25;
-        }
         if vig(Ordinance::FarolesVecinos) {
             o -= 0.08;
         }
         if vig(Ordinance::SinPaja) && h.is_some_and(|h| h.vive_en_solar()) && clase <= Clase::Modesta {
             o -= 0.08;
         }
-        v[9] = o.clamp(0.0, 1.0);
-        // 10 Seguridad: el barrio (el centro, con serenos y vecinos, es más seguro que las
+        v[8] = o.clamp(0.0, 1.0);
+        // 9 Seguridad: el barrio (el centro, con serenos y vecinos, es más seguro que las
         // afueras), no tener techo y haber perdido la casa en un desastre.
         if let Some(h) = h {
-            v[10] = [0.8, 0.72, 0.55, 0.3, 0.6][self.barrio_de(h, info) as usize];
+            v[9] = [0.8, 0.72, 0.55, 0.3, 0.6][self.barrio_de(h, info) as usize];
             if ent.con_servicios && h.vive_en_solar() {
                 // El delito del barrio (pobreza, oscuridad, baldíos) y quién lo vigila.
-                v[10] = (0.85 - 0.6 * sv.delito + 0.1 * sv.vigilancia).clamp(0.0, 1.0);
+                v[9] = (0.85 - 0.6 * sv.delito + 0.1 * sv.vigilancia).clamp(0.0, 1.0);
                 if sv.delito > 0.3 {
-                    var[10] = 2;
+                    var[9] = 2;
                 }
             }
             if h.desastre.is_some_and(|m| mes - m < 12) {
-                v[10] = 0.25;
-                var[10] = 1;
+                v[9] = 0.25;
+                var[9] = 1;
             }
         }
-        // 11 Educación: para los padres con hijos de 5 a 12 años y para los chicos de esa edad,
+        // 10 Educación: para los padres con hijos de 5 a 12 años y para los chicos de esa edad,
         // tener escuela en el barrio (con el modelo de servicios).
         let en_edad = |e: i32| (5..=12).contains(&e);
         let con_hijos = en_edad(edad) || p.hijos.iter().any(|&c| self.personas[c as usize].viva() && en_edad(self.personas[c as usize].edad(mes)));
         let mut pesa_educacion = false;
-        if ent.con_servicios && con_hijos && p.libre() {
+        if ent.con_servicios && con_hijos {
             pesa_educacion = true;
             let paga = vig(Ordinance::EscuelasPrimerasLetras) || clase >= Clase::Acomodada;
-            v[11] = if sv.escuela <= 0.0 { 0.35 } else if paga { 0.55 + 0.4 * sv.escuela } else { 0.5 };
+            v[10] = if sv.escuela <= 0.0 { 0.35 } else if paga { 0.55 + 0.4 * sv.escuela } else { 0.5 };
             if sv.escuela <= 0.0 {
-                var[11] = 0;
+                var[10] = 0;
             } else if !paga {
-                var[11] = 1;
+                var[10] = 1;
             }
         }
         // Pesos según la personalidad.
@@ -341,27 +313,27 @@ impl Poblacion {
         w[1] *= 0.8 + 0.4 * r.prudencia();
         w[4] *= 0.6 + 0.6 * r.laboriosidad() + 0.2 * r.ambicion();
         w[5] *= 0.6 + 0.8 * r.sociabilidad();
-        w[7] *= 0.4 + 1.2 * r.ambicion();
-        w[8] *= 0.3 + 1.4 * r.devocion();
-        w[10] *= 0.7 + 0.6 * r.prudencia();
+        w[6] *= 0.4 + 1.2 * r.ambicion();
+        w[7] *= 0.3 + 1.4 * r.devocion();
+        w[9] *= 0.7 + 0.6 * r.prudencia();
         if !pesa_educacion {
-            w[11] = 0.0;
+            w[10] = 0.0;
         }
         if edad < 14 {
             w[4] = 0.0;
-            w[7] *= 0.3;
-            w[9] *= 0.3;
+            w[6] *= 0.3;
+            w[8] *= 0.3;
         }
         for x in &mut v {
             *x = x.clamp(0.0, 1.0);
         }
-        // La media ponderada, más el peso de lo peor: una sola cosa grave (no tener libertad,
-        // pasar hambre, no tener casa) no se compensa con lo demás.
+        // La media ponderada, más el peso de lo peor: una sola cosa grave (pasar hambre, no
+        // tener casa) no se compensa con lo demás.
         let media = v.iter().zip(&w).map(|(a, b)| a * b).sum::<f32>() / w.iter().sum::<f32>();
         let peor = v.iter().zip(&w).filter(|(_, &b)| b >= 0.5).map(|(a, _)| *a).fold(1.0f32, f32::min);
         let total = 0.65 * media + 0.35 * peor;
         // Motivos: lo que más le pesa (por debajo de lo aceptable).
-        let mut peor: Vec<(usize, f32)> = (0..12).map(|i| (i, w[i] * (0.62 - v[i]))).filter(|x| x.1 > 0.0).collect();
+        let mut peor: Vec<(usize, f32)> = (0..N).map(|i| (i, w[i] * (0.62 - v[i]))).filter(|x| x.1 > 0.0).collect();
         peor.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         let cod = |i: usize| (i * 4) as u8 + var[i];
         let motivos = match peor.len() {

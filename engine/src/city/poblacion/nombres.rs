@@ -2,15 +2,9 @@
 //! ficticias: los nombres se combinan al azar a partir de listas de nombres frecuentes, no se
 //! recrea a ninguna persona real.
 //!
-//! Notas de representación:
-//! - Las personas africanas llegadas por la trata recibían en el bautismo un nombre cristiano
-//!   impuesto y se las registraba con su "nación" (Congo, Angola, Benguela, Mina, Calabarí,
-//!   Mozambique…: nombres de puertos y regiones de embarque, no de pueblos) y el nombre de
-//!   quien las sometía ("Rosa, de nación Benguela, esclava de D. …"); el apellido, cuando lo
-//!   tenían, solía ser el de esa casa (Frega et al., 2020, cap. 7). Aquí se muestran como
-//!   "Rosa, de nación Benguela" (sin el nombre de nadie que las posea) y toman apellido al
-//!   obtener la libertad: muchas veces el de la casa donde vivieron, a veces otro. Queda en su
-//!   historia.
+//! Notas:
+//! - Las personas de origen africano llevan nombre y apellido como las demás (de las listas
+//!   castellanas, como se registraban en la parroquia).
 //! - Los guaraníes de las misiones tenían nombre cristiano y, muchas veces, apellido de raíz
 //!   guaraní; con los años muchos tomaron apellidos castellanos. La lista guaraní es corta y
 //!   orientativa (estimación, ver `docs/sistemas/poblacion.md`).
@@ -59,27 +53,6 @@ pub const ARMENIO_H: &[&str] = &["Hagop", "Garabed", "Krikor", "Ohannes", "Aram"
 pub const ARMENIO_M: &[&str] = &["Anahid", "Siranush", "Arpi", "Mari", "Zabel", "Nvart", "Takuhi"];
 pub const ARMENIO_AP: &[&str] = &["Kasparian", "Sarkissian", "Boyadjian", "Hovsepian", "Manukian", "Avedissian", "Kalustian", "Der Bedrossian"];
 
-/// "Naciones" africanas registradas en Montevideo, por región de embarque (orientativo:
-/// Andrews, 2007, nombra Congo, Mina, Benguela y Calabarí; Frega et al., 2020, Angola y
-/// Mozambique; las salas de nación de la década de 1830 eran de África occidental, del Congo y
-/// Angola y de África oriental).
-pub const NACIONES_CENTRO: &[&str] = &["Congo", "Angola", "Benguela"];
-pub const NACIONES_OCCIDENTE: &[&str] = &["Mina", "Calabarí"];
-pub const NACIONES_ORIENTE: &[&str] = &["Mozambique"];
-
-/// La "nación" con que se registraba a una persona africana (determinista por su id: no
-/// necesita guardarse). `None` si no nació en África.
-pub fn nacion(o: super::modelo::Origen, id: u32) -> Option<&'static str> {
-    use super::modelo::Origen;
-    let l = match o {
-        Origen::AfricaCentral => NACIONES_CENTRO,
-        Origen::AfricaOccidental => NACIONES_OCCIDENTE,
-        Origen::AfricaOriental => NACIONES_ORIENTE,
-        _ => return None,
-    };
-    Some(l[(id as usize).wrapping_mul(2654435761) % l.len()])
-}
-
 pub fn nombres(c: Cultura, s: Sexo) -> &'static [&'static str] {
     use Cultura::*;
     match (c, s) {
@@ -104,7 +77,7 @@ pub fn nombres(c: Cultura, s: Sexo) -> &'static [&'static str] {
     }
 }
 
-/// Apellidos de una cultura. Las personas africanas llegan sin apellido (lista vacía).
+/// Apellidos de una cultura.
 pub fn apellidos(c: Cultura) -> &'static [&'static str] {
     use Cultura::*;
     match c {
@@ -114,7 +87,7 @@ pub fn apellidos(c: Cultura) -> &'static [&'static str] {
         Catalana => CATALAN_AP,
         Portuguesa => PORTUGUES_AP,
         Guarani => GUARANI_AP,
-        Africana => &[],
+        Africana => HISPANO_AP,
         Italiana => ITALIANO_AP,
         Francesa => FRANCES_AP,
         Britanica => BRITANICO_AP,

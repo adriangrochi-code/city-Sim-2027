@@ -93,7 +93,7 @@ impl City {
         v
     }
 
-    /// Personas que podrían tomar un puesto de peón (libres, en edad, sin trabajo).
+    /// Personas que podrían tomar un puesto de peón (en edad, sin trabajo).
     fn candidatos_peon(&self) -> Vec<u32> {
         let p = &self.poblacion;
         if !p.fundada {
@@ -106,7 +106,7 @@ impl City {
             .copied()
             .filter(|&id| {
                 let q = &p.personas[id as usize];
-                (15..=60).contains(&q.edad(p.mes)) && !q.sujeta() && q.trabajo.is_none() && matches!(q.oficio, Oficio::Peon | Oficio::Ninguno) && q.hogar.is_some() && !ocupados.contains(&id)
+                (15..=60).contains(&q.edad(p.mes)) && q.trabajo.is_none() && matches!(q.oficio, Oficio::Peon | Oficio::Ninguno) && q.hogar.is_some() && !ocupados.contains(&id)
             })
             .collect()
     }
@@ -381,7 +381,7 @@ impl City {
                     let p = &pob.personas[id as usize];
                     let edad = p.edad(mes);
                     let oficio_ok = if acc == Saber::Artesanos { matches!(p.oficio, Oficio::Artesano | Oficio::Peon) && p.trabajo.is_some() } else { matches!(p.oficio, Oficio::Ninguno | Oficio::Peon | Oficio::Servicio | Oficio::Artesano | Oficio::Labrador | Oficio::Marinero) };
-                    (14..=30).contains(&edad) && p.educacion >= lectura && !p.sujeta() && (!varones || p.sexo == Sexo::Hombre) && oficio_ok && !ya.contains(&id) && !d.formados.iter().any(|x| x.0 == id)
+                    (14..=30).contains(&edad) && p.educacion >= lectura && (!varones || p.sexo == Sexo::Hombre) && oficio_ok && !ya.contains(&id) && !d.formados.iter().any(|x| x.0 == id)
                 });
                 match elegido {
                     Some(id) => {
@@ -414,7 +414,7 @@ impl City {
                 .copied()
                 .filter(|&id| {
                     let q = &pob.personas[id as usize];
-                    (15..=60).contains(&q.edad(mes)) && !q.sujeta() && q.trabajo.is_none() && matches!(q.oficio, Oficio::Peon | Oficio::Ninguno) && q.hogar.is_some() && !ocupados.contains(&id)
+                    (15..=60).contains(&q.edad(mes)) && q.trabajo.is_none() && matches!(q.oficio, Oficio::Peon | Oficio::Ninguno) && q.hogar.is_some() && !ocupados.contains(&id)
                 })
                 .collect::<Vec<u32>>()
         };

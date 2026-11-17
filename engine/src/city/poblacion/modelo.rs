@@ -2,12 +2,9 @@
 //! vida de cada uno. Almacenamiento compacto: vectores indexados por id (el id de una persona
 //! es su posición en `Poblacion::personas`), sin punteros ni grafos con `Rc`.
 //!
-//! Representación cuidadosa (decisión de diseño, ver `docs/sistemas/poblacion.md`): las
-//! personas africanas y afrodescendientes —esclavizadas o libres— y las indígenas son
-//! personas con nombre, familia e historia. La desigualdad legal de la época es una
-//! RESTRICCIÓN sobre sus vidas (no pueden tener bienes raíces ni elegir patrón; su trabajo
-//! beneficia a otro hogar), nunca una mercancía: ninguna persona tiene precio en el modelo y no
-//! existe ninguna función para comprar, vender ni transferir personas.
+//! Decisión de diseño (ver `docs/sistemas/poblacion.md`): el juego no representa la
+//! esclavitud. Todas las personas son libres: las de origen europeo, africano, indígena o
+//! mixto tienen nombre, familia, oficio e historia, y ninguna vive sujeta a otro hogar.
 
 use serde::{Deserialize, Serialize};
 
@@ -24,76 +21,9 @@ pub enum Sexo {
     Mujer,
 }
 
-/// Condición legal. Extensible: el resto de la vida jurídica se agrega como variantes o
-/// banderas (el patronato de libertos, colonos y pupilos es la bandera `Persona::patronato`;
-/// la capacidad de las mujeres casadas queda pendiente).
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Condicion {
-    Libre,
-    /// Sometida a esclavitud: no puede tener bienes raíces, elegir patrón ni mudarse por su
-    /// cuenta; su trabajo beneficia al hogar donde vive. Puede casarse, tener familia, ahorrar
-    /// un peculio y obtener la libertad.
-    Esclavizada,
-    /// Liberada (por carta de libertad, testamento, el fondo del cabildo, las armas o la ley).
-    /// Puede seguir un tiempo bajo patronato (`Persona::patronato`).
-    Liberta,
-}
-
-impl Condicion {
-    pub const ALL: [Condicion; 3] = [Condicion::Libre, Condicion::Esclavizada, Condicion::Liberta];
-    pub fn nombre(self, s: Sexo) -> &'static str {
-        match (self, s) {
-            (Condicion::Libre, Sexo::Hombre) => "libre",
-            (Condicion::Libre, Sexo::Mujer) => "libre",
-            (Condicion::Esclavizada, Sexo::Hombre) => "esclavizado",
-            (Condicion::Esclavizada, Sexo::Mujer) => "esclavizada",
-            (Condicion::Liberta, Sexo::Hombre) => "liberto",
-            (Condicion::Liberta, Sexo::Mujer) => "liberta",
-        }
-    }
-    pub fn plural(self) -> &'static str {
-        match self {
-            Condicion::Libre => "Libres",
-            Condicion::Esclavizada => "Esclavizadas",
-            Condicion::Liberta => "Libertas y libertos",
-        }
-    }
-}
-
-/// Cómo se obtuvo la libertad.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ViaLibertad {
-    /// Juntó su peculio y pagó su carta de libertad.
-    Ahorro,
-    /// Por el testamento de quien la sometía.
-    Testamento,
-    /// Con ayuda del fondo de manumisión del cabildo.
-    Fondo,
-    /// Por la ley de abolición.
-    Abolicion,
-    /// Nació libre por la ley de libertad de vientres.
-    Vientres,
-    /// Por servir en las armas: las compañías de pardos y morenos (desde 1760) y las levas de
-    /// las guerras (1762, 1807, 1811–1816, 1825–1828, 1842) daban la libertad a quien se
-    /// alistaba (Frega et al., 2020, cap. 4 y 5).
-    Armas,
-    /// Carta de libertad que otorgó en vida quien la sometía ("concesión graciosa", muchas
-    /// veces con condiciones).
-    Otorgada,
-    /// Su familia libre juntó lo que faltaba para la carta (las familias liberaban primero a
-    /// la esposa y madre, porque la condición se heredaba por vía materna).
-    Familia,
-    /// Completó la suma con la colecta de su cofradía o de su sala de nación.
-    Colecta,
-    /// Quien la sometía murió sin herederos. En la época, una herencia vacante pasaba a la Real
-    /// Hacienda (y las personas con ella); el juego no modela ese traspaso, que sería tratar a
-    /// alguien como un bien, y la deja libre.
-    SinHerederos,
-}
-
 /// Raíz familiar, solo para las estadísticas y la endogamia (con mezcla). No se usa para
-/// ningún efecto económico por sí sola: las diferencias salen de la condición legal, del
-/// origen y de la historia de cada familia.
+/// ningún efecto económico: las diferencias salen del origen, de la clase y de la historia de
+/// cada familia.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Raiz {
     Europea,
@@ -414,7 +344,7 @@ impl Estamento {
 }
 
 /// Rasgos de personalidad (0 a 255 → 0 a 1). Pesan en las decisiones (trabajar, ahorrar,
-/// casarse, emigrar, liberar por testamento) y en qué le importa a cada uno para su felicidad.
+/// casarse, emigrar) y en qué le importa a cada uno para su felicidad.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Rasgos(pub [u8; 5]);
 
@@ -477,12 +407,6 @@ pub struct Evento {
 pub enum TipoEvento {
     Nacio,
     Llego(Origen),
-    /// Llegó en contra de su voluntad, por la trata (lo cuenta la crónica con respeto).
-    LlegoForzada(Origen),
-    /// Llegó como "colono" africano (1832–1835): la trata disfrazada de contrato de trabajo.
-    LlegoColono(Origen),
-    /// Llegó prisionera tras la matanza de Salsipuedes (1831) y fue repartida a una familia.
-    LlegoPrisionera,
     Caso,
     /// Unión consensual (sin casamiento en la iglesia; frecuente en los sectores populares).
     Union,
@@ -490,8 +414,6 @@ pub enum TipoEvento {
     NacioHijo,
     MurioHijo,
     MurioPadre,
-    Libertad(ViaLibertad),
-    TomoApellido,
     Aprendio,
     Oficio(Oficio),
     SeMudo,
@@ -504,13 +426,6 @@ pub enum TipoEvento {
     Empobrecio,
     Emigro,
     Murio(Causa),
-    /// Queda bajo patronato: libre por ley, pero obligada a servir en una casa a cambio de
-    /// techo, comida y ropa hasta la fecha de `Persona::patronato` (reglamento de 1837,
-    /// colonos africanos de 1832–1835, menores y no aptos para las armas tras la abolición de
-    /// 1842, prisioneros charrúas repartidos en 1831).
-    Patronato,
-    /// Termina su patronato.
-    FinPatronato,
 }
 
 /// Una persona. Unos 120 bytes más su historial; las listas cortas viven en vectores propios.
@@ -519,9 +434,7 @@ pub struct Persona {
     pub id: PersonaId,
     /// Índices en el registro de nombres y apellidos (`Poblacion::textos`).
     pub nombre: u32,
-    /// Apellido paterno y materno (costumbre hispana). `NADIE` si todavía no tiene (las
-    /// personas llegadas por la trata se registraban sin apellido: lo toman al casarse o al
-    /// obtener la libertad).
+    /// Apellido paterno y materno (costumbre hispana). `NADIE` si no tiene.
     pub apellidos: [u32; 2],
     pub sexo: Sexo,
     /// Mes de nacimiento (meses desde enero de 1726; negativo antes).
@@ -540,14 +453,13 @@ pub struct Persona {
     pub hogar: Option<HogarId>,
     pub origen: Origen,
     pub raiz: Raiz,
-    pub condicion: Condicion,
     pub estamento: Estamento,
     pub oficio: Oficio,
     /// 0 no sabe leer · 1 lee · 2 lee y escribe (primeras letras) · 3 estudios.
     pub educacion: u8,
     /// 0 a 1.
     pub salud: f32,
-    /// Riqueza propia en pesos (dote, peculio, herencia personal).
+    /// Riqueza propia en pesos (dote, herencia personal).
     pub riqueza: f32,
     pub rasgos: Rasgos,
     /// Lugar de trabajo (solar comercial o industrial), si tiene.
@@ -557,11 +469,40 @@ pub struct Persona {
     pub motivos: [u8; 2],
     /// Meses de duelo que le quedan.
     pub duelo: u8,
+    /// Hechos de su vida. Al cargar una partida vieja se descartan los tipos de hecho que el
+    /// juego ya no tiene (ver [`historial_tolerante`]).
+    #[serde(deserialize_with = "historial_tolerante")]
     pub historial: Vec<Evento>,
-    /// Mes hasta el que sigue bajo patronato (libre por ley pero obligada a servir en el
-    /// hogar donde vive; no elige patrón ni se muda). `None` si no.
-    #[serde(default)]
-    pub patronato: Option<i32>,
+}
+
+/// Lee el historial de una persona de una partida guardada. Las partidas de versiones
+/// anteriores pueden traer tipos de hecho que el juego ya no tiene: una llegada de otro tipo
+/// (con su origen) se lee como `Llego`; cualquier otro hecho desconocido se descarta.
+fn historial_tolerante<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Evento>, D::Error> {
+    #[derive(Deserialize)]
+    struct Guardado {
+        mes: i32,
+        tipo: TipoGuardado,
+        con: u32,
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum TipoGuardado {
+        Actual(TipoEvento),
+        ConOrigen(std::collections::BTreeMap<String, Origen>),
+        Otro(serde::de::IgnoredAny),
+    }
+    let v: Vec<Guardado> = Vec::deserialize(d)?;
+    Ok(v.into_iter()
+        .filter_map(|e| {
+            let tipo = match e.tipo {
+                TipoGuardado::Actual(t) => t,
+                TipoGuardado::ConOrigen(m) if m.len() == 1 => TipoEvento::Llego(*m.values().next()?),
+                _ => return None,
+            };
+            Some(Evento { mes: e.mes, tipo, con: e.con })
+        })
+        .collect())
 }
 
 impl Persona {
@@ -572,14 +513,6 @@ impl Persona {
     /// Edad en años cumplidos en el mes dado (o al morir o irse).
     pub fn edad(&self, mes: i32) -> i32 {
         ((self.muerte.or(self.fuera).unwrap_or(mes).min(mes) - self.nacimiento) / 12).max(0)
-    }
-    pub fn libre(&self) -> bool {
-        self.condicion != Condicion::Esclavizada
-    }
-    /// ¿Vive sujeta a otro hogar? Esclavizada, o liberta bajo patronato: no elige patrón, no
-    /// se muda por su cuenta y su trabajo beneficia al hogar donde vive.
-    pub fn sujeta(&self) -> bool {
-        self.condicion == Condicion::Esclavizada || self.patronato.is_some()
     }
     pub fn evento(&mut self, mes: i32, tipo: TipoEvento, con: u32) {
         self.historial.push(Evento { mes, tipo, con });
@@ -601,9 +534,7 @@ pub enum Alojamiento {
     Campo,
 }
 
-/// Un hogar: quienes viven juntos y comparten la economía (incluidas, con su condición, las
-/// personas esclavizadas que viven en él: su trabajo se suma al ingreso del hogar, pero no son
-/// bienes del hogar ni tienen precio).
+/// Un hogar: quienes viven juntos y comparten la economía.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Hogar {
     pub id: HogarId,

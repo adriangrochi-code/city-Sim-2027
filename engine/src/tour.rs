@@ -361,7 +361,6 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-poblacion-cronica", |s, u| ui_pob(s, u, ui::Detail::Poblacion(3))),
         UiShot("motor-ui-vecinos", ui_vecinos),
         UiShot("motor-ui-persona", ui_persona),
-        UiShot("motor-ui-persona-liberta", ui_persona_liberta),
         // Desarrollo: tecnologías, escuelas, industrias, inversores y comercio exterior.
         Game("cinco años de desarrollo", d::desarrollo),
         WaitIdle("ciudad con industrias"),
@@ -733,17 +732,6 @@ fn ui_persona(s: &mut Session, u: &mut GameUi) {
     u.open = None;
     let p = &g.city.poblacion;
     let id = p.vivos().filter(|x| x.edad(p.mes) >= 18).max_by_key(|x| (p.linaje(x.id).len(), x.historial.len(), std::cmp::Reverse(x.id))).map(|x| x.id);
-    u.detail = id.map(ui::Detail::Persona);
-}
-
-/// Ficha de una persona que obtuvo la libertad (o, si no hay, de alguien esclavizado).
-fn ui_persona_liberta(s: &mut Session, u: &mut GameUi) {
-    use crate::city::poblacion::Condicion;
-    let g = s.game.as_mut().unwrap();
-    g.inspected = None;
-    u.open = None;
-    let p = &g.city.poblacion;
-    let id = p.vivos().filter(|x| x.condicion == Condicion::Liberta).max_by_key(|x| (x.historial.len(), std::cmp::Reverse(x.id))).or_else(|| p.vivos().find(|x| x.condicion == Condicion::Esclavizada)).map(|x| x.id);
     u.detail = id.map(ui::Detail::Persona);
 }
 

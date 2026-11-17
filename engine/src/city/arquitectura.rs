@@ -14,8 +14,7 @@ use crate::structures::estilo::{self, Contexto, Cubierta, Estilo, MaterialesObra
 use glam::Vec2;
 
 /// Tradición constructiva de cada origen (los rasgos están en `structures::estilo::RASGOS`).
-/// Sin estilo propio documentado: los africanos y afrodescendientes (que en la colonia vivían
-/// mayormente en las casas de sus dueños, en ranchos o en cuartos), los pueblos de la región,
+/// Sin estilo propio documentado: los africanos y afrodescendientes, los pueblos de la región,
 /// franceses, británicos y los demás orígenes de épocas posteriores.
 pub fn tradicion_de(o: Origen) -> Tradicion {
     match o {
@@ -248,12 +247,10 @@ impl City {
 }
 
 /// Origen más probable de quien levanta una casa en ese año, sorteado (con la semilla del
-/// solar) con el peso de cada origen en las llegadas de la época. Las llegadas forzadas por
-/// la trata no levantaban casas propias: no cuentan.
+/// solar) con el peso de cada origen en las llegadas de la época.
 pub fn origen_probable(anio: u16, seed: u64) -> Origen {
     let tabla = super::poblacion::origenes::tabla(Epoca::del_año(anio as i32));
-    let libres: Vec<_> = tabla.iter().filter(|l| !l.forzada).collect();
-    let total: f32 = libres.iter().map(|l| l.peso).sum::<f32>() + 20.0;
+    let total: f32 = tabla.iter().map(|l| l.peso).sum::<f32>() + 20.0;
     // Los nacidos en la ciudad pesan cada vez más.
     let criollos = 20.0 + (anio.saturating_sub(1726) as f32) * 0.3;
     let mut x = Rng::new(seed ^ 0x0216E).f() * (total - 20.0 + criollos);
@@ -261,7 +258,7 @@ pub fn origen_probable(anio: u16, seed: u64) -> Origen {
         return Origen::Montevideo;
     }
     x -= criollos;
-    for l in &libres {
+    for l in tabla {
         if x < l.peso {
             return l.origen;
         }

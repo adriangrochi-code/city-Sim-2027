@@ -1,5 +1,5 @@
 //! Estadísticas de la población: pirámide, orígenes, clases, desigualdad (Gini de la riqueza
-//! y del ingreso, parte del 10 % más rico, pobreza por origen y por condición legal) y
+//! y del ingreso, parte del 10 % más rico, pobreza y riqueza por origen y por clase) y
 //! felicidad por grupo con sus motivos principales. Se recalculan cada mes; las fotos
 //! mensuales y anuales quedan para los gráficos.
 
@@ -21,7 +21,6 @@ pub struct Estadisticas {
     pub tam_hogar: f32,
     pub hombres_por_100_mujeres: f32,
     pub por_origen: Vec<(Origen, u32)>,
-    pub por_condicion: [u32; 3],
     pub por_clase: [u32; 4],
     pub por_raiz: [u32; 4],
     /// Adultos que saben leer (0 a 1).
@@ -38,8 +37,6 @@ pub struct Estadisticas {
     pub pobreza: f32,
     /// (origen del hogar, pobreza, personas).
     pub pobreza_por_origen: Vec<(Origen, f32, u32)>,
-    /// Pobreza por condición legal: libres, esclavizadas (sin derecho a bienes: 1), libertas.
-    pub pobreza_por_condicion: [f32; 3],
     /// Riqueza media de los hogares por origen (pesos).
     pub riqueza_por_origen: Vec<(Origen, f32)>,
     // Felicidad
@@ -49,17 +46,14 @@ pub struct Estadisticas {
     pub fel_edad: [f32; 4],
     pub fel_sexo: [f32; 2],
     pub fel_clase: [f32; 4],
-    pub fel_condicion: [f32; 3],
     pub fel_barrio: [f32; 5],
     pub fel_origen: Vec<(Origen, f32, u32)>,
     /// Motivos de queja más comunes (código, personas).
     pub motivos: Vec<(u8, u32)>,
-    /// Personas con ascendencia africana (libres, libertas o esclavizadas: la raíz se sigue
-    /// por padre y madre) y con ascendencia indígena.
+    /// Personas con ascendencia africana y con ascendencia indígena (la raíz se sigue por
+    /// padre y madre).
     pub afrodescendientes: u32,
     pub indigenas: u32,
-    /// Personas libres por ley pero bajo patronato (obligadas a servir en una casa).
-    pub bajo_patronato: u32,
 }
 
 /// Una foto para los gráficos (mes o año).
@@ -76,11 +70,8 @@ pub struct Foto {
     pub top10: f32,
     pub pobreza: f32,
     pub felicidad: f32,
-    pub esclavizadas: u32,
     #[serde(default)]
     pub afrodescendientes: u32,
-    #[serde(default)]
-    pub bajo_patronato: u32,
 }
 
 impl Foto {
@@ -99,9 +90,7 @@ impl Foto {
             top10: s.top10,
             pobreza: s.pobreza,
             felicidad: s.felicidad,
-            esclavizadas: s.por_condicion[1],
             afrodescendientes: s.afrodescendientes,
-            bajo_patronato: s.bajo_patronato,
         }
     }
 }
@@ -141,11 +130,36 @@ pub fn parte_top10(valores: &[f32]) -> f32 {
     v[..k].iter().sum::<f32>() / total
 }
 
+/// Ascendencia de cada persona registrada (por id): bit 1 africana, bit 2 indígena. Se sigue
+/// por padre y madre (los padres siempre tienen un id menor que sus hijos).
+pub const ASC_AFRICANA: u8 = 1;
+pub const ASC_INDIGENA: u8 = 2;
+
 fn media(a: (f32, f32)) -> f32 {
     if a.1 > 0.0 { a.0 / a.1 } else { 0.0 }
 }
 
 impl Poblacion {
+    /// Ascendencia (bits `ASC_*`) de todas las personas registradas, en una pasada.
+    pub fn ascendencias(&self) -> Vec<u8> {
+        let bits = |r: Raiz| match r {
+            Raiz::Africana => ASC_AFRICANA,
+            Raiz::Indigena => ASC_INDIGENA,
+            _ => 0,
+        };
+        let mut v = vec![0u8; self.personas.len()];
+        for p in &self.personas {
+            let mut a = bits(p.origen.raiz()) | bits(p.raiz);
+            for x in [p.padre, p.madre].into_iter().flatten() {
+                if (x as usize) < v.len() {
+                    a |= v[x as usize];
+                }
+            }
+            v[p.id as usize] = a;
+        }
+        v
+    }
+
     pub fn estadisticas(&self) -> Estadisticas {
         let mes = self.mes;
         let mut s = Estadisticas { habitantes: self.habitantes(), ..Default::default() };
@@ -156,11 +170,9 @@ impl Poblacion {
         let mut fel_edad = [(0.0f32, 0.0f32); 4];
         let mut fel_sexo = [(0.0f32, 0.0f32); 2];
         let mut fel_clase = [(0.0f32, 0.0f32); 4];
-        let mut fel_cond = [(0.0f32, 0.0f32); 3];
         let mut fel_barrio = [(0.0f32, 0.0f32); 5];
         let mut fel_origen = [(0.0f32, 0.0f32); Origen::ALL.len()];
         let mut motivos = [0u32; 256];
-        let mut pobres_cond = [(0.0f32, 0.0f32); 3];
         for p in self.vivos() {
             let e = p.edad(mes);
             let g = (e / 5).min(GRUPOS_PIRAMIDE as i32 - 1) as usize;
@@ -172,7 +184,6 @@ impl Poblacion {
                 Sexo::Mujer => m += 1,
             }
             origen[p.origen as usize] += 1;
-            s.por_condicion[p.condicion as usize] += 1;
             s.por_raiz[p.raiz as usize] += 1;
             let hg = p.hogar.map(|x| &self.hogares[x as usize]);
             let clase = hg.map_or(Clase::Pobre, |x| x.clase);
@@ -198,8 +209,6 @@ impl Poblacion {
             fel_sexo[p.sexo as usize].1 += 1.0;
             fel_clase[clase as usize].0 += f;
             fel_clase[clase as usize].1 += 1.0;
-            fel_cond[p.condicion as usize].0 += f;
-            fel_cond[p.condicion as usize].1 += 1.0;
             let b = self.barrio_cache(p).unwrap_or(3);
             fel_barrio[b].0 += f;
             fel_barrio[b].1 += 1.0;
@@ -216,12 +225,6 @@ impl Poblacion {
                     }
                 }
             }
-            let pobre = match p.condicion {
-                Condicion::Esclavizada => 1.0,
-                _ => (clase == Clase::Pobre) as u8 as f32,
-            };
-            pobres_cond[p.condicion as usize].0 += pobre;
-            pobres_cond[p.condicion as usize].1 += 1.0;
             match hg.map(|x| x.alojamiento) {
                 Some(Alojamiento::SinCasa) => s.sin_casa += 1,
                 Some(Alojamiento::Campo) => s.campo += 1,
@@ -231,9 +234,8 @@ impl Poblacion {
         let asc = self.ascendencias();
         for p in self.vivos() {
             let a = asc.get(p.id as usize).copied().unwrap_or(0);
-            s.afrodescendientes += (a & super::historia::ASC_AFRICANA != 0) as u32;
-            s.indigenas += (a & super::historia::ASC_INDIGENA != 0) as u32;
-            s.bajo_patronato += p.patronato.is_some() as u32;
+            s.afrodescendientes += (a & ASC_AFRICANA != 0) as u32;
+            s.indigenas += (a & ASC_INDIGENA != 0) as u32;
         }
         s.edad_media = if n > 0 { edades as f32 / n as f32 } else { 0.0 };
         s.hombres_por_100_mujeres = if m > 0 { h as f32 / m as f32 * 100.0 } else { 0.0 };
@@ -246,7 +248,6 @@ impl Poblacion {
         s.fel_edad = fel_edad.map(media);
         s.fel_sexo = fel_sexo.map(media);
         s.fel_clase = fel_clase.map(media);
-        s.fel_condicion = fel_cond.map(media);
         s.fel_barrio = fel_barrio.map(media);
         let mut fo: Vec<(Origen, f32, u32)> = Origen::ALL.iter().map(|&o| (o, media(fel_origen[o as usize]), fel_origen[o as usize].1 as u32)).filter(|x| x.2 > 0).collect();
         fo.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
@@ -255,7 +256,6 @@ impl Poblacion {
         mv.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         mv.truncate(6);
         s.motivos = mv;
-        s.pobreza_por_condicion = pobres_cond.map(media);
         // Desigualdad entre hogares (sin el cuartel ni el campamento).
         let mut riqueza = Vec::new();
         let mut ingreso = Vec::new();
@@ -263,10 +263,7 @@ impl Poblacion {
         let mut por_origen: BTreeMap<Origen, (f32, f32, f32)> = BTreeMap::new();
         let mut tam = (0.0f32, 0.0f32);
         for hg in self.hogares.iter().filter(|x| x.activo && !x.miembros.is_empty() && !Self::colectivo(x)) {
-            let libres = hg.miembros.iter().filter(|&&x| self.personas[x as usize].libre()).count() as f32;
-            if libres == 0.0 {
-                continue;
-            }
+            let personas = hg.miembros.len() as f32;
             s.hogares += 1;
             tam.0 += hg.miembros.len() as f32;
             tam.1 += 1.0;
@@ -274,11 +271,11 @@ impl Poblacion {
             riqueza.push(pat);
             ingreso.push(hg.ingresos / self.equivalentes(hg));
             let pobre = (hg.clase == Clase::Pobre) as u8 as f32;
-            pob.0 += pobre * libres;
-            pob.1 += libres;
+            pob.0 += pobre * personas;
+            pob.1 += personas;
             let e = por_origen.entry(hg.origen).or_default();
-            e.0 += pobre * libres;
-            e.1 += libres;
+            e.0 += pobre * personas;
+            e.1 += personas;
             e.2 += pat;
         }
         s.tam_hogar = media(tam);

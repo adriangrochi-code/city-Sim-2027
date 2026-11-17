@@ -39,7 +39,6 @@
 | 1780–1800 | **Casa de Lavalleja** (Zabala 1467/1469). El MEC la data hacia 1783. | [F] IM Listado; MEC |
 | 1780–1790 | **Casa de Antonio Pérez** (Av. Agraciada 2752), en el camino extramuros. | [F] IM Listado |
 | 1780–1830 | Las fuentes arqueológicas llaman a esta etapa **"variantes más antiguas" de la casa patio**. | [F] Mata et al. 2020 |
-| 1788 | Caserío de la Compañía de Filipinas (depósito de personas esclavizadas): «una manzana de terreno, bajo muro, teniendo en el centro cinco piezas edificadas, dos grandes almacenes, cocinas, etc., **techo de teja**». | [F] Frega 2024, citando a Isidoro de María |
 | 1790–1804 | **Iglesia Matriz** (Sáa y Faría, luego Tomás Toribio). | [F] IM Listado; *Caminatour* |
 | desde 1794 | **Bóvedas** (Lecocq): 34 construcciones a prueba de bala de cañón en el norte de la península (almacén, tropa, hospital, prisión). | [F] Frega 2024 |
 | c. 1800 | **Casa de Rivera** (Rincón y Misiones). Empezó como casa del regidor y comerciante **Cristóbal Salvañach**. Rivera vivió allí entre 1834 y 1849. La planta alta y un remate octogonal serían agregados posteriores. | [F] IM Listado (1800); guías turísticas (Salvañach, ampliaciones: verificar) |
@@ -78,7 +77,7 @@ Las frecuencias por época están en la sección 6. Acá van la descripción y l
 
 #### D. Casa de azotea de una planta (de patio) (desde c.1770–1780; dominante en las casas "buenas" hacia 1800–1830)
 - **Documentado:** unas 300 hacia 1800 [F, De María]. «Casa a patio con techo de azotea, de influencia canaria» [F]. Las cisternas de **aljibe** se alimentaban con el agua «recogida en las azoteas y conducida mediante canalizaciones» [F, Mata et al.]. Los aljibes empiezan a construirse en Montevideo **a fines del XVIII e inicios del XIX** [F].
-- **Planta:** **zaguán** (único acceso) → **primer patio** con aljibe, rodeado de habitaciones que se comunican entre sí → paso entre patios → **segundo patio de servicio** (cocina chica, letrina, cuartos de servidumbre o esclavizados) → a veces **fondo, huerta o corral** [F, Mata et al. citando IdD 2002 y Rodríguez Villamil 1996].
+- **Planta:** **zaguán** (único acceso) → **primer patio** con aljibe, rodeado de habitaciones que se comunican entre sí → paso entre patios → **segundo patio de servicio** (cocina chica, letrina, cuartos de servicio) → a veces **fondo, huerta o corral** [F, Mata et al. citando IdD 2002 y Rodríguez Villamil 1996].
 - **Forma [E]:** frente de **10 a 20 varas** (8,4 a 16,7 m). Muros de **ladrillo asentado en cal de 0,45 a 0,60 m** (en excavación se documentaron muros de ladrillo a tizón de 45 cm [F, Mata et al.]), con cimientos de piedra. **Techo plano** de ladrillo o tejuela sobre tirantes, con leve pendiente al patio o a la calle. **Pretil** de 0,8 a 1,2 m de alto con **caños o gárgolas** de desagüe (de teja, cerámica o hojalata). Altura libre de **4 a 5 m**, o sea fachada de **5 a 6 m** con el pretil.
 - **Fachada:** puerta de zaguán (a menudo **descentrada**) más 1 a 4 ventanas con **reja**. Cornisa simple de 2 o 3 molduras bajo el pretil. A veces pilastras en los bordes de la fachada.
 
@@ -268,7 +267,7 @@ Pigmentos disponibles: **cal** (blanco), **tierras** (ocre amarillo, almagre u o
 
 1. **Época:** ver la tabla de pesos en la sección 6. Los materiales siguen esta secuencia: cuero → adobe y paja → piedra y teja → ladrillo y azotea → dos plantas y balcones → miradores y neoclásico (Toribio, desde 1799).
 2. **Clase social:**
-   - **Pobre** (peón, pardo o moreno libre, soldado, pescador, lavandera): rancho, o 1–2 cuartos alquilados. Muchos esclavizados vivían en los fondos de casas ajenas.
+   - **Pobre** (peón, soldado, pescador, lavandera): rancho, o 1–2 cuartos alquilados.
    - **Media** (artesano, pulpero, pequeño comerciante, oficial): casa de teja o azotea chica, de 3 a 6 piezas, con 1 patio.
    - **Alta** (comerciante mayorista, funcionario, hacendado): casa de 2 o 3 patios, de altos, con balcones, portada y aljibe. Desde 1810–1820 puede tener mirador. Además tiene una **quinta** extramuros.
 3. **Ubicación:** cerca de la **Matriz y la Plaza** y en las calles principales (San Carlos, después Sarandí; San Pedro, después 25 de Mayo; San Miguel, después Piedras) hay más casas de altos y comercio. Cerca de la **bahía y el puerto**, almacenes, barracas, pulperías y miradores. Hacia el **sur y las orillas** de la península, casas más modestas, huecos y ranchos. Cerca de las **murallas** quedan predios recortados y cuarteles. **Extramuros** (antes de 1829 estaba restringido edificar en el ejido fortificado) hay quintas, chacras, ranchos, hornos y saladeros.
