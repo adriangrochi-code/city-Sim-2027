@@ -25,6 +25,8 @@ pub enum Act {
     Fill(f32, f32, i32),
     /// Viaja con la cámara hasta x, z en N cuadros (el mundo se va cargando en el camino).
     Travel(f32, f32, u32),
+    /// Lleva la cámara al puente que construyó la demostración.
+    Bridge,
     /// Una acción del modo juego (fundar, trazar, zonificar, crecer); devuelve lo que pasó.
     Game(&'static str, fn(&mut Session) -> String),
     /// Captura con la interfaz del juego encima, después de prepararla (herramienta, ficha,
@@ -86,9 +88,21 @@ pub fn city_steps() -> Vec<Act> {
         Hour(10.5),
         WaitIdle("terreno virgen"),
         Game("fundar la plaza", d::found),
+        Cam([c.x + 20.0, c.y + 30.0, 250.0, 200.0, 40.0]),
+        WaitIdle("plaza fundada de cerca"),
+        Shot("motor-plaza-fundada-cerca"),
+        Cam([c.x + 20.0, c.y + 30.0, 700.0, 200.0, 40.0]),
+        WaitIdle("plaza fundada de lejos"),
+        Shot("motor-plaza-fundada-lejos"),
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
         Game("damero", d::grid),
         Game("calle curva", d::curve),
         Game("zonificar", d::zone),
+        Game("puente", d::bridge),
+        Bridge,
+        WaitIdle("puente"),
+        Shot("motor-puente"),
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
         WaitIdle("trazado"),
         Shot("motor-ciudad-trazado"),
         Game("crecer 60 meses", d::grow),
@@ -406,6 +420,18 @@ impl Tour {
                     s.cam.yaw = c[3];
                     s.cam.pitch = c[4];
                     s.update(0.0);
+                    self.next();
+                }
+                Act::Bridge => {
+                    if let Some(p) = *crate::city::game_demo::BRIDGE_AT.lock().unwrap() {
+                        s.cam.target.x = p.x;
+                        s.cam.target.z = p.y;
+                        s.cam.target.y = s.terrain.height(p.x, p.y).max(0.0);
+                        s.cam.distance = 90.0;
+                        s.cam.yaw = 30.0;
+                        s.cam.pitch = 28.0;
+                        s.update(0.0);
+                    }
                     self.next();
                 }
                 Act::Game(label, f) => {

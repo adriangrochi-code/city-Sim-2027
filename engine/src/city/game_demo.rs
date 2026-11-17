@@ -53,6 +53,7 @@ pub fn grid(s: &mut Session) -> String {
                 if let Ok(e) = g.city.build_road(&t, &seg, RoadKind::Stone) {
                     all.voxels.extend(e.voxels);
                     all.surface.extend(e.surface);
+                    all.ground.extend(e.ground);
                 }
             }
         }
@@ -97,11 +98,47 @@ pub fn zone(s: &mut Session) -> String {
         n += k_n;
         e.voxels.extend(k_e.voxels);
         e.surface.extend(k_e.surface);
+        e.ground.extend(k_e.ground);
     }
     s.apply_edits(&e);
     let g = s.game.as_ref().unwrap();
     let count = |k: ZoneKind| g.city.lots.lots.values().filter(|l| l.kind() == Some(k)).count();
     format!("{n} solares zonificados: {} residenciales, {} comerciales, {} industriales", count(ZoneKind::Residencial), count(ZoneKind::Comercial), count(ZoneKind::Industrial))
+}
+
+/// Punto del último puente construido por la demostración (para la captura).
+pub static BRIDGE_AT: std::sync::Mutex<Option<Vec2>> = std::sync::Mutex::new(None);
+
+/// Un camino empedrado con puente sobre el arroyo más cercano a la plaza.
+pub fn bridge(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let mut best: Option<(f32, Vec<Vec2>)> = None;
+    for arr in &t.arroyos {
+        for w in arr.windows(2).step_by(3) {
+            let (p, q) = (w[0], w[1]);
+            let m = (p + q) * 0.5;
+            let dist = m.distance(PLAZA);
+            if dist > 3000.0 || best.as_ref().is_some_and(|b| b.0 <= dist) {
+                continue;
+            }
+            let n = (q - p).normalize_or_zero().perp();
+            let (x0, x1) = (m - n * 35.0, m + n * 35.0);
+            if t.is_water(x0.x, x0.y) || t.is_water(x1.x, x1.y) || !t.is_water(m.x, m.y) {
+                continue;
+            }
+            let line = roads::line(x0, x1);
+            if g.city.road_problem(&t, &line, RoadKind::Stone).is_none() {
+                best = Some((dist, line));
+            }
+        }
+    }
+    let Some((_, line)) = best else { return "no hay arroyos cerca para cruzar".into() };
+    let mid = (line[0] + *line.last().unwrap()) * 0.5;
+    *BRIDGE_AT.lock().unwrap() = Some(mid);
+    let r = g.city.build_road(&t, &line, RoadKind::Stone);
+    let out = apply(s, r);
+    format!("{out} · puente en {:.0}, {:.0}", mid.x, mid.y)
 }
 
 pub fn grow(s: &mut Session) -> String {

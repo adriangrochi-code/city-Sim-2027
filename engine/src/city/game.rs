@@ -309,7 +309,7 @@ impl Game {
         let mut help = help.to_string();
         let Some(h) = self.hover else { return (help, None) };
         let road = |pts: &[Vec2]| -> (i64, Option<String>) {
-            let cost = City::road_cost(pts, self.kind);
+            let cost = City::road_cost(t, pts, self.kind);
             let err = self.city.road_problem(t, pts, self.kind).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {} pesos", fmt_thousands(cost))));
             (cost, err)
         };
@@ -325,7 +325,7 @@ impl Game {
             }
             Tool::Grid if self.stage == 2 => {
                 let lines = grid_lines(self.p0, self.p1, h);
-                let cost: i64 = lines.iter().map(|l| City::road_cost(l, self.kind)).sum();
+                let cost: i64 = lines.iter().map(|l| City::road_cost(t, l, self.kind)).sum();
                 let err = lines.iter().find_map(|l| self.city.road_problem(t, l, self.kind)).or_else(|| (cost > self.city.money).then(|| format!("Fondos insuficientes: hacen falta {} pesos", fmt_thousands(cost))));
                 (Some(cost), err)
             }
@@ -438,7 +438,7 @@ impl Game {
     }
 
     fn road_preview(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, pts: &[Vec2]) {
-        let good = self.city.road_problem(t, pts, self.kind).is_none() && City::road_cost(pts, self.kind) <= self.city.money;
+        let good = self.city.road_problem(t, pts, self.kind).is_none() && City::road_cost(t, pts, self.kind) <= self.city.money;
         ribbon(out, t, pts, self.kind.width(), if good { [0.45, 0.95, 0.45, 0.55] } else { [1.0, 0.35, 0.3, 0.55] });
     }
 }

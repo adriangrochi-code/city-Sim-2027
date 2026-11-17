@@ -19,6 +19,10 @@ pub struct Edits {
     pub voxels: HashMap<IVec3, Mat>,
     /// Material de la capa superior del terreno (calles, plaza, huertas).
     pub surface: HashMap<IVec2, Mat>,
+    /// Suelo nivelado por una obra (calle, plaza): índice del vóxel de arriba de la columna.
+    /// Cada nivel de detalle usa esta altura en lugar de la natural, así el pasto no asoma
+    /// por encima de lo aplanado en los niveles gruesos.
+    pub ground: HashMap<IVec2, i32>,
 }
 
 impl Edits {

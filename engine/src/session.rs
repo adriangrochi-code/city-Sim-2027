@@ -159,6 +159,7 @@ impl Session {
             if let Some(e) = g.update(&t, dt) {
                 batch.voxels.extend(e.voxels);
                 batch.surface.extend(e.surface);
+                batch.ground.extend(e.ground);
             }
             self.apply_edits(&batch);
         }

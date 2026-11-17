@@ -102,6 +102,8 @@ pub struct LevelStore {
     pub surface: HashMap<IVec2, Mat>,
     /// Altura máxima (en vóxeles del nivel) de lo editado en cada columna de chunks.
     pub max_y: HashMap<IVec2, i32>,
+    /// Suelo nivelado por obras, en vóxeles de este nivel (ver `Edits::ground`).
+    pub ground: HashMap<IVec2, i32>,
 }
 
 /// Clave de desempate determinista a partir de la posición fina (x, z).
@@ -161,6 +163,23 @@ impl LevelStore {
         }
         for (k, (_, m)) in surf {
             self.surface.insert(k, m);
+        }
+        // Suelo nivelado: promedio de la altura de la superficie de las columnas finas que caen
+        // en cada columna gruesa, convertido a vóxeles del nivel.
+        let mut gr: HashMap<IVec2, (f64, u32)> = HashMap::new();
+        for (&c, &top) in &edits.ground {
+            let k = IVec2::new(c.x >> lod, c.y >> lod);
+            let e = gr.entry(k).or_insert((0.0, 0));
+            e.0 += (top + 1) as f64; // altura de la cara de arriba, en vóxeles finos
+            e.1 += 1;
+            if touched.is_some() {
+                cols.push(k);
+            }
+        }
+        let scale = (1u32 << lod) as f64;
+        for (k, (sum, n)) in gr {
+            let top = ((sum / n as f64) / scale).round() as i32 - 1;
+            self.ground.insert(k, top);
         }
         if let Some(t) = touched {
             // Una edición afecta a su columna de chunks y, si está en el borde, a la vecina

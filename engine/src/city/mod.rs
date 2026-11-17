@@ -122,6 +122,7 @@ fn plaza_church_edits(t: &TerrainGen, c: Vec2, f: Vec2) -> Edits {
     let church = build_rotated(t, church_center(c, f), f, 30, 84, 4242, &iglesia5);
     e.voxels.extend(church.edits.voxels);
     e.surface.extend(church.edits.surface);
+    e.ground.extend(church.edits.ground);
     e
 }
 
@@ -152,6 +153,7 @@ impl City {
         for r in roads {
             e.voxels.extend(r.voxels);
             e.surface.extend(r.surface);
+            e.ground.extend(r.ground);
         }
         let jobs: Vec<(u32, Vec2, Vec2, u64, ZoneKind, u8)> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, l.kind()?, l.level))).filter(|j| j.5 > 0).collect();
         let per = jobs.len().div_ceil(threads).max(1);
@@ -165,6 +167,7 @@ impl City {
         for (id, b) in built {
             e.voxels.extend(b.edits.voxels);
             e.surface.extend(b.edits.surface);
+            e.ground.extend(b.edits.ground);
             self.lots.lots.get_mut(&id).unwrap().voxels = b.voxels;
         }
         e
@@ -215,11 +218,20 @@ impl City {
         if r < kind.min_radius() {
             return Some(format!("Curva demasiado cerrada: radio {} m (mínimo {} m)", r as i32, kind.min_radius() as i32));
         }
+        // Donde cruza agua, la calle es un puente (hasta MAX_BRIDGE m en esta época).
+        let spans = voxelize::water_spans(t, pts);
+        if let Some(&(a, b)) = spans.iter().find(|&&(a, b)| b - a > voxelize::MAX_BRIDGE) {
+            return Some(format!("El cruce de agua mide {} m: los puentes de esta época llegan a {} m", (b - a) as i32, voxelize::MAX_BRIDGE as i32));
+        }
+        let mut s = 0.0;
         for (i, p) in pts.iter().enumerate() {
-            let h = t.height(p.x, p.y);
-            if h < 0.5 {
-                return Some("No se puede construir sobre el agua (aún no hay puentes)".into());
+            if i > 0 {
+                s += pts[i - 1].distance(*p);
             }
+            if spans.iter().any(|&(a, b)| s >= a - 1.0 && s <= b + 1.0) {
+                continue; // tablero del puente: no sigue el terreno
+            }
+            let h = t.height(p.x, p.y);
             if i > 0 {
                 let q = pts[i - 1];
                 let dist = q.distance(*p);
@@ -237,8 +249,14 @@ impl City {
         None
     }
 
-    pub fn road_cost(pts: &[Vec2], kind: RoadKind) -> i64 {
-        (polyline_length(pts) * kind.cost_per_m()) as i64
+    /// Costo de una calle: por metro según el tipo, más los puentes (mucho más caros).
+    pub fn road_cost(t: &TerrainGen, pts: &[Vec2], kind: RoadKind) -> i64 {
+        let bridge: f32 = voxelize::water_spans(t, pts).iter().map(|(a, b)| b - a).sum();
+        let per_bridge_m = match kind {
+            RoadKind::Dirt => 25.0,  // puente de madera
+            RoadKind::Stone => 60.0, // puente de piedra con arcos
+        };
+        (polyline_length(pts) * kind.cost_per_m() + bridge * per_bridge_m) as i64
     }
 
     pub fn plaza_problem(&self, t: &TerrainGen, c: Vec2, angle: f32) -> Option<String> {
@@ -287,7 +305,7 @@ impl City {
         if let Some(p) = self.road_problem(t, pts, kind) {
             return Err(p);
         }
-        let cost = Self::road_cost(pts, kind);
+        let cost = Self::road_cost(t, pts, kind);
         if cost > self.money {
             return Err(format!("Fondos insuficientes: hacen falta {cost} pesos"));
         }
@@ -308,7 +326,7 @@ impl City {
             if let Some(p) = self.road_problem(t, l, kind) {
                 return Err(format!("Damero: {p}"));
             }
-            cost += Self::road_cost(l, kind);
+            cost += Self::road_cost(t, l, kind);
         }
         if cost > self.money {
             return Err(format!("Fondos insuficientes: hacen falta {cost} pesos"));
@@ -385,6 +403,7 @@ impl City {
             }
             e.voxels.extend(b.edits.voxels);
             e.surface.extend(b.edits.surface);
+            e.ground.extend(b.edits.ground);
             self.lots.lots.get_mut(&ch.lot).unwrap().voxels = b.voxels;
         }
     }
@@ -663,5 +682,51 @@ mod tests {
         let (_, e) = city.paint(built.c, 1.0, zone_code(ZoneKind::Comercial, Density::Baja));
         assert!(!e.voxels.is_empty());
         assert_eq!(city.lots.lots[&built.id].level, 0);
+    }
+
+    #[test]
+    fn puentes_sobre_arroyos_y_nada_de_solares_en_el_agua() {
+        let t = TerrainGen::montevideo();
+        let mut city = City::default();
+        city.money = 1_000_000;
+        city.found_plaza(&t, t.founding_site(), 0.0).unwrap();
+        // Una cañada o arroyo cualquiera del mapa, en un tramo recto: una calle que lo cruza.
+        let (mut a, mut b) = (Vec2::ZERO, Vec2::ZERO);
+        'busca: for arr in &t.arroyos {
+            for w in arr.windows(2).step_by(7) {
+                let (p, q) = (w[0], w[1]);
+                let dir = (q - p).normalize_or_zero();
+                let n = Vec2::new(-dir.y, dir.x);
+                let m = (p + q) * 0.5;
+                let (x0, x1) = (m - n * 30.0, m + n * 30.0);
+                if !t.is_water(x0.x, x0.y) && !t.is_water(x1.x, x1.y) && t.is_water(m.x, m.y) && m.x > 2000.0 && m.y > 2000.0 && m.x < 22000.0 && m.y < 22000.0 {
+                    let line = roads::line(x0, x1);
+                    if city.road_problem(&t, &line, RoadKind::Stone).is_none() {
+                        a = x0;
+                        b = x1;
+                        break 'busca;
+                    }
+                }
+            }
+        }
+        assert!(a != b, "no se encontró un arroyo para cruzar");
+        let line = roads::line(a, b);
+        let spans = voxelize::water_spans(&t, &line);
+        assert_eq!(spans.len(), 1, "un solo puente: {spans:?}");
+        assert!(City::road_cost(&t, &line, RoadKind::Stone) > (60.0 * RoadKind::Stone.cost_per_m()) as i64, "el puente cuesta más");
+        let e = city.build_road(&t, &line, RoadKind::Stone).unwrap();
+        // El agua sigue corriendo: el centro del cauce no tiene suelo nivelado ni superficie.
+        let mid = (a + b) * 0.5;
+        let c = glam::IVec2::new((mid.x / 0.5).floor() as i32, (mid.y / 0.5).floor() as i32);
+        assert!(!e.ground.contains_key(&c) && !e.surface.contains_key(&c), "el cauce no se rellena");
+        assert!(e.voxels.iter().any(|(v, &m)| v.x == c.x && v.z == c.y && m == crate::palette::STONE), "hay tablero de piedra sobre el agua");
+        // Ningún solar sobre el agua.
+        for l in city.lots.lots.values() {
+            assert!(!t.is_water(l.c.x, l.c.y), "solar {} en el agua", l.id);
+        }
+        // Un cruce de más de 80 m (el río) no se puede.
+        let fs = t.founding_site();
+        let sea = roads::line(fs + Vec2::new(0.0, 300.0), fs + Vec2::new(0.0, 1500.0));
+        assert!(city.road_problem(&t, &sea, RoadKind::Stone).is_some_and(|m| m.contains("puentes")), "{:?}", city.road_problem(&t, &sea, RoadKind::Stone));
     }
 }

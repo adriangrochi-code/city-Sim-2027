@@ -495,11 +495,15 @@ fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, 
     for tr in trees {
         let (gx, gz) = ((tr.x / vs).floor() as i32, (tr.z / vs).floor() as i32);
         // ¿Obras cerca del tronco? (superficie pintada o vóxeles editados en el chunk).
-        let cleared = (-1..=1).any(|d: i32| {
-            let g = IVec2::new(gx + d * (3.0 / vs).ceil() as i32, gz);
-            let g2 = IVec2::new(gx, gz + d * (3.0 / vs).ceil() as i32);
-            ls.surface.contains_key(&g) || ls.surface.contains_key(&g2)
-        });
+        // Si la copa toca una obra (calle, plaza), el árbol se taló: se mira el tronco y ocho
+        // puntos alrededor, a la distancia del radio de la copa.
+        let rr = ((tr.radius + 1.0) / vs).ceil() as i32;
+        let cleared = std::iter::once((0, 0))
+            .chain((0..8).map(|k| {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                ((a.cos() * rr as f32) as i32, (a.sin() * rr as f32) as i32)
+            }))
+            .any(|(dx, dz)| ls.surface.contains_key(&IVec2::new(gx + dx, gz + dz)) || ls.ground.contains_key(&IVec2::new(gx + dx, gz + dz)));
         if cleared {
             continue;
         }
@@ -619,7 +623,8 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
             let dx = hi(1, 0) - hi(-1, 0);
             let dz = hi(0, 1) - hi(0, -1);
             let slope = (dx * dx + dz * dz).sqrt() / (2.0 * vs);
-            let ty = top_from_height(h, vs);
+            // Donde hay obras (calle, plaza), el suelo nivelado manda sobre el natural.
+            let ty = ls.ground.get(&IVec2::new(gx, gz)).copied().unwrap_or_else(|| top_from_height(h, vs));
             let k = (i + j * Q) as usize;
             top[k] = ty;
             let x = (gx as f32 + 0.5) * vs;

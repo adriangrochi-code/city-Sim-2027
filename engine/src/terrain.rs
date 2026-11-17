@@ -615,6 +615,15 @@ impl TerrainGen {
         h
     }
 
+    /// ¿Hay agua acá? El río (bajo el nivel del mar) o el cauce de un arroyo.
+    pub fn is_water(&self, x: f32, z: f32) -> bool {
+        if self.height(x, z) < 0.5 {
+            return true;
+        }
+        let (d, hw) = self.arroyo_query(x, z);
+        d < hw + 0.5
+    }
+
     pub fn arroyo_distance(&self, x: f32, z: f32) -> f32 {
         self.arroyo_query(x, z).0
     }

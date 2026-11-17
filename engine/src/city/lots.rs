@@ -386,6 +386,21 @@ impl Lots {
     pub fn valid(&self, net: &RoadNetwork, t: &TerrainGen, c: Vec2, f: Vec2) -> bool {
         let cs = corners_of(c, f, W, D);
         let (mut hmin, mut hmax) = (f32::INFINITY, f32::NEG_INFINITY);
+        // Nada de solares sobre el agua (ni en el cauce de un arroyo: se rellenaría).
+        // Grilla de 3 × 8 puntos (cada ~5 m): una cañada de 2 o 3 m no pasa entre ellos sin
+        // tocar alguno junto con su orilla de 0,5 m.
+        let side = side_of(f);
+        for i in 0..3 {
+            for j in 0..8 {
+                let u = (i as f32 / 2.0 - 0.5) * (W - 1.0);
+                let v = (j as f32 / 7.0 - 0.5) * (D - 1.0);
+                let p = c + side * u + f * v;
+                let (d, hw) = t.arroyo_query(p.x, p.y);
+                if d < hw + 2.5 || t.height(p.x, p.y) < 0.5 {
+                    return false;
+                }
+            }
+        }
         for p in cs.iter().chain(std::iter::once(&c)) {
             let h = t.height(p.x, p.y);
             if h < 0.6 {
