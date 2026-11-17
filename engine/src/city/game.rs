@@ -254,7 +254,7 @@ impl Game {
         }
         let zone = if self.tool == Tool::Zone { zone_code(self.zone_kind, self.density) } else { 0 };
         let (n, e) = self.city.paint(p, self.brush, zone);
-        (n > 0 && !e.voxels.is_empty()).then_some(e)
+        (n > 0 && !e.is_empty()).then_some(e)
     }
 
     /// Ficha del punto inspeccionado: solar (nivel, habitantes, valor del suelo y por qué no
@@ -348,7 +348,7 @@ impl Game {
         for n in news {
             self.say(n);
         }
-        (!e.voxels.is_empty()).then_some(e)
+        (!e.is_empty()).then_some(e)
     }
 
     pub fn status(&self) -> String {

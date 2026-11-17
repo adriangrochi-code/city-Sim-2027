@@ -100,7 +100,7 @@ wgpu. Por ahora genera el mapa y una ciudad de prueba y guarda capturas
 ([detalle](docs/sistemas/motor-voxel.md)).
 
 La estética de las estructuras está definida en [estetica-voxel.md](docs/sistemas/estetica-voxel.md):
-vóxel de 0,5 m, kit modular (zócalo, cuerpo, pretil, vanos, rejas, balcones, techos de teja y paja),
+vóxel de diseño de 0,5 m (el mundo es de 0,25 m), kit modular (zócalo, cuerpo, pretil, vanos, rejas, balcones, techos de teja y paja),
 desgaste por vóxel y detalle fino dibujado por material. Catálogo colonial completo, incluida la
 iglesia matriz en sus 5 fases de obra.
 

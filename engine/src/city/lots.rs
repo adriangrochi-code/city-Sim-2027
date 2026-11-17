@@ -8,7 +8,7 @@ use crate::terrain::TerrainGen;
 use glam::{IVec2, IVec3, Vec2};
 use std::collections::{BTreeMap, HashMap};
 
-/// Frente y fondo del solar, en metros (24 × 48 vóxeles de 0,5 m).
+/// Frente y fondo del solar, en metros (24 × 48 vóxeles de diseño de 0,5 m).
 pub const W: f32 = 12.0;
 pub const D: f32 = 38.0; // hasta el medio de la manzana: (86,6 − 10,4) / 2
 /// Habitantes por nivel de una casa (densidad baja y media).

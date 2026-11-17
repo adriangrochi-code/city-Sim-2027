@@ -11,7 +11,7 @@
 //! los niveles.
 
 use crate::buildings::Edits;
-use crate::lod::CHUNK;
+use crate::lod::{CHUNK, DESIGN_SCALE, DESIGN_SHIFT};
 use crate::palette::Mat;
 use glam::{IVec2, IVec3};
 use std::collections::{HashMap, HashSet};
@@ -45,6 +45,25 @@ impl ChunkEdits {
 
     pub fn len(&self) -> usize {
         self.idx.len()
+    }
+
+    /// Quita los índices dados (ordenados).
+    fn remove_sorted(&mut self, gone: &[u16]) {
+        let mut k = 0;
+        let (mut idx, mut h, mut m) = (Vec::new(), Vec::new(), Vec::new());
+        for j in 0..self.idx.len() {
+            let i = self.idx[j];
+            while k < gone.len() && gone[k] < i {
+                k += 1;
+            }
+            if k < gone.len() && gone[k] == i {
+                continue;
+            }
+            idx.push(i);
+            h.push(self.h[j]);
+            m.push(self.m[j]);
+        }
+        *self = ChunkEdits { idx, h, m };
     }
 
     /// Recorre (índice local, material).
@@ -104,6 +123,9 @@ pub struct LevelStore {
     pub max_y: HashMap<IVec2, i32>,
     /// Suelo nivelado por obras, en vóxeles de este nivel (ver `Edits::ground`).
     pub ground: HashMap<IVec2, i32>,
+    /// Solo en el nivel 0: ediciones de diseño (vóxeles de 0,5 m) por chunk de diseño, sin
+    /// expandir a la grilla base. Lo que hay en `voxels` les gana.
+    pub design: HashMap<IVec3, ChunkEdits>,
 }
 
 /// Clave de desempate determinista a partir de la posición fina (x, z).
@@ -113,56 +135,113 @@ fn tiebreak(x: i32, z: i32) -> u64 {
 }
 
 impl LevelStore {
+    /// Material editado de un vóxel del nivel (base primero; en el nivel 0, después diseño).
     pub fn get(&self, v: IVec3) -> Option<Mat> {
-        self.voxels.get(&chunk_of(v)).and_then(|c| c.get(local_index(v)))
+        self.voxels.get(&chunk_of(v)).and_then(|c| c.get(local_index(v))).or_else(|| {
+            let d = IVec3::new(v.x >> DESIGN_SHIFT, v.y >> DESIGN_SHIFT, v.z >> DESIGN_SHIFT);
+            self.design.get(&chunk_of(d)).and_then(|c| c.get(local_index(d)))
+        })
+    }
+
+    /// ¿Hay ediciones en el chunk `ck` (coordenadas de chunk del nivel)?
+    pub fn has_chunk(&self, ck: IVec3) -> bool {
+        self.voxels.contains_key(&ck) || self.design.contains_key(&IVec3::new(ck.x >> DESIGN_SHIFT, ck.y >> DESIGN_SHIFT, ck.z >> DESIGN_SHIFT))
+    }
+
+    /// Recorre las ediciones del chunk `ck` como (índice local, material): primero los
+    /// bloques de diseño que caen en él y después los vóxeles base (que deben ganar: quien
+    /// escribe en orden se queda con lo último).
+    pub fn for_each_in_chunk(&self, ck: IVec3, mut f: impl FnMut(u16, Mat)) {
+        let s = DESIGN_SCALE;
+        let dk = IVec3::new(ck.x >> DESIGN_SHIFT, ck.y >> DESIGN_SHIFT, ck.z >> DESIGN_SHIFT);
+        if let Some(dc) = self.design.get(&dk) {
+            // Parte del chunk de diseño que cubre este chunk base (en vóxeles de diseño locales).
+            let side = CHUNK / s;
+            let o = (ck - dk * s) * side;
+            for (i, m) in dc.iter() {
+                let l = IVec3::new((i & 31) as i32, (i >> 10) as i32, ((i >> 5) & 31) as i32) - o;
+                if l.x < 0 || l.y < 0 || l.z < 0 || l.x >= side || l.y >= side || l.z >= side {
+                    continue;
+                }
+                let b = l * s;
+                for dy in 0..s {
+                    for dz in 0..s {
+                        for dx in 0..s {
+                            f(((b.x + dx) + (b.z + dz) * CHUNK + (b.y + dy) * CHUNK * CHUNK) as u16, m);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(c) = self.voxels.get(&ck) {
+            for (i, m) in c.iter() {
+                f(i, m);
+            }
+        }
+    }
+
+    /// Columnas de chunks del nivel que tienen ediciones de vóxeles.
+    pub fn edited_columns(&self) -> HashSet<IVec2> {
+        let s = DESIGN_SCALE;
+        let mut out: HashSet<IVec2> = self.voxels.keys().map(|k| IVec2::new(k.x, k.z)).collect();
+        for k in self.design.keys() {
+            for dz in 0..s {
+                for dx in 0..s {
+                    out.insert(IVec2::new(k.x * s + dx, k.z * s + dz));
+                }
+            }
+        }
+        out
     }
 
     fn apply(&mut self, edits: &Edits, touched: Option<&mut HashSet<IVec2>>) {
         let lod = self.lod as i32;
-        // 1. Ganador de cada vóxel del nivel dentro de esta carga: el vóxel fino más alto; a
-        //    igual altura, el de mayor posición (x, z). Así el resultado no depende del orden
-        //    en que se recorre el HashMap de ediciones.
-        //    Un vóxel macizo le gana al aire: si en la carga se reemplaza un edificio alto por
-        //    uno más bajo, el aire que borra el viejo no tapa el techo del nuevo en lo grueso.
-        let mut staged: HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>> = HashMap::new();
+        let track = touched.is_some();
+        let s = DESIGN_SCALE;
         let mut cols: Vec<IVec2> = Vec::new();
-        for (&v, &m) in &edits.voxels {
-            let k = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
-            let ck = chunk_of(k);
-            let tb = tiebreak(v.x, v.z);
-            let solid = m != crate::palette::AIR;
-            let e = staged.entry(ck).or_default().entry(local_index(k)).or_insert((false, i32::MIN, 0, m));
-            if (solid, v.y, tb) >= (e.0, e.1, e.2) {
-                *e = (solid, v.y, tb, m);
-            }
-            let col = IVec2::new(ck.x, ck.z);
-            let my = self.max_y.entry(col).or_insert(i32::MIN);
-            *my = (*my).max(k.y);
-            if touched.is_some() {
-                cols.push(IVec2::new(k.x, k.z));
-            }
+        if lod == 0 {
+            self.apply_fine(edits, track, &mut cols);
+        } else {
+            self.apply_coarse(edits, track, &mut cols);
         }
-        // 2. Se compacta y se une con lo que ya había (la carga nueva gana los empates).
-        for (ck, map) in staged {
-            let mut list: Vec<(u16, i16, Mat)> = map.into_iter().map(|(i, (_, h, _, m))| (i, h.clamp(i16::MIN as i32, i16::MAX as i32) as i16, m)).collect();
-            list.sort_unstable_by_key(|e| e.0);
-            self.voxels.entry(ck).or_default().merge(&list);
-        }
-        // Superficie: a igual celda gruesa, gana la celda fina de mayor posición.
-        let mut surf: HashMap<IVec2, (u64, Mat)> = HashMap::new();
-        for (&c, &m) in &edits.surface {
-            let k = IVec2::new(c.x >> lod, c.y >> lod);
-            let tb = tiebreak(c.x, c.y);
-            let e = surf.entry(k).or_insert((0, m));
-            if tb >= e.0 {
-                *e = (tb, m);
+        // Superficie: a igual celda gruesa, gana la celda fina de mayor posición. Una columna
+        // de diseño cuenta como su columna base de más arriba a la derecha; en el nivel 0 se
+        // expande y lo base gana donde se pisan.
+        if lod == 0 {
+            for (&c, &m) in &edits.design_surface {
+                for dz in 0..s {
+                    for dx in 0..s {
+                        let k = c * s + IVec2::new(dx, dz);
+                        self.surface.insert(k, m);
+                        if track {
+                            cols.push(k);
+                        }
+                    }
+                }
             }
-            if touched.is_some() {
-                cols.push(k);
+            for (&c, &m) in &edits.surface {
+                self.surface.insert(c, m);
+                if track {
+                    cols.push(c);
+                }
             }
-        }
-        for (k, (_, m)) in surf {
-            self.surface.insert(k, m);
+        } else {
+            let mut surf: HashMap<IVec2, (u64, Mat)> = HashMap::new();
+            let design = edits.design_surface.iter().map(|(&c, &m)| (c * s + IVec2::splat(s - 1), m));
+            for (c, m) in edits.surface.iter().map(|(&c, &m)| (c, m)).chain(design) {
+                let k = IVec2::new(c.x >> lod, c.y >> lod);
+                let tb = tiebreak(c.x, c.y);
+                let e = surf.entry(k).or_insert((0, m));
+                if tb >= e.0 {
+                    *e = (tb, m);
+                }
+                if track {
+                    cols.push(k);
+                }
+            }
+            for (k, (_, m)) in surf {
+                self.surface.insert(k, m);
+            }
         }
         // Suelo nivelado: promedio de la altura de la superficie de las columnas finas que caen
         // en cada columna gruesa, convertido a vóxeles del nivel.
@@ -172,7 +251,7 @@ impl LevelStore {
             let e = gr.entry(k).or_insert((0.0, 0));
             e.0 += (top + 1) as f64; // altura de la cara de arriba, en vóxeles finos
             e.1 += 1;
-            if touched.is_some() {
+            if track {
                 cols.push(k);
             }
         }
@@ -194,21 +273,123 @@ impl LevelStore {
             }
         }
     }
+
+    /// Nivel 0: los vóxeles base van tal cual a `voxels`; los de diseño, sin expandir, a
+    /// `design` (por chunk de diseño). Así una ciudad entera no ocupa ocho veces más. Un
+    /// vóxel de diseño nuevo borra los vóxeles base viejos de su bloque (la carga nueva
+    /// gana); dentro de la misma carga, lo base gana porque se consulta primero.
+    fn apply_fine(&mut self, edits: &Edits, track: bool, cols: &mut Vec<IVec2>) {
+        let s = DESIGN_SCALE;
+        let note = |max_y: &mut HashMap<IVec2, i32>, v: IVec3, top: i32| {
+            let my = max_y.entry(IVec2::new(v.x >> 5, v.z >> 5)).or_insert(i32::MIN);
+            *my = (*my).max(top);
+        };
+        // Diseño: por chunk de diseño, y los índices base que tapa cada bloque, por chunk base.
+        let mut by_dchunk: HashMap<IVec3, Vec<(u16, i16, Mat)>> = HashMap::new();
+        let mut covered: HashMap<IVec3, Vec<u16>> = HashMap::new();
+        for (&d, &m) in &edits.design {
+            let h = d.y.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            by_dchunk.entry(chunk_of(d)).or_default().push((local_index(d), h, m));
+            let v = d * s;
+            note(&mut self.max_y, v, v.y + s - 1);
+            let ck = chunk_of(v);
+            if self.voxels.contains_key(&ck) {
+                let i = local_index(v);
+                let list = covered.entry(ck).or_default();
+                for dy in 0..s {
+                    for dz in 0..s {
+                        for dx in 0..s {
+                            list.push(i + (dx + dz * CHUNK + dy * CHUNK * CHUNK) as u16);
+                        }
+                    }
+                }
+            }
+            if track {
+                for dz in 0..s {
+                    for dx in 0..s {
+                        cols.push(IVec2::new(v.x + dx, v.z + dz));
+                    }
+                }
+            }
+        }
+        for (dk, mut list) in by_dchunk {
+            list.sort_unstable_by_key(|e| e.0);
+            self.design.entry(dk).or_default().merge(&list);
+        }
+        for (ck, mut gone) in covered {
+            gone.sort_unstable();
+            if let Some(c) = self.voxels.get_mut(&ck) {
+                c.remove_sorted(&gone);
+                if c.len() == 0 {
+                    self.voxels.remove(&ck);
+                }
+            }
+        }
+        // Base: por chunk, ordenado.
+        let mut by_chunk: HashMap<IVec3, Vec<(u16, i16, Mat)>> = HashMap::new();
+        for (&v, &m) in &edits.voxels {
+            let h = v.y.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            by_chunk.entry(chunk_of(v)).or_default().push((local_index(v), h, m));
+            note(&mut self.max_y, v, v.y);
+            if track {
+                cols.push(IVec2::new(v.x, v.z));
+            }
+        }
+        for (ck, mut list) in by_chunk {
+            list.sort_unstable_by_key(|e| e.0);
+            self.voxels.entry(ck).or_default().merge(&list);
+        }
+    }
+
+    /// Niveles gruesos: el ganador de cada vóxel del nivel dentro de esta carga es el vóxel
+    /// fino más alto; a igual altura, el de mayor posición (x, z). Así el resultado no depende
+    /// del orden en que se recorre el HashMap de ediciones. Un vóxel de diseño cuenta como su
+    /// vóxel base de más arriba (con DESIGN_SHIFT ≤ 1 nunca es más grande que el del nivel).
+    /// Un vóxel macizo le gana al aire: si en la carga se reemplaza un edificio alto por uno
+    /// más bajo, el aire que borra el viejo no tapa el techo del nuevo en lo grueso.
+    fn apply_coarse(&mut self, edits: &Edits, track: bool, cols: &mut Vec<IVec2>) {
+        let lod = self.lod as i32;
+        let s = DESIGN_SCALE;
+        let mut staged: HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>> = HashMap::new();
+        let design = edits.design.iter().map(|(&d, &m)| (d * s + IVec3::splat(s - 1), m));
+        for (v, m) in edits.voxels.iter().map(|(&v, &m)| (v, m)).chain(design) {
+            let k = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
+            let ck = chunk_of(k);
+            let tb = tiebreak(v.x, v.z);
+            let solid = m != crate::palette::AIR;
+            let e = staged.entry(ck).or_default().entry(local_index(k)).or_insert((false, i32::MIN, 0, m));
+            if (solid, v.y, tb) >= (e.0, e.1, e.2) {
+                *e = (solid, v.y, tb, m);
+            }
+            let col = IVec2::new(ck.x, ck.z);
+            let my = self.max_y.entry(col).or_insert(i32::MIN);
+            *my = (*my).max(k.y);
+            if track {
+                cols.push(IVec2::new(k.x, k.z));
+            }
+        }
+        // Se compacta y se une con lo que ya había (la carga nueva gana los empates).
+        for (ck, map) in staged {
+            let mut list: Vec<(u16, i16, Mat)> = map.into_iter().map(|(i, (_, h, _, m))| (i, h.clamp(i16::MIN as i32, i16::MAX as i32) as i16, m)).collect();
+            list.sort_unstable_by_key(|e| e.0);
+            self.voxels.entry(ck).or_default().merge(&list);
+        }
+    }
 }
 
 impl LevelStore {
     /// Memoria aproximada de las ediciones de este nivel, en bytes.
     pub fn approx_bytes(&self) -> usize {
-        let mut b: usize = self.voxels.values().map(|c| c.bytes()).sum();
-        b += self.voxels.capacity() * (std::mem::size_of::<(IVec3, ChunkEdits)>() + 1);
+        let mut b: usize = self.voxels.values().chain(self.design.values()).map(|c| c.bytes()).sum();
+        b += (self.voxels.capacity() + self.design.capacity()) * (std::mem::size_of::<(IVec3, ChunkEdits)>() + 1);
         b += self.surface.capacity() * (std::mem::size_of::<(IVec2, Mat)>() + 1);
         b += self.max_y.capacity() * (std::mem::size_of::<(IVec2, i32)>() + 1);
         b
     }
 
-    /// Número de vóxeles editados guardados en este nivel.
+    /// Número de vóxeles editados guardados en este nivel (los de diseño cuentan uno).
     pub fn voxel_count(&self) -> usize {
-        self.voxels.values().map(|c| c.len()).sum()
+        self.voxels.values().chain(self.design.values()).map(|c| c.len()).sum()
     }
 }
 
@@ -318,5 +499,49 @@ mod tests {
         c.fill(IVec3::new(0, 0, 0), IVec3::new(8, 8, 8), AIR);
         s.apply(&c, false);
         assert_eq!(s.levels[2].get(IVec3::new(1, 0, 1)), Some(AIR));
+    }
+
+    /// Un vóxel de diseño ocupa su bloque de vóxeles base en el nivel 0 y un vóxel en el 1
+    /// (del mismo tamaño); lo base le gana en la misma carga y la carga siguiente reemplaza.
+    #[test]
+    fn el_diseno_se_expande_en_el_nivel_0() {
+        use crate::lod::DESIGN_SCALE as S;
+        let mut s = EditStore::new(3);
+        let mut e = Edits::default();
+        e.dset(IVec3::new(5, 3, 7), CAL);
+        e.dsurface(IVec2::new(5, 7), PLAZA);
+        e.set(IVec3::new(5 * S, 3 * S, 7 * S), TILE);
+        let touched = s.apply(&e, true);
+        let l0 = &s.levels[0];
+        let mut n = 0;
+        for y in 0..S {
+            for z in 0..S {
+                for x in 0..S {
+                    let v = IVec3::new(5 * S + x, 3 * S + y, 7 * S + z);
+                    let want = if (x, y, z) == (0, 0, 0) { TILE } else { CAL };
+                    assert_eq!(l0.get(v), Some(want), "{v}");
+                    assert_eq!(l0.surface.get(&IVec2::new(v.x, v.z)), Some(&PLAZA));
+                    n += 1;
+                }
+            }
+        }
+        assert_eq!(n, S * S * S);
+        assert_eq!(l0.voxel_count(), 2, "el diseño se guarda sin expandir (un vóxel) más el base");
+        let mut seen = Vec::new();
+        l0.for_each_in_chunk(chunk_of(IVec3::new(5 * S, 3 * S, 7 * S)), |i, m| seen.push((i, m)));
+        assert_eq!(seen.len(), (n + 1) as usize, "el bloque expandido y el vóxel base encima");
+        assert_eq!(seen.last().map(|e| e.1), Some(TILE));
+        assert_eq!(l0.max_y.get(&IVec2::new(5 * S >> 5, 7 * S >> 5)), Some(&(3 * S + S - 1)));
+        assert!(touched[0].contains(&IVec2::new(5 * S >> 5, 7 * S >> 5)));
+        // En el nivel 1 (vóxel de diseño) es un solo vóxel: gana el más alto, el de diseño.
+        let k = IVec3::new(5 * S, 3 * S, 7 * S) >> 1;
+        assert_eq!(s.levels[1].get(k), Some(CAL));
+        assert_eq!(s.levels[1].voxel_count(), 1);
+        // Demoler el vóxel de diseño borra también el vóxel base que tenía adentro.
+        let mut d = Edits::default();
+        d.dset(IVec3::new(5, 3, 7), AIR);
+        s.apply(&d, false);
+        assert_eq!(s.levels[0].get(IVec3::new(5 * S, 3 * S, 7 * S)), Some(AIR));
+        assert_eq!(s.levels[1].get(k), Some(AIR));
     }
 }

@@ -105,9 +105,9 @@ mod tests {
     fn el_rayo_vertical_toca_el_terreno_y_los_edificios() {
         let t = TerrainGen::new(1726);
         let mut s = EditStore::new(1);
-        let (x, z) = (27000, 32600);
+        let (x, z) = (54000, 65200);
         let top = terrain_top_l0(&t, x, z);
-        let o = Vec3::new((x as f32 + 0.5) * 0.5, 400.0, (z as f32 + 0.5) * 0.5);
+        let o = Vec3::new((x as f32 + 0.5) * BASE_VOXEL, 400.0, (z as f32 + 0.5) * BASE_VOXEL);
         let hit = raycast(&t, &s.levels[0], o, Vec3::NEG_Y, 2000.0).expect("debe tocar el suelo");
         assert_eq!(hit.voxel, IVec3::new(x, top, z));
         assert_eq!(hit.normal, IVec3::Y);
@@ -118,7 +118,7 @@ mod tests {
         let hit = raycast(&t, &s.levels[0], o, Vec3::NEG_Y, 2000.0).unwrap();
         assert_eq!(hit.voxel, IVec3::new(x, top + 10, z));
         // Un rayo inclinado contra la pared del bloque toca su cara lateral.
-        let o2 = Vec3::new((x as f32 - 20.0) * 0.5, (top as f32 + 5.5) * 0.5, (z as f32 + 0.5) * 0.5);
+        let o2 = Vec3::new((x as f32 - 20.0) * BASE_VOXEL, (top as f32 + 5.5) * BASE_VOXEL, (z as f32 + 0.5) * BASE_VOXEL);
         let hit = raycast(&t, &s.levels[0], o2, Vec3::X, 100.0).unwrap();
         assert_eq!(hit.voxel, IVec3::new(x - 2, top + 5, z));
         assert_eq!(hit.normal, IVec3::NEG_X);

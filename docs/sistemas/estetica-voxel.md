@@ -8,7 +8,7 @@
 
 ## 1. Idea
 
-**Vóxeles a la vista, arquitectura reconocible.** Cada bloque de 0,5 m se nota (bordes,
+**Vóxeles a la vista, arquitectura reconocible.** Cada bloque de 0,5 m de la obra se nota (bordes,
 tono por bloque, oclusión ambiental), pero las proporciones, los materiales y los detalles
 son los de la arquitectura colonial rioplatense: fachadas sobre la línea de la calle, cal,
 rejas voladas, azoteas con pretil, teja, paja, piedra.
@@ -21,10 +21,15 @@ Tres reglas guían todo:
 
 ## 2. Escala: ¿hace falta un vóxel más fino que 0,5 m?
 
-**Decisión: no.** Un único vóxel de 0,5 m para terreno y edificios. El detalle menor que
-0,5 m lo dibuja el shader por material.
+**Decisión (actualizada):** el mundo usa vóxeles de **0,25 m** (terreno, monte, flora baja,
+calles y puentes), pero los edificios se siguen **diseñando** en vóxeles de 0,5 m
+(`lod::DESIGN_VOXEL`): cada vóxel de diseño ocupa un bloque de 2 × 2 × 2 vóxeles del mundo,
+y el shader marca bordes y tinte por vóxel de diseño en los materiales de obra. Así el
+catálogo no cambió y las medidas reales son las mismas. El detalle menor que 0,5 m de los
+edificios lo sigue dibujando el shader por material. Ver
+[motor-voxel.md §16](motor-voxel.md#16-vóxel-de-025-m).
 
-**Por qué 0,5 m alcanza** (medidas coloniales → vóxeles):
+**Por qué 0,5 m alcanza para la obra** (medidas coloniales → vóxeles de diseño):
 
 | Elemento | Medida real | Vóxeles |
 |---|---|---|
@@ -41,7 +46,9 @@ Tres reglas guían todo:
 Lo que **no** entra en 0,5 m son los barrotes de las rejas (2–3 cm), los canales de las
 tejas, las hebras de la paja y las juntas de la sillería. Para eso hay dos caminos:
 
-- **Micro-vóxeles de 0,25 m en los edificios** (descartado por ahora). Medido en la escena
+- **Micro-vóxeles de 0,25 m en los edificios** (descartado por ahora; el mundo ya es de
+  0,25 m, pero los edificios solo ocupan bloques de 2 × 2 × 2: la medida que sigue era con el
+  almacén viejo, hoy son ~5 bytes por vóxel). Medido en la escena
   de la ciudad: 4,3 millones de vóxeles editados ocupan unos 260 MB, unos **80 bytes por
   vóxel editado** contando todas las copias por nivel de detalle. A 0,25 m serían 8 veces
   más (~34 millones) → **~2,7 GB** solo de ediciones, más un nivel de detalle extra y del
@@ -87,10 +94,10 @@ alto** de cada celda. Por eso el diseño prioriza lo que se ve desde arriba:
 
 | Nivel | Vóxel | Qué se conserva |
 |---|---|---|
-| 0 | 0,5 m | Todo: vanos rehundidos, rejas, balcones, cornisas, desgaste, dibujos del shader |
-| 1 | 1 m | Ventanas y puertas (1–1,5 m de ancho), balcones, mirador, chimeneas |
-| 2 | 2 m | Silueta, color del techo (teja, azotea, paja), pretiles, patios |
-| 3+ | 4 m o más | Masa del edificio y color del techo: la "textura" de la ciudad desde lejos |
+| 0–1 | 0,25–0,5 m | Todo: vanos rehundidos, rejas, balcones, cornisas, desgaste, dibujos del shader |
+| 2 | 1 m | Ventanas y puertas (1–1,5 m de ancho), balcones, mirador, chimeneas |
+| 3 | 2 m | Silueta, color del techo (teja, azotea, paja), pretiles, patios |
+| 4+ | 4 m o más | Masa del edificio y color del techo: la "textura" de la ciudad desde lejos |
 
 Consecuencias de diseño:
 - **El techo es la firma de cada tipo**: azotea rojiza con pretil blanco (casa de azotea),

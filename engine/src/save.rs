@@ -303,18 +303,31 @@ pub struct Settings {
     pub escala_interfaz: f32,
     pub sincronizacion_vertical: bool,
     pub mostrar_fps: bool,
-    /// Niveles de detalle del mundo (6 = vista corta, 8 = larga). Se aplica al empezar o
+    /// Niveles de detalle del mundo (7 = vista corta, 9 = larga). Se aplica al empezar o
     /// cargar una partida.
     pub niveles: u32,
     /// Suavizado de bordes: 0 = automático, 1 = desactivado, 4 = 4×. Se aplica al reiniciar.
     pub msaa: u32,
     /// Autoguardado cada tantos meses de juego (0 = nunca).
     pub autoguardado_meses: u32,
+    /// Lado del vóxel base (cm) con el que se eligieron los `niveles`. Las opciones guardadas
+    /// antes del vóxel de 25 cm no lo tienen (eran de 50 cm): ahí hace falta un nivel más
+    /// para ver igual de lejos.
+    #[serde(default = "voxel_cm_viejo")]
+    pub voxel_cm: u32,
+}
+
+fn voxel_cm_viejo() -> u32 {
+    50
+}
+
+fn voxel_cm() -> u32 {
+    (crate::lod::BASE_VOXEL * 100.0).round() as u32
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: 8, msaa: 0, autoguardado_meses: 12 }
+        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm() }
     }
 }
 
@@ -322,7 +335,19 @@ impl Settings {
     /// Corrige valores fuera de rango (un archivo editado a mano).
     pub fn sanitized(mut self) -> Settings {
         self.escala_interfaz = if self.escala_interfaz.is_finite() { self.escala_interfaz.clamp(0.75, 1.5) } else { 1.0 };
-        self.niveles = self.niveles.clamp(5, 8);
+        // Opciones de antes de achicar el vóxel: la misma distancia de dibujo lleva más niveles.
+        let mut cm = self.voxel_cm.max(1);
+        while cm > voxel_cm() {
+            self.niveles += 1;
+            cm /= 2;
+        }
+        while cm < voxel_cm() && self.niveles > 0 {
+            self.niveles -= 1;
+            cm *= 2;
+        }
+        self.voxel_cm = voxel_cm();
+        let max = crate::lod::LEVELS;
+        self.niveles = self.niveles.clamp(max - 3, max);
         if !matches!(self.msaa, 0 | 1 | 4) {
             self.msaa = 0;
         }
@@ -409,7 +434,7 @@ mod tests {
         assert_eq!(g2.city.money, g.city.money);
         assert_eq!(g2.city.net.edges.len(), 4);
         assert_eq!(g2.tool, Tool::Inspect);
-        assert!(e.voxels.len() > 10_000, "plaza, iglesia y calles regeneradas");
+        assert!(e.voxel_count() > 10_000, "plaza, iglesia y calles regeneradas");
         // Una partida de un formato futuro no se carga.
         let mut fut = f.clone();
         fut.formato = FORMAT + 1;
@@ -424,7 +449,10 @@ mod tests {
         assert_eq!(Settings::load(&d), s);
         std::fs::write(d.join("opciones.json"), r#"{"escala_interfaz": 9, "msaa": 3}"#).unwrap();
         let s = Settings::load(&d);
-        assert_eq!((s.escala_interfaz, s.msaa, s.niveles), (1.5, 0, 8));
+        assert_eq!((s.escala_interfaz, s.msaa, s.niveles), (1.5, 0, crate::lod::LEVELS));
+        // Opciones de antes del vóxel de 25 cm: "media" (7 niveles de 0,5 m) sigue siendo media.
+        std::fs::write(d.join("opciones.json"), r#"{"niveles": 7}"#).unwrap();
+        assert_eq!(Settings::load(&d).niveles, crate::lod::LEVELS - 1);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

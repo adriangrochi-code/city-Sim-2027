@@ -10,10 +10,11 @@
 
 ## 1. Objetivos
 
-- **Estética de vóxeles a la vista** (decisión del proyecto): cada bloque de 0,5 m se nota,
+- **Estética de vóxeles a la vista** (decisión del proyecto): cada bloque se nota (0,25 m en
+  el terreno y la vegetación, 0,5 m en los edificios),
   con su variación de tono, sus bordes y la oclusión ambiental en las esquinas, pero con luz,
   sombras, cielo y niebla cuidados para mantener el "realismo estilizado" rioplatense.
-- **Mapas del tamaño de Montevideo** (24 × 24 km) con detalle de 0,5 m cerca de la cámara.
+- **Mapas del tamaño de Montevideo** (24 × 24 km) con detalle de 0,25 m cerca de la cámara.
 - **Mundo editable**: calles, edificios, terraplenes y, más adelante, excavar, ganar tierra al
   río o dragar el puerto son simplemente cambios de vóxeles.
 - **Motor propio en Rust**, sin otro motor de juego: control total del formato de datos, de la
@@ -40,13 +41,18 @@ Dependencias: `wgpu` (render), `glam` (matemática), `fastnoise-lite` (ruido),
 
 ## 3. Datos
 
-- **Vóxel**: 1 byte de material. Vóxel base de **0,5 m**.
-- **Chunk**: 32 × 32 × 32 vóxeles (32 KB). A resolución base cubre 16 m de lado.
+- **Vóxel**: 1 byte de material. Vóxel base de **0,25 m** (`lod::BASE_VOXEL`; hasta la §16
+  era de 0,5 m).
+- **Vóxel de diseño**: los edificios se diseñan en vóxeles de **0,5 m** (`lod::DESIGN_VOXEL`):
+  puerta de 3 × 6, solar de 24 × 48. Cada uno ocupa un bloque de 2 × 2 × 2 vóxeles base.
+- **Chunk**: 32 × 32 × 32 vóxeles (32 KB). A resolución base cubre 8 m de lado.
 - **Disperso**: solo se guardan los chunks que tocan la superficie. Debajo se asume roca
   maciza y encima aire, a partir de la altura de cada columna (`Column.top`), así que un chunk
   enterrado no ocupa memoria.
-- **Ediciones**: la ciudad y los árboles se escriben como un mapa de vóxeles a resolución
-  base más un mapa de "material de superficie" (calles, plaza, huertas). Cada nivel de detalle
+- **Ediciones**: calles, plaza, puentes y excavaciones se escriben como un mapa de vóxeles a
+  resolución base; los edificios, en un mapa aparte en vóxeles de diseño (`Edits::design`). A
+  eso se suma un mapa de "material de superficie" (calles, plaza, huertas). En el nivel 0 el
+  diseño se guarda sin expandir y se expande al mallar (§16). Cada nivel de detalle
   las reduce a su resolución quedándose con el vóxel fino **más alto** de cada celda, para que
   desde arriba se vea el techo y no un moteado.
 
@@ -57,21 +63,22 @@ y la distancia que cubre:
 
 | Nivel | Vóxel | Chunk | Anillo (lado) |
 |---|---|---|---|
-| 0 | 0,5 m | 16 m | 384 m |
-| 1 | 1 m | 32 m | 768 m |
-| 2 | 2 m | 64 m | 1,5 km |
-| 3 | 4 m | 128 m | 3 km |
-| 4 | 8 m | 256 m | 6 km |
-| 5 | 16 m | 512 m | 12 km |
-| 6 | 32 m | 1 km | 24 km |
-| 7 | 64 m | 2 km | 49 km |
+| 0 | 0,25 m | 8 m | 192 m |
+| 1 | 0,5 m | 16 m | 384 m |
+| 2 | 1 m | 32 m | 768 m |
+| 3 | 2 m | 64 m | 1,5 km |
+| 4 | 4 m | 128 m | 3 km |
+| 5 | 8 m | 256 m | 6 km |
+| 6 | 16 m | 512 m | 12 km |
+| 7 | 32 m | 1 km | 24 km |
+| 8 | 64 m | 2 km | 49 km |
 
 - Cada anillo tiene 24 × 24 chunks y excluye el hueco que cubre el nivel más fino. Las
   regiones se alinean a la cuadrícula del nivel siguiente, así cada punto del mapa pertenece a
   **exactamente un nivel** (hay un test que lo verifica).
 - **Juntas entre niveles**: el mallador trata como aire lo que queda fuera del anillo, y eso
   genera "faldones" verticales que tapan las grietas.
-- **Mapa completo**: con 8 niveles ya se cubren los 24 km. Cuando la cámara se mueve, solo
+- **Mapa completo**: con 9 niveles (`lod::LEVELS`) ya se cubren los 24 km. Cuando la cámara se mueve, solo
   se regeneran las columnas de chunks que entran en cada anillo (ver §10, *streaming*).
 
 ## 5. Render
@@ -891,3 +898,62 @@ Todo usa el mismo papel y tinta de la interfaz (sección 14).
   cargar (se regeneran en orden de solar, no en el orden en que crecieron).
 - El suavizado de bordes elegido se aplica recién al volver a abrir el juego.
 - El contador de FPS de las opciones es una etiqueta de la interfaz (abajo a la derecha).
+
+## 16. Vóxel de 0,25 m
+
+El vóxel base pasó de 0,5 m a **0,25 m**: el doble de resolución lineal en el terreno, el
+monte, las rocas, la flora baja, las calles y los puentes, con los mismos tamaños reales y la
+misma distancia de dibujo.
+
+### Qué cambió
+
+- **Niveles**: `lod::BASE_VOXEL = 0.25` y un nivel más (`lod::LEVELS = 9`): el último sigue
+  siendo de 64 m por vóxel y cubre los 24 km. Las opciones guardadas con el vóxel de 0,5 m
+  (sin `voxel_cm`) suman un nivel al cargarse, así "corta / media / larga" siguen viendo igual
+  de lejos (ahora 7 / 8 / 9 niveles).
+- **Criterios en metros, no en índices de nivel**: árboles hasta 4 m por vóxel
+  (`stream::TREE_MAX_VOXEL`), sombras hasta 4 m (`render::SHADOW_MAX_LOD` se calcula),
+  flora baja en los niveles de 0,25 y 0,5 m (`trees::PLANT_MAX_VOXEL`), plantas de hasta
+  2,4 m (`trees::PLANT_SLOTS` vóxeles), hebras de las ramas colgantes de 1,5 m, mezcla de
+  biomas por vóxel base (`terrain::dither`), celdas del agua desde 0,25 m. El nivel más fino
+  que vale la pena generar ya se elegía en píxeles (`lod::choose_first_level`).
+- **Edificios en vóxeles de diseño**: el catálogo (`structures`, `buildings`, la escena de
+  muestra) sigue contando en vóxeles de **0,5 m** (`lod::DESIGN_VOXEL`; puerta de 3 × 6,
+  solar de 24 × 48). `Frame` trabaja todo en esa grilla (origen, base, medidas) y escribe en
+  `Edits::design` / `Edits::design_surface`; nada del catálogo se reescribió. La altura del
+  terreno en esa grilla (`buildings::design_top_at`) toma lo más bajo de las cuatro columnas
+  base, así los cimientos siempre llegan al suelo. Los edificios girados del juego se
+  re-muestrean en la grilla de diseño, como antes.
+- **Calles, plaza y puentes en la grilla base**: anchos y alturas en metros (tablero de 1 m,
+  pretiles de 0,5 o 1 m, rollo de 2 × 2 m con fuste de 1 × 1 × 4,5 m). Las banquinas de las
+  calles ya no pintan pasto sobre el empedrado de la plaza (antes se veían franjas verdes en
+  el borde; con 0,25 m eran más).
+- **Almacén**: en el nivel 0 los vóxeles de diseño se guardan **sin expandir** (un mapa
+  aparte por chunk de diseño, `LevelStore::design`); al mallar, cada uno se expande a su
+  bloque de 2 × 2 × 2. Lo base gana en la misma carga y un vóxel de diseño nuevo borra los
+  vóxeles base viejos de su bloque. En los niveles 1 en adelante un vóxel de diseño ya cabe
+  en un vóxel del nivel y se reduce como siempre. Expandiendo todo, la escena de muestra
+  pasaba de 50 MB a 300 MB de ediciones (48 M de vóxeles); así queda en 121 MB.
+- **Shader**: los materiales de obra marcan bordes y tinte por vóxel de diseño (0,5 m), no por
+  vóxel del mundo, para que las fachadas se vean como antes. El resto del detalle por
+  material ya estaba en metros.
+- El empaquetado de las caras (11 bits de altura por columna: 512 m a 0,25 m) alcanza.
+
+### Antes y después (`motor --bench`, 1280×720, MSAA 4×, 3 hilos, lavapipe, dos corridas)
+
+| Vista | Columnas | Triángulos | Generar+mallar | Cuadro (sombra en caché) | RSS |
+|---|---|---|---|---|---|
+| Ciudad de cerca | 3600 → 4032 | 1,35 → 1,45 M | 0,96–1,00 → 1,14–1,20 s | 204–224 → 226–262 ms | 520–554 → 654–661 MB |
+| Península | 3168 → 3168 | 0,95 → 0,94 M | 0,72 → 0,70–0,76 s | 205–209 → 213–236 ms | 514–548 → 630–637 MB |
+| Lejos (9 km) | 2304 → 2304 | 0,42 → 0,42 M | 0,51–0,53 → 0,54–0,62 s | 144–146 → 141–147 ms | 544–579 → 661–667 MB |
+| Ciudad de noche | 3600 → 4032 | 1,35 → 1,45 M | 0,91–0,95 → 1,22–1,25 s | 294–306 → 326–364 ms | 592–651 → 717–724 MB |
+
+Escena de muestra: armada en 3,2–3,5 → 3,8–3,9 s; ediciones 50 → 121 MB (6,3 → 11,6 M de
+vóxeles guardados en todos los niveles: el nivel de 0,5 m, que ahora es el 1, se suma al
+diseño sin expandir del 0). Memoria máxima del banco: 592–651 → 736–742 MB.
+
+De lejos no cambia nada (mismos niveles en metros). De cerca hay un anillo más, de 0,25 m
+(≈ +430 columnas) y en el monte y los bañados de cerca hasta un 60 % más de triángulos (copas
+y flora baja con el doble de detalle). Capturas antes y después: mismos edificios y del mismo
+tamaño, calles, plaza y puentes alineados, sin grietas entre anillos.
+

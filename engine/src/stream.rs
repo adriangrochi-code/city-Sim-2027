@@ -10,7 +10,7 @@
 use crate::lod::{choose_first_level, level_columns_from, LevelSpec, CHUNK};
 use crate::mesher::{self, Mesh};
 use crate::palette::*;
-use crate::store::{chunk_of, local_index, EditStore};
+use crate::store::EditStore;
 use crate::terrain::TerrainGen;
 use glam::{IVec2, IVec3, Vec2, Vec3};
 use std::cmp::Ordering;
@@ -273,8 +273,8 @@ impl Streamer {
                     }
                 }
             };
-            for k in l.voxels.keys() {
-                add(IVec2::new(k.x, k.z));
+            for c in l.edited_columns() {
+                add(c);
             }
             let cols: HashSet<IVec2> = l.surface.keys().map(|c| IVec2::new(c.x >> 5, c.y >> 5)).collect();
             for c in cols {
@@ -475,16 +475,18 @@ struct VoxTree {
     holes: u32,
     flower: Option<(Mat, u32)>,
     seed: u32,
+    /// Largo de las hebras de las ramas colgantes (vóxeles del nivel, unos 1,5 m).
+    strand: i32,
 }
 
-/// Niveles con árboles: de 0,5 m a 4 m por vóxel (más lejos, una copa sería un solo vóxel).
-const TREE_MAX_LOD: u32 = 3;
+/// Niveles con árboles: hasta 4 m por vóxel (más lejos, una copa sería un solo vóxel).
+const TREE_MAX_VOXEL: f32 = 4.0;
 
 /// Árboles cuyo tronco o copa caen en la columna, salvo donde hay obras (calles, plaza o
 /// edificios): ahí el monte se taló.
 fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, col: IVec2) -> Vec<VoxTree> {
     let mut out = Vec::new();
-    if spec.lod > TREE_MAX_LOD || !t.is_real() {
+    if spec.voxel() > TREE_MAX_VOXEL || !t.is_real() {
         return out;
     }
     let vs = spec.voxel();
@@ -517,7 +519,7 @@ fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, 
         let ground = top_from_height(t.height(tr.x, tr.z), vs) + 1;
         let ck = IVec2::new(gx >> 5, gz >> 5);
         let cy = ground >> 5;
-        if (-1..=1).any(|dy| ls.voxels.contains_key(&IVec3::new(ck.x, cy + dy, ck.y))) {
+        if (-1..=1).any(|dy| ls.has_chunk(IVec3::new(ck.x, cy + dy, ck.y))) {
             continue;
         }
         // De metros (pie del tronco en el origen) a vóxeles del nivel. El pie se hunde medio
@@ -558,6 +560,7 @@ fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, 
             holes: if vs >= 2.0 { shape.holes / 4 } else { shape.holes },
             flower: shape.flower,
             seed: (gx as u32).wrapping_mul(73_856_093) ^ (gz as u32).wrapping_mul(19_349_663),
+            strand: ((1.5 / vs).round() as i32).max(1),
         });
     }
     out
@@ -618,7 +621,7 @@ fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
                     // Borde de la copa irregular: algunos vóxeles del contorno faltan. Las ramas
                     // colgantes se cortan por columnas (hebras verticales).
                     let hh = if droop {
-                        (col_h ^ ((gy / 3) as u32).wrapping_mul(40_503)) % 100
+                        (col_h ^ (gy.div_euclid(tr.strand) as u32).wrapping_mul(40_503)) % 100
                     } else {
                         (col_h ^ (gy as u32).wrapping_mul(40_503)) % 100
                     };
@@ -719,7 +722,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     let trees = column_trees(t, ls, spec, col);
     let tree_top = trees.iter().map(|tr| tr.top).max().unwrap_or(i32::MIN);
     // Flora baja (matas, juncos, flores) de cada columna natural, por encima del agua.
-    let mut plants: Vec<(usize, i32, [Mat; 4], usize)> = Vec::new();
+    let mut plants: Vec<(usize, i32, [Mat; crate::trees::PLANT_SLOTS], usize)> = Vec::new();
     if t.is_real() && vs <= crate::trees::PLANT_MAX_VOXEL {
         for j in 0..Q {
             for i in 0..Q {
@@ -727,7 +730,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
                 if !natural[k] || top[k] == i32::MIN || (top[k] as f32 + 1.0) * vs < 0.4 {
                     continue;
                 }
-                let mut m = [AIR; 4];
+                let mut m = [AIR; crate::trees::PLANT_SLOTS];
                 let n = crate::trees::ground_plant(surf[k], base.x + i - 1, base.y + j - 1, vs, &mut m);
                 if n > 0 {
                     plants.push((k, top[k], m, n));
@@ -749,7 +752,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         for dz in -1..=1 {
             for dy in -1..=1 {
                 for dx in -1..=1 {
-                    if ls.voxels.contains_key(&(ck + IVec3::new(dx, dy, dz))) {
+                    if ls.has_chunk(ck + IVec3::new(dx, dy, dz)) {
                         any_edit = true;
                     }
                 }
@@ -797,13 +800,11 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         }
         if any_edit {
             // Ediciones del propio chunk: se recorren todas.
-            if let Some(map) = ls.voxels.get(&ck) {
-                for (idx, m) in map.iter() {
-                    let (lx, lz, ly) = ((idx & 31) as i32, ((idx >> 5) & 31) as i32, (idx >> 10) as i32);
-                    pad[((lx + 1) + (lz + 1) * Q + (ly + 1) * Q * Q) as usize] = m;
-                    solid += 1;
-                }
-            }
+            ls.for_each_in_chunk(ck, |idx, m| {
+                let (lx, lz, ly) = ((idx & 31) as i32, ((idx >> 5) & 31) as i32, (idx >> 10) as i32);
+                pad[((lx + 1) + (lz + 1) * Q + (ly + 1) * Q * Q) as usize] = m;
+                solid += 1;
+            });
             // Borde: consultas puntuales a los chunks vecinos.
             for y in 0..Q {
                 for j in 0..Q {
@@ -815,11 +816,9 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
                         if top[(i + j * Q) as usize] == i32::MIN {
                             continue;
                         }
-                        if let Some(map) = ls.voxels.get(&chunk_of(g)) {
-                            if let Some(m) = map.get(local_index(g)) {
-                                pad[(i + j * Q + y * Q * Q) as usize] = m;
-                                solid += 1;
-                            }
+                        if let Some(m) = ls.get(g) {
+                            pad[(i + j * Q + y * Q * Q) as usize] = m;
+                            solid += 1;
                         }
                     }
                 }
@@ -837,7 +836,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     out
 }
 
-/// Índice del vóxel de superficie del terreno en el nivel 0 (vóxel de 0,5 m).
+/// Índice del vóxel de superficie del terreno en el nivel 0 (vóxel de 0,25 m).
 pub fn terrain_top_l0(t: &TerrainGen, x: i32, z: i32) -> i32 {
     let vs = crate::lod::BASE_VOXEL;
     top_from_height(t.height((x as f32 + 0.5) * vs, (z as f32 + 0.5) * vs), vs)
@@ -898,12 +897,12 @@ mod tests {
         pump(&mut s, 120);
         let total = s.wanted_columns();
         // Un bloque de 3×3×3 vóxeles en medio de una columna: toca su columna en cada nivel.
-        let v = IVec3::new(27010, terrain_top_l0(&t, 27010, 32610) + 1, 32610);
+        let v = IVec3::new(54020, terrain_top_l0(&t, 54020, 65220) + 1, 65220);
         let mut e = Edits::default();
         e.fill(v, v + IVec3::splat(3), CAL);
         let keys = s.edit(&e);
         assert!(!keys.is_empty() && keys.len() <= 3 * 4, "se encolaron {} columnas de {total}", keys.len());
-        assert!(keys.contains(&(0, IVec2::new(27010 >> 5, 32610 >> 5))));
+        assert!(keys.contains(&(0, IVec2::new(54020 >> 5, 65220 >> 5))));
         let rebuilt = pump(&mut s, 60);
         assert_eq!(rebuilt.len(), keys.len(), "solo deben volver a subirse las columnas tocadas");
         // Y al quitarlo, lo mismo.
@@ -924,7 +923,7 @@ mod tests {
         pump(&mut s, 120);
         // Dos ediciones seguidas sobre la misma columna, sin dar tiempo a que se suba la
         // primera: solo debe llegar a la GPU la malla con la última versión.
-        let v = IVec3::new(27010, terrain_top_l0(&t, 27010, 32610) + 1, 32610);
+        let v = IVec3::new(54020, terrain_top_l0(&t, 54020, 65220) + 1, 65220);
         let mut e1 = Edits::default();
         e1.fill(v, v + IVec3::splat(2), CAL);
         let mut e2 = Edits::default();
@@ -932,7 +931,7 @@ mod tests {
         let k1 = s.edit(&e1);
         let k2 = s.edit(&e2);
         assert_eq!(k1, k2);
-        let key = (0u32, IVec2::new(27010 >> 5, 32610 >> 5));
+        let key = (0u32, IVec2::new(54020 >> 5, 65220 >> 5));
         let rebuilt = pump(&mut s, 60);
         let n = rebuilt.iter().filter(|k| **k == key).count();
         assert_eq!(n, 1, "la columna editada se subió {n} veces (debería subirse una sola, con la última versión)");

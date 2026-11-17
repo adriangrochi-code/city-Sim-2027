@@ -334,7 +334,7 @@ impl Menu {
         let t_rebuild = t0.elapsed();
         let fp = fingerprint(&game);
         let new = Session::with_game(game, &edits, self.levels, self.threads, f.camara, f.hora);
-        println!("Partida «{}» cargada en {:.2?} ({:.2?} regenerando {} vóxeles)", f.nombre, t0.elapsed(), t_rebuild, edits.voxels.len());
+        println!("Partida «{}» cargada en {:.2?} ({:.2?} regenerando {} vóxeles)", f.nombre, t0.elapsed(), t_rebuild, edits.voxel_count());
         self.replace_session(s, new, r, gui);
         // Un autoguardado se sigue guardando en la partida normal de esa ciudad.
         self.current = Some(if f.autoguardado { save::path_for(&self.saves_dir, &f.nombre, false) } else { path.to_path_buf() });
@@ -787,7 +787,8 @@ impl Menu {
                 ui.end_row();
                 ui.label("Distancia de dibujo");
                 ui.horizontal(|ui| {
-                    for (v, name, tip) in [(6, "Corta", "Menos detalle a lo lejos: más rápido"), (7, "Media", "Un término medio"), (8, "Larga", "Se ve hasta el horizonte")] {
+                    let l = crate::lod::LEVELS;
+                    for (v, name, tip) in [(l - 2, "Corta", "Menos detalle a lo lejos: más rápido"), (l - 1, "Media", "Un término medio"), (l, "Larga", "Se ve hasta el horizonte")] {
                         if ui.selectable_label(d.niveles == v, name).on_hover_text(tip).clicked() {
                             d.niveles = v;
                         }

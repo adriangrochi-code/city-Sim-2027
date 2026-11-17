@@ -177,6 +177,14 @@ fn is_terrain(m: u32) -> bool {
     return m == 1u || m == 2u || m == 3u || m == 4u || m == 5u || m == 12u || m == 13u || m == 17u || m == 20u || m == 25u || (m >= 47u && m <= 53u);
 }
 
+// Materiales de obra (revoques, tejas, paja, madera, ladrillo, piedra, aberturas): los
+// edificios se diseñan en vóxeles de 0,5 m (`lod::DESIGN_VOXEL`), cada uno hecho de 2 × 2 × 2
+// vóxeles del mundo. Sus bordes y su tinte van por vóxel de diseño, no por vóxel del mundo.
+const DESIGN_VOXEL: f32 = 0.5;
+fn is_built(m: u32) -> bool {
+    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u);
+}
+
 // Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
 fn along(world: vec3<f32>, n: vec3<f32>) -> f32 {
     if (abs(n.x) > 0.5) {
@@ -189,15 +197,17 @@ fn along(world: vec3<f32>, n: vec3<f32>) -> f32 {
 fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let n = normalize(v.normal);
     let mat = u32(v.color.a * 255.0 + 0.5);
-    // Variación de tono por vóxel: se ve cada bloque aunque las caras estén unidas.
-    let cell = floor((v.world - n * 0.01 * v.voxel) / v.voxel);
+    // Variación de tono por vóxel: se ve cada bloque aunque las caras estén unidas (en la
+    // obra, por vóxel de diseño).
+    let cv = select(v.voxel, max(v.voxel, DESIGN_VOXEL), is_built(mat));
+    let cell = floor((v.world - n * 0.01 * cv) / cv);
     let tint = 0.9 + 0.16 * hash3(cell);
     var albedo = srgb_to_linear(v.color.rgb) * tint;
     // Bordes de cada vóxel, más suaves a lo lejos.
-    let f = fract(v.world / v.voxel);
+    let f = fract(v.world / cv);
     let e3 = min(f, 1.0 - f) + abs(n) * 10.0;
     let edge = min(min(e3.x, e3.y), e3.z);
-    let fw = length(fwidth(v.world / v.voxel));
+    let fw = length(fwidth(v.world / cv));
     let line = (1.0 - smoothstep(0.0, 0.07, edge)) * (1.0 - smoothstep(0.15, 0.6, fw));
     // Escalones del terreno: el terreno es una ladera suave cortada en vóxeles. Se ilumina
     // con la normal suave de la ladera (calculada al mallar), así el relieve se lee como una

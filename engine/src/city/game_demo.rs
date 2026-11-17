@@ -18,7 +18,7 @@ fn apply(s: &mut Session, r: Result<crate::buildings::Edits, String>) -> String 
         Ok(e) => {
             let t0 = Instant::now();
             let n = s.apply_edits(&e);
-            format!("{} vóxeles, {n} columnas a re-mallar (encolado {:.1?})", e.voxels.len(), t0.elapsed())
+            format!("{} vóxeles, {n} columnas a re-mallar (encolado {:.1?})", e.voxel_count(), t0.elapsed())
         }
         Err(m) => format!("ERROR: {m}"),
     }
@@ -51,9 +51,7 @@ pub fn grid(s: &mut Session) -> String {
             for k in 0..n {
                 let seg = roads::line(p0.lerp(p1, k as f32 / n as f32), p0.lerp(p1, (k + 1) as f32 / n as f32));
                 if let Ok(e) = g.city.build_road(&t, &seg, RoadKind::Stone) {
-                    all.voxels.extend(e.voxels);
-                    all.surface.extend(e.surface);
-                    all.ground.extend(e.ground);
+                    all.extend(e);
                 }
             }
         }
@@ -97,9 +95,7 @@ pub fn zone(s: &mut Session) -> String {
     ] {
         let (k_n, k_e) = g.city.paint(c, r, zone_code(k, d));
         n += k_n;
-        e.voxels.extend(k_e.voxels);
-        e.surface.extend(k_e.surface);
-        e.ground.extend(k_e.ground);
+        e.extend(k_e);
     }
     s.apply_edits(&e);
     let g = s.game.as_ref().unwrap();
@@ -180,7 +176,7 @@ pub fn month_realtime(s: &mut Session) -> String {
         let mut e = crate::buildings::Edits::default();
         g.city.tick(&t, 0.5, &mut e);
         changed += g.city.lots.lots.values().map(|l| l.level).zip(before).filter(|(a, b)| a != b).count();
-        voxels += e.voxels.len();
+        voxels += e.voxel_count();
         cols += s.apply_edits(&e);
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         worst = worst.max(ms);

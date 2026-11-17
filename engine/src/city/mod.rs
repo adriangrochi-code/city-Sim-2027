@@ -117,7 +117,7 @@ fn iglesia5(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
 
 fn clear_voxels(e: &mut Edits, lot: &Lot) {
     for &v in &lot.voxels {
-        e.set(v, AIR);
+        e.dset(v, AIR);
     }
 }
 
@@ -131,13 +131,16 @@ fn plaza_church_edits(t: &TerrainGen, c: Vec2, f: Vec2) -> Edits {
     let mut e = Edits::default();
     plaza_edits(t, c, f, &mut e);
     let church = build_rotated(t, church_center(c, f), f, 30, 84, 4242, &iglesia5);
-    e.voxels.extend(church.edits.voxels);
-    e.surface.extend(church.edits.surface);
-    e.ground.extend(church.edits.ground);
+    e.extend(church.edits);
     e
 }
 
 impl City {
+    /// Centro y frente de la plaza mayor, si ya se fundó.
+    fn plaza_square(&self) -> voxelize::PlazaSquare {
+        self.plaza.map(|(c, angle)| (c, plaza_frame(angle).0))
+    }
+
     /// Vuelve a generar todos los vóxeles de la ciudad a partir de su estado (al cargar una
     /// partida): plaza e iglesia, todas las calles y el edificio de cada solar construido.
     /// La voxelización es determinista (semillas de los solares), así que el resultado es el
@@ -152,19 +155,18 @@ impl City {
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).max(1);
         let ids: Vec<u32> = self.net.edges.keys().copied().collect();
         let net = &self.net;
+        let plaza = self.plaza_square();
         let per = ids.len().div_ceil(threads).max(1);
         let roads: Vec<Edits> = std::thread::scope(|sc| {
             let hs: Vec<_> = ids.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&id| {
                 let mut r = Edits::default();
-                road_edits(t, net, id, &mut r);
+                road_edits(t, net, id, plaza, &mut r);
                 r
             }).collect::<Vec<_>>())).collect();
             hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
         });
         for r in roads {
-            e.voxels.extend(r.voxels);
-            e.surface.extend(r.surface);
-            e.ground.extend(r.ground);
+            e.extend(r);
         }
         let jobs: Vec<(u32, Vec2, Vec2, u64, (ZoneKind, lots::Density), u8)> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, lots::zone_of(l.zone)?, l.level))).filter(|j| j.5 > 0).collect();
         let per = jobs.len().div_ceil(threads).max(1);
@@ -176,9 +178,7 @@ impl City {
             l.voxels.clear();
         }
         for (id, b) in built {
-            e.voxels.extend(b.edits.voxels);
-            e.surface.extend(b.edits.surface);
-            e.ground.extend(b.edits.ground);
+            e.extend(b.edits);
             self.lots.lots.get_mut(&id).unwrap().voxels = b.voxels;
         }
         e
@@ -364,7 +364,7 @@ impl City {
         }
         for &eid in new {
             if self.net.edges.contains_key(&eid) {
-                road_edits(t, &self.net, eid, e);
+                road_edits(t, &self.net, eid, self.plaza_square(), e);
             }
         }
     }
@@ -378,11 +378,11 @@ impl City {
         for lot in &removed {
             clear_voxels(&mut e, lot);
         }
-        road_restore(t, &edge, &mut e);
+        road_restore(t, &edge, self.plaza_square(), &mut e);
         // Las calles vecinas se vuelven a pintar encima (cruces, banquinas compartidas).
         let neighbors: Vec<u32> = self.net.edges.iter().filter(|(_, x)| [x.a, x.b].iter().any(|n| self.net.nodes[n].distance(edge.pts[0]) < 1.0 || self.net.nodes[n].distance(*edge.pts.last().unwrap()) < 1.0)).map(|(&id, _)| id).collect();
         for id in neighbors {
-            road_edits(t, &self.net, id, &mut e);
+            road_edits(t, &self.net, id, self.plaza_square(), &mut e);
         }
         self.money -= 20;
         Ok(e)
@@ -409,12 +409,10 @@ impl City {
             let new: std::collections::HashSet<glam::IVec3> = b.voxels.iter().copied().collect();
             for &v in &lot.voxels {
                 if !new.contains(&v) {
-                    e.set(v, AIR);
+                    e.dset(v, AIR);
                 }
             }
-            e.voxels.extend(b.edits.voxels);
-            e.surface.extend(b.edits.surface);
-            e.ground.extend(b.edits.ground);
+            e.extend(b.edits);
             self.lots.lots.get_mut(&ch.lot).unwrap().voxels = b.voxels;
         }
     }
@@ -538,7 +536,7 @@ impl City {
         for id in &lost {
             let lot = self.lots.lots.get_mut(id).unwrap();
             for &v in &lot.voxels {
-                e.set(v, AIR);
+                e.dset(v, AIR);
             }
             lot.voxels.clear();
             lot.level = 0;
@@ -636,7 +634,7 @@ mod tests {
         city.money = 1_000_000;
         let c = Vec2::new(13500.0, 16300.0);
         let e = city.found_plaza(&t, c, 0.0).unwrap();
-        assert!(e.voxels.len() > 10_000, "plaza, iglesia y calles: {} vóxeles", e.voxels.len());
+        assert!(e.voxel_count() > 10_000, "plaza, iglesia y calles: {} vóxeles", e.voxel_count());
         let (f, s) = plaza_frame(0.0);
         let a = c - s * (BLOCK * 2.5) - f * (BLOCK * 2.5);
         city.build_grid(&t, &grid_lines(a, a + s * BLOCK * 5.0, a + f * BLOCK * 5.0), RoadKind::Stone).unwrap();
@@ -645,11 +643,11 @@ mod tests {
         assert!(n > 100);
         let e = city.fast_forward(&t, 24);
         assert!(city.population() > 100, "población {}", city.population());
-        assert!(!e.voxels.is_empty());
+        assert!(!e.is_empty());
         // Ningún edificio pisa una calzada.
         for lot in city.lots.lots.values().filter(|l| l.level > 0) {
             for v in lot.voxels.iter().step_by(37) {
-                let p = Vec2::new((v.x as f32 + 0.5) * 0.5, (v.z as f32 + 0.5) * 0.5);
+                let p = Vec2::new((v.x as f32 + 0.5) * crate::lod::DESIGN_VOXEL, (v.z as f32 + 0.5) * crate::lod::DESIGN_VOXEL);
                 assert!(city.net.clearance(p, 20.0) > -0.3, "un edificio pisa la calle en {p}");
             }
         }
@@ -691,7 +689,7 @@ mod tests {
         // Rezonificar de residencial a comercial derriba lo construido.
         let built = city.lots.lots.values().find(|l| l.level > 0 && l.kind() == Some(ZoneKind::Residencial)).unwrap().clone();
         let (_, e) = city.paint(built.c, 1.0, zone_code(ZoneKind::Comercial, Density::Baja));
-        assert!(!e.voxels.is_empty());
+        assert!(!e.is_empty());
         assert_eq!(city.lots.lots[&built.id].level, 0);
     }
 
@@ -728,7 +726,8 @@ mod tests {
         let e = city.build_road(&t, &line, RoadKind::Stone).unwrap();
         // El agua sigue corriendo: el centro del cauce no tiene suelo nivelado ni superficie.
         let mid = (a + b) * 0.5;
-        let c = glam::IVec2::new((mid.x / 0.5).floor() as i32, (mid.y / 0.5).floor() as i32);
+        let vs = crate::lod::BASE_VOXEL;
+        let c = glam::IVec2::new((mid.x / vs).floor() as i32, (mid.y / vs).floor() as i32);
         assert!(!e.ground.contains_key(&c) && !e.surface.contains_key(&c), "el cauce no se rellena");
         assert!(e.voxels.iter().any(|(v, &m)| v.x == c.x && v.z == c.y && m == crate::palette::STONE), "hay tablero de piedra sobre el agua");
         // Ningún solar sobre el agua.

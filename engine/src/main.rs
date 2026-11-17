@@ -11,7 +11,7 @@
 //!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
 //!   motor --bench carpeta              banco de pruebas reproducible (tabla y capturas)
 //! Opciones: --mapa real (Montevideo, sin la escena), --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
-//!   --hour 10.5, --size 1600x900, --levels 8, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
+//!   --hour 10.5, --size 1600x900, --levels 9, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
 //!   --sin-suavizar (sin el suavizado de los escalones del terreno)
 
 mod app;
@@ -79,7 +79,7 @@ fn parse_args() -> Args {
         cam: [13500.0, 16300.0, 420.0, 200.0, 38.0],
         hour: 10.5,
         size: (1600, 900),
-        levels: 8,
+        levels: crate::lod::LEVELS,
         scene: "ciudad".into(),
         cam_set: false,
         auto_test: None,
@@ -134,7 +134,7 @@ fn parse_args() -> Args {
                 }
             }
             "--levels" => {
-                a.levels = next.parse().unwrap_or(8);
+                a.levels = next.parse().unwrap_or(crate::lod::LEVELS);
                 a.levels_set = true;
             }
             "--auto-test" => a.auto_test = Some(next),
@@ -338,7 +338,7 @@ fn main() {
     let t_mesh = t2.elapsed();
 
     let tris: usize = meshes.iter().map(|(_, m)| m.triangles()).sum();
-    println!("Escena «{}»: {} vóxeles editados en {:.2?}", args.scene, edits.voxels.len(), t_city);
+    println!("Escena «{}»: {} vóxeles editados en {:.2?}", args.scene, edits.voxel_count(), t_city);
     println!("Mundo: {} chunks en {} niveles, generado en {:.2?}", world.chunk_count(), world.levels.len(), t_gen);
     for l in &world.levels {
         let lt: usize = meshes.iter().filter(|(lod, _)| *lod == l.spec.lod).map(|(_, m)| m.triangles()).sum();
