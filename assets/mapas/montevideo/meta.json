@@ -1,7 +1,7 @@
 {
   "nombre": "Montevideo (geografía real)",
   "fuente": "MDT Uruguay 30 m (IDE Uruguay), servicio WCS raster__mdt_pais_30m_4326",
-  "atribucion": "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Hidrografía (cursos de agua, playas, bañados, áreas húmedas, bancos de arena, lagunas e islas), cerros y cuchillas: IDE Uruguay, servicio WFS (hidrografía nacional 1:50.000 y urbana). Licencia de Datos Abiertos del Uruguay. Monte nativo: Cartografía de Bosque Nativo 2021, Dirección General Forestal (MGAP), servicio del SNIG; reconstrucción de 1726 propia (docs/sistemas/vegetacion-historica.md). Suelos: grupos CONEAT (RENARE, MGAP), servicio SNIG MapasBase/Renare_Coneat. Ver docs/sistemas/mapa-real.md.",
+  "atribucion": "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Hidrografía (cursos de agua, playas, bañados, áreas húmedas, bancos de arena, lagunas e islas), cerros y cuchillas: IDE Uruguay, servicio WFS (hidrografía nacional 1:50.000 y urbana). Licencia de Datos Abiertos del Uruguay. Monte nativo: Cartografía de Bosque Nativo 2021, Dirección General Forestal (MGAP), servicio del SNIG; reconstrucción de 1726 propia (docs/sistemas/vegetacion-historica.md). Suelos: grupos CONEAT (RENARE, MGAP), servicio SNIG MapasBase/Renare_Coneat. Productividad y aptitud de los suelos: CONEAT (MGAP-RENARE), servicios ArcGIS de dgrn.mgap.gub.uy. Geología y catastro minero: DINAMIGE (MIEM), geoportal.miem.gub.uy. Ver docs/sistemas/mapa-real.md.",
   "origen_noroeste": {
     "lat": -34.778,
     "lon": -56.325
@@ -130,6 +130,31 @@
       "capa": "Renare_Coneat",
       "servicio": "https://web.snig.gub.uy/arcgisserver/rest/services/MapasBase/Renare_Coneat/MapServer/0/query",
       "uso": "rocosidad (afloramientos)"
+    },
+    {
+      "capa": "CONEAT/ConsultaConeat (PROD_SUE por grupo)",
+      "servicio": "ArcGIS REST https://dgrn.mgap.gub.uy/arcgis/rest/services/CONEAT/ConsultaConeat/MapServer/0/query",
+      "uso": "recursos: productividad.bin"
+    },
+    {
+      "capa": "TEMATICOS/IntConeat 11 y 12 (aptitud cultivos de verano de secano)",
+      "servicio": "ArcGIS REST https://dgrn.mgap.gub.uy/arcgis/rest/services/TEMATICOS/IntConeat/MapServer/11/query",
+      "uso": "recursos: suelos.json"
+    },
+    {
+      "capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2)",
+      "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query",
+      "uso": "recursos: geologia.bin, minerales.bin"
+    },
+    {
+      "capa": "Dinamige_GeoS/CatastroMineroGeoS (4, 5)",
+      "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/CatastroMineroGeoS/MapServer/{4,5}/query",
+      "uso": "recursos: minerales.bin (sitios explotados)"
+    },
+    {
+      "capa": "hidrografia:actividad_minera_abandonada_a, hidrografia_urbana:actividad_minera_abandonada_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "recursos: minerales.bin (canteras abandonadas)"
     }
   ],
   "biomas": {
@@ -728,6 +753,27 @@
       "11.9": 4,
       "9.42": 1,
       "6.4": 1
+    }
+  },
+  "recursos": {
+    "archivos": {
+      "suelos": "suelos.bin / suelos_contexto.bin: uint8, índice del grupo en suelos.json (bits 0-6) + 128 si es estimación; 0 = agua",
+      "productividad": "productividad.bin / productividad_contexto.bin: uint8, índice de productividad CONEAT (media nacional 100); 0 en el agua",
+      "geologia": "geologia.bin / geologia_contexto.bin: uint8, índice de la unidad en suelos.json (geologia); 0 = sin dato",
+      "minerales": "minerales.bin (grilla de 40 m, 601 × 601) / minerales_contexto.bin (grilla de contexto): 4 bytes por muestra: piedra, arcilla, arena, canto rodado; 0..255 = 0..1"
+    },
+    "minerales_paso_m": 40.0,
+    "minerales_muestras": 601,
+    "fuente_ip": "servicio",
+    "fuente_aptitud_cultivo": "servicio",
+    "fraccion_estimada": 0.012,
+    "ip_medio_tierra": 146.0,
+    "celdas_con_mineria": 2923,
+    "media_minerales": {
+      "piedra": 0.168,
+      "arcilla": 0.509,
+      "arena": 0.088,
+      "canto_rodado": 0.064
     }
   }
 }

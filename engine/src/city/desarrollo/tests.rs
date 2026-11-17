@@ -213,6 +213,22 @@ fn la_escuela_de_oficios_forma_oficiales_en_la_poblacion() {
     assert!(city.desarrollo.saber(Saber::Alfabetizados) > 0);
 }
 
+/// Sin escuela de oficios, el aprendizaje en los talleres no pasa de unos pocos oficiales:
+/// para industrializar hay que invertir en la escuela.
+#[test]
+fn sin_escuela_de_oficios_el_taller_forma_pocos_oficiales() {
+    let t = TerrainGen::new(1726);
+    let mut city = town(&t);
+    city.fast_forward(&t, 12);
+    // Muchos meses de talleres con aprendizaje acelerado (como si pasaran décadas).
+    for _ in 0..40 {
+        city.desarrollo.acumulado[Saber::Artesanos.i()] += 5.0;
+        city.fast_forward(&t, 1);
+    }
+    let ofi = city.desarrollo.saber(Saber::Oficiales);
+    assert!(ofi <= super::ciudad::TOPE_APRENDIZAJE as u32, "sin escuela: {ofi} oficiales");
+}
+
 #[test]
 fn guardar_y_cargar_el_desarrollo() {
     use crate::city::roads::{line, RoadKind};

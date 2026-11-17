@@ -647,7 +647,7 @@ impl Desarrollo {
                 m.push((format!("{}: {} libres (necesita {})", s.nombre(), libres, n), libres >= n));
             }
             if let Some((r, q)) = inf.insumo {
-                m.push((format!("{} libre para comprar: {} (necesita {})", if r == Res::Carne { "Ganado" } else { r.name() }, carne_libre as i32, q as i32), carne_libre >= q * 0.8));
+                m.push((format!("{} libre para comprar: {} (necesita {})", if r == Res::Carne { "Ganado" } else { r.name() }, carne_libre as i32, q as i32), carne_libre >= q * 1.2));
             }
             m.push((format!("Brazos: {} sin trabajo (necesita {})", ctx.desocupados, inf.empleos), ctx.desocupados >= inf.empleos / 2));
             m.push((format!("Seguridad: delito {} %", (ctx.delito * 100.0) as i32), ctx.delito < 0.45));

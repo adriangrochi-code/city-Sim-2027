@@ -24,10 +24,13 @@ pub fn es_de_desarrollo(k: Kind) -> bool {
     matches!(k, Kind::EscuelaOficios | Kind::EscuelaNautica | Kind::Saladero | Kind::Molino | Kind::Astillero | Kind::Imprenta)
 }
 
-/// Rinde de una industria en un sitio (1,0 = normal). Punto de enganche para el módulo de
-/// recursos del suelo (pasturas, arcilla, costa, viento): hoy todos los sitios rinden igual.
-pub fn rinde_del_sitio(_ind: Ind, _c: Vec2) -> f32 {
-    1.0
+/// Rinde de una industria en un sitio (1,0 = normal), según el recurso del suelo que declara
+/// su perfil (pasturas, tierra de cultivo, arcilla, piedra; ver `recursos`). Amortiguado: el
+/// sitio pesa, pero no decide solo (entre 0,84 y 1,34 para los recursos más comunes).
+pub fn rinde_del_sitio(ind: Ind, c: Vec2, t: &TerrainGen) -> f32 {
+    let r = super::super::recursos::Recursos::de(t).en_punto(c);
+    let base = super::super::recursos::rinde_por_clave(ind_info(ind).recurso, &r);
+    0.75 + 0.25 * base
 }
 
 /// Distancias a la plaza (mínima y máxima, m) donde un inversor busca sitio para cada edificio.
@@ -45,6 +48,9 @@ fn distancias(k: Kind) -> (f32, f32) {
 const CURSO_MESES: f32 = 24.0;
 /// Aprendices por mes por cada empleo de los talleres (oficiales que salen del taller).
 const APRENDIZAJE: f32 = 0.0005;
+/// Oficiales que el aprendizaje en los talleres sostiene sin escuela de oficios: alcanza para
+/// mejorar un oficio, no para industrializar (eso pide formar gente en la escuela).
+pub(crate) const TOPE_APRENDIZAJE: usize = 3;
 
 impl City {
     /// Cuántos edificios de cada tipo hay (para los requisitos).
@@ -188,7 +194,7 @@ impl City {
 
     /// Los edificios de industria que el jugador levantó con la herramienta son del cabildo;
     /// los demolidos se van de la lista.
-    fn sincronizar_establecimientos(&mut self) {
+    fn sincronizar_establecimientos(&mut self, t: &TerrainGen) {
         let edificios = &self.services.buildings;
         self.desarrollo.establecimientos.retain(|e| edificios.get(&e.edificio).is_some_and(|b| ind_de_edificio(b.kind) == Some(e.ind)));
         let nuevos: Vec<(u32, Ind)> = edificios.values().filter_map(|b| ind_de_edificio(b.kind).map(|i| (b.id, i))).filter(|(id, _)| !self.desarrollo.establecimientos.iter().any(|e| e.edificio == *id)).collect();
@@ -197,14 +203,14 @@ impl City {
         }
         // El rinde de cada sitio (recursos del suelo).
         for e in &mut self.desarrollo.establecimientos {
-            e.sitio = rinde_del_sitio(e.ind, self.services.buildings[&e.edificio].c);
+            e.sitio = rinde_del_sitio(e.ind, self.services.buildings[&e.edificio].c, t);
         }
     }
 
     /// El mes del desarrollo (antes de la economía). Devuelve las noticias.
     pub(crate) fn desarrollo_month(&mut self, t: &TerrainGen, e: &mut Edits) -> Vec<String> {
         use crate::city::economy::Res;
-        self.sincronizar_establecimientos();
+        self.sincronizar_establecimientos(t);
         let ctx = self.desarrollo_contexto();
         let mut r = self.desarrollo.mes(&ctx);
         // El ganado que compran los saladeros sale de las existencias de carne.
@@ -332,6 +338,11 @@ impl City {
         // (acumulador, saber que da, lectura mínima, solo varones, oficio que toma)
         for (acc, saber, lectura, varones, oficio) in [(Saber::Oficiales, Saber::Oficiales, 1u8, false, Oficio::Artesano), (Saber::Artesanos, Saber::Oficiales, 0, false, Oficio::Artesano), (Saber::Pilotos, Saber::Pilotos, 2, true, Oficio::Marinero)] {
             while d.acumulado[acc.i()] >= 1.0 {
+                // Sin escuela de oficios, el taller no forma más que unos pocos oficiales.
+                if acc == Saber::Artesanos && n_ofi == 0.0 && d.formados.iter().filter(|x| x.1 == Saber::Oficiales).count() >= TOPE_APRENDIZAJE {
+                    d.acumulado[acc.i()] = 0.0;
+                    break;
+                }
                 d.acumulado[acc.i()] -= 1.0;
                 let elegido = (0..vivos.len()).map(|k| vivos[(inicio + k) % vivos.len()]).find(|&id| {
                     let p = &pob.personas[id as usize];

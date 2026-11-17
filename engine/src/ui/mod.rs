@@ -599,7 +599,7 @@ impl GameUi {
                     });
                 });
         }
-        if let Some(info) = game.inspect_info() {
+        if let Some(info) = game.inspect_info_en(terrain) {
             inspect_panel(ctx, &info, &mut acts);
         }
         // Paneles pedidos desde la ficha (los vecinos de una casa).

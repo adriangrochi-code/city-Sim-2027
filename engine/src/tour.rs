@@ -272,6 +272,25 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-capa-salud", |s, u| ui_layer(s, u, crate::city::services::Layer::Salud)),
         UiShot("motor-ui-capa-saneamiento", |s, u| ui_layer(s, u, crate::city::services::Layer::Saneamiento)),
         UiShot("motor-ui-capa-delito", |s, u| ui_layer(s, u, crate::city::services::Layer::Delito)),
+        // Recursos del suelo, molestias y valor del suelo (ver `city::recursos`).
+        UiShot("motor-ui-capa-valor", |s, u| ui_layer(s, u, crate::city::services::Layer::Valor)),
+        Cam([c.x + 300.0, c.y - 20.0, 950.0, 215.0, 50.0]),
+        WaitIdle("molestias"),
+        UiShot("motor-ui-capa-molestias", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Molestias, Vec2::new(300.0, 0.0))),
+        UiShot("motor-ui-capa-valor-industria", |s, u| ui_layer(s, u, crate::city::services::Layer::Valor)),
+        Cam([c.x + 1500.0, c.y - 1700.0, 5200.0, 200.0, 58.0]),
+        WaitIdle("el campo de lejos"),
+        UiShot("motor-ui-capa-cultivo", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Cultivo, Vec2::new(1500.0, -1700.0))),
+        UiShot("motor-ui-capa-pasturas", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Pasturas, Vec2::new(1500.0, -1700.0))),
+        UiShot("motor-ui-capa-piedra", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Piedra, Vec2::new(1500.0, -1700.0))),
+        UiShot("motor-ui-capa-arcilla", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Arcilla, Vec2::new(1500.0, -1700.0))),
+        UiShot("motor-ui-capa-arena", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Arena, Vec2::new(1500.0, -1700.0))),
+        UiShot("motor-ui-ficha-terreno", ui_ficha_terreno),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Cantera, 90.0)),
+        WaitIdle("ficha de la cantera"),
+        UiShot("motor-ui-ficha-cantera", |s, u| ui_ficha_servicio(s, u, crate::city::services::Kind::Cantera)),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        WaitIdle("capas del barrio (cajones)"),
         UiShot("motor-ui-cajon-educacion", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Educacion)),
         UiShot("motor-ui-cajon-salud", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Salud)),
         UiShot("motor-ui-cajon-seguridad", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Seguridad)),
@@ -497,6 +516,24 @@ fn ui_layer(s: &mut Session, u: &mut GameUi, l: crate::city::services::Layer) {
     g.layer = Some(l);
     u.open = Some(ui::Category::Capas);
     u.sync_news(g);
+}
+
+/// Una capa sobre el terreno (recursos o molestias) alrededor de un punto relativo a la plaza.
+fn ui_capa_terreno(s: &mut Session, u: &mut GameUi, l: crate::city::services::Layer, rel: Vec2) {
+    ui_layer(s, u, l);
+    let g = s.game.as_mut().unwrap();
+    g.hover = Some(crate::city::game_demo::PLAZA + rel);
+}
+
+/// Ficha del terreno en el campo, tierra adentro (suelo CONEAT, geología, recursos).
+fn ui_ficha_terreno(s: &mut Session, u: &mut GameUi) {
+    u.open = None;
+    let g = s.game.as_mut().unwrap();
+    g.layer = Some(crate::city::services::Layer::Cultivo);
+    g.set_tool(7);
+    let p = crate::city::game_demo::PLAZA + Vec2::new(1500.0, -1700.0);
+    g.inspected = Some(p);
+    g.hover = Some(p);
 }
 
 /// Cajón del puerto y la muralla, con la herramienta de muralla elegida.
@@ -910,11 +947,16 @@ impl Tour {
                     let summary = |s: &Session| {
                         let c = &s.game.as_ref().unwrap().city;
                         let sv = &c.services;
-                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default(), serde_json::to_string(&c.desarrollo).unwrap_or_default())
+                        let mut valor: Vec<(u32, [f32; 3])> = c.lots.valor.iter().map(|(&k, v)| (k, [v.valor, v.molestia, v.atractivo])).collect();
+                        valor.sort_by_key(|x| x.0);
+                        let rinde: Vec<f32> = sv.buildings.values().map(|b| b.rinde).collect();
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default(), (valor, rinde, format!("{:?}", c.suelo.molestias)), serde_json::to_string(&c.desarrollo).unwrap_or_default())
                     };
-                    // Lo derivado del barrio (escuelas, delito por solar), al día con el estado
-                    // que se guarda (al cargar se recalcula igual).
+                    // Lo derivado del barrio (escuelas, delito por solar) y del suelo (molestias,
+                    // valor), al día con el estado que se guarda (al cargar se recalcula igual).
+                    let terreno = s.terrain.clone();
                     s.game.as_mut().unwrap().city.refresh_barrio();
+                    s.game.as_mut().unwrap().city.refresh_suelo(&terreno);
                     let before = summary(s);
                     let t0 = Instant::now();
                     u.menu.perform(MenuAction::Save, s, Some(r), &mut u.game_ui);

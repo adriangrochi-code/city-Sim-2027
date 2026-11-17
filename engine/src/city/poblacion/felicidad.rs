@@ -32,6 +32,7 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
         12 => "está enfermo",
         13 => "está débil por la edad",
         14 => "no hay médico ni botica cerca",
+        15 => "el olor, el humo y el ruido de los talleres del barrio",
         16 => "no tiene trabajo",
         17 => "trabaja por su cuenta, sin taller ni mostrador",
         20 => "está de duelo",
@@ -167,6 +168,11 @@ impl Poblacion {
                     if nivel <= 1 {
                         var[1] = 0;
                     }
+                    // El olor, el ruido y el humo de la industria cercana.
+                    let m = ent.servicios_hogar(Some(h)).molestia;
+                    if m > 0.05 {
+                        v[1] -= (m * 0.35).min(0.3);
+                    }
                     if let Some(i) = i {
                         let hac = self.hacinamiento(i.id, i.capacidad);
                         if hac > 1.0 {
@@ -189,6 +195,10 @@ impl Poblacion {
             v[3] = p.salud * 0.75 + 0.25 * (0.35 + 0.65 * sv.salud);
             if p.salud >= 0.5 && sv.salud < 0.1 {
                 var[3] = 2;
+            }
+            if sv.molestia > 0.35 {
+                v[3] -= 0.1 * sv.molestia;
+                var[3] = 3;
             }
         }
         // 4 Trabajo.

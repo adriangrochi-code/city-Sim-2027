@@ -1342,6 +1342,59 @@ def guardar_u8(ruta, v):
         f.write(np.clip(np.round(v * 255.0), 0, 255).astype(np.uint8).tobytes())
 
 
+def leer_u16(ruta):
+    v = np.fromfile(ruta, dtype="<u2").astype(np.float64)
+    n = int(round(math.sqrt(v.size)))
+    return v.reshape(n, n) / 200.0 - 50.0
+
+
+def leer_u8(ruta):
+    v = np.fromfile(ruta, dtype=np.uint8)
+    n = int(round(math.sqrt(v.size)))
+    return v.reshape(n, n)
+
+
+def solo_recursos(args):
+    """Paso de recursos del suelo sobre los archivos ya generados (alturas, biomas, arroyos,
+    costa y rocosidad) más la caché: calidad de la tierra, geología y minerales. Agrega la
+    entrada «recursos» y sus fuentes a meta.json."""
+    import recursos_suelo
+    sal = args.salida
+    h = leer_u16(os.path.join(sal, "altura.bin"))
+    h_o = leer_u16(os.path.join(sal, "contexto.bin"))
+    bio = leer_u8(os.path.join(sal, "biomas.bin"))
+    bio_o = leer_u8(os.path.join(sal, "biomas_contexto.bin"))
+    roc = leer_u8(os.path.join(sal, "rocas.bin")).astype(np.float32) / 255.0
+    roc_o = leer_u8(os.path.join(sal, "rocas_contexto.bin")).astype(np.float32) / 255.0
+    with open(os.path.join(sal, "arroyos.json")) as f:
+        arr = json.load(f)["arroyos"]
+    with open(os.path.join(sal, "arroyos_contexto.json")) as f:
+        arr_o = json.load(f)["arroyos"]
+    with open(os.path.join(sal, "costa.json")) as f:
+        tramos = json.load(f)["tramos"]
+    coneat = bajar_coneat(args.cache)
+    resumen = recursos_suelo.construir(args.cache, sal, h, h_o, bio, bio_o, arr, arr_o, tramos, roc, roc_o, coneat)
+    ruta = os.path.join(sal, "meta.json")
+    with open(ruta) as f:
+        meta = json.load(f)
+    meta["recursos"] = resumen
+    fuentes = [x for x in meta.get("fuentes", []) if not str(x.get("uso", "")).startswith("recursos")]
+    fuentes += [
+        {"capa": "CONEAT/ConsultaConeat (PROD_SUE por grupo)", "servicio": "ArcGIS REST " + recursos_suelo.URL_CONSULTA, "uso": "recursos: productividad.bin"},
+        {"capa": "TEMATICOS/IntConeat 11 y 12 (aptitud cultivos de verano de secano)", "servicio": "ArcGIS REST " + recursos_suelo.URL_APT_CULTIVO, "uso": "recursos: suelos.json"},
+        {"capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2)", "servicio": "ArcGIS REST " + recursos_suelo.URL_GEOLOGIA, "uso": "recursos: geologia.bin, minerales.bin"},
+        {"capa": "Dinamige_GeoS/CatastroMineroGeoS (4, 5)", "servicio": "ArcGIS REST " + recursos_suelo.URL_MINERIA.format(capa="{4,5}"), "uso": "recursos: minerales.bin (sitios explotados)"},
+        {"capa": ", ".join(recursos_suelo.CAPAS_MINERA_IDE), "servicio": "WFS " + IDE_WFS.split("?")[0], "uso": "recursos: minerales.bin (canteras abandonadas)"},
+    ]
+    meta["fuentes"] = fuentes
+    extra = (" Productividad y aptitud de los suelos: CONEAT (MGAP-RENARE), servicios ArcGIS de dgrn.mgap.gub.uy."
+             " Geología y catastro minero: DINAMIGE (MIEM), geoportal.miem.gub.uy.")
+    if "DINAMIGE" not in meta.get("atribucion", ""):
+        meta["atribucion"] = meta.get("atribucion", "").replace(" Ver docs/sistemas/mapa-real.md.", "") + extra + " Ver docs/sistemas/mapa-real.md."
+    guardar_json(ruta, meta, compacto=False)
+    print(json.dumps(resumen, ensure_ascii=False, indent=2))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cache", required=True, help="carpeta vacía o con tiles ya bajados")
@@ -1353,7 +1406,14 @@ def main():
                     help="monte nativo (cartografía DGF 2021 por el SNIG) y su reconstrucción de 1726 "
                          "(por omisión con la hidrografía de la IDE); 'no' deja los bosque*.bin como están")
     ap.add_argument("--salida", default=os.path.join(os.path.dirname(__file__), "..", "..", "assets", "mapas", "montevideo"))
+    ap.add_argument("--solo-recursos", action="store_true",
+                    help="solo el paso de recursos del suelo (productividad CONEAT, geología, minerales) sobre "
+                         "los archivos ya generados en --salida; ver docs/sistemas/recursos-del-suelo.md")
     args = ap.parse_args()
+    if args.solo_recursos:
+        os.makedirs(args.cache, exist_ok=True)
+        solo_recursos(args)
+        return
     if args.hidrografia is None:
         args.hidrografia = "ide" if args.fuente == "ide" else "relieve"
     if args.bosque is None:
@@ -1502,6 +1562,9 @@ def main():
             "grupos_en_la_ventana": rocas[2],
         }
     guardar_json(os.path.join(args.salida, "meta.json"), meta, compacto=False)
+    if args.fuente == "ide" and hidro and rocas is not None:
+        print("Recursos del suelo (productividad, geología, minerales)…", flush=True)
+        solo_recursos(args)
     # Vista previa: relieve sombreado con agua, biomas oficiales y arroyos.
     gris = np.clip(h / 80.0, 0, 1)
     rgb = np.stack([0.35 + 0.5 * gris, 0.45 + 0.45 * gris, 0.25 + 0.3 * gris], axis=-1)

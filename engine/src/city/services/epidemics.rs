@@ -192,7 +192,7 @@ mod tests {
         let mut city = town(&t);
         city.fast_forward(&t, 10);
         // El lazareto se coloca a mano (en el mapa sintético la costa queda lejos de la plaza).
-        city.services.buildings.insert(99, super::super::Building { id: 99, kind: Kind::Lazareto, c: c + Vec2::new(0.0, 900.0), f: Vec2::NEG_Y, served: 0, contaminacion: 0.0, voxels: Vec::new() });
+        city.services.buildings.insert(99, super::super::Building { id: 99, kind: Kind::Lazareto, c: c + Vec2::new(0.0, 900.0), f: Vec2::NEG_Y, served: 0, contaminacion: 0.0, rinde: 1.0, voxels: Vec::new() });
         let (now, msg) = city.sick_ship(40, c);
         assert_eq!(now, 0, "nadie baja del barco");
         assert!(msg.contains("cuarentena"));

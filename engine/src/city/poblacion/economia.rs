@@ -326,7 +326,8 @@ impl Poblacion {
         let mut al_cabildo = 0.0f32;
         for (l, hs) in &self.idx.por_lote {
             let Some(i) = info.get(l) else { continue };
-            let total = ALQUILER[i.nivel as usize];
+            // Los alquileres siguen al valor del suelo (0,7 a 1,3 veces el de lista).
+            let total = ALQUILER[i.nivel as usize] * (0.7 + 0.6 * i.valor.clamp(0.0, 1.0));
             let dueno = self.duenos.get(l).copied();
             for &h in hs {
                 if Some(h) == dueno {
