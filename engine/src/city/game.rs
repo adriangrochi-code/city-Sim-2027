@@ -925,8 +925,10 @@ impl Game {
             }
             Placeable::Muelle => {
                 let good = self.city.pier_problem(t, h).is_none();
-                let dir = services::port::find_sea(t, h).map_or(Vec2::Y * 40.0, |(d, dist)| d * (dist + 25.0));
-                ribbon(out, t, &line(h, h + dir), 6.0, if good { ok } else { bad });
+                // El muelle se engancha a la orilla más cercana: se ve dónde va a quedar.
+                let s = services::port::pier_start(t, h).unwrap_or(h);
+                let dir = services::port::find_sea(t, s).map_or(Vec2::Y * 40.0, |(d, dist)| d * (dist + 25.0).clamp(40.0, services::port::PIER_MAX_LEN));
+                ribbon(out, t, &line(s, s + dir), 6.0, if good { ok } else { bad });
             }
             Placeable::Muralla if self.stage == 1 => {
                 let good = self.city.wall_problem(t, self.p0, h).is_none();
