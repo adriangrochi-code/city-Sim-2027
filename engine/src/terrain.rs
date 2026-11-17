@@ -613,6 +613,41 @@ impl TerrainGen {
     /// en la celda); en el terreno se vuelve manchas de monte cerrado de unos 100 m con claros
     /// entre ellas: hay monte donde un ruido de manchas queda por debajo de la cobertura.
     pub fn forest_density(&self, x: f32, z: f32) -> f32 {
+        let (da, hw) = self.arroyo_query(x, z);
+        self.forest_density_at(x, z, da, hw)
+    }
+
+    /// Igual que [`forest_density`], con la distancia al eje del arroyo más cercano y su medio
+    /// ancho ya calculados: el monte del raster o la galería del arroyo, lo que sea mayor.
+    pub fn forest_density_at(&self, x: f32, z: f32, da: f32, hw: f32) -> f32 {
+        self.raster_forest(x, z).max(self.gallery(x, z, da - hw, hw))
+    }
+
+    /// Monte de galería de 1726: en el Uruguay el monte ribereño acompañaba casi todo arroyo
+    /// permanente, como una cinta continua de unas decenas de metros que se ensancha aguas
+    /// abajo (Carrere 1990; ver docs/sistemas/vegetacion-historica.md). El raster de 2021 es lo
+    /// que quedó de esa cinta (cortada por el pastoreo, la leña y la ciudad): aquí se repone.
+    /// `edge`: distancia al borde del agua (m), `hw`: medio ancho del cauce (m).
+    /// Ancho mínimo de la cinta desde la orilla (suposición, por debajo de los casos medidos
+    /// de 100–200 m en arroyos del interior): ~20 m en una cañada de 2 m, ~30 m en un arroyo
+    /// de 6 m, ~50 m en uno de 20 m, ~70 m en el Miguelete o el Pantanoso.
+    pub fn gallery(&self, x: f32, z: f32, edge: f32, hw: f32) -> f32 {
+        let w = hw * 2.0;
+        let band = 8.0 + 9.0 * w.max(0.5).sqrt();
+        if edge > band * 1.5 || edge < 0.0 || self.real.is_none() {
+            return 0.0;
+        }
+        // Borde irregular: entrantes y salientes de decenas de metros.
+        let lobe = self.n_hills.get_noise_2d(x * 18.0 + 211.0, z * 18.0 - 97.0);
+        let b = band * (0.95 + 0.45 * lobe);
+        // Las cañadas chicas (menos de 2 m) tienen monte a tramos; los arroyos, casi continuo.
+        let gaps = self.n_hills.get_noise_2d(x * 9.0 - 333.0, z * 9.0 + 71.0);
+        let cont = smoothstep(-0.45 + (w - 2.0).clamp(0.0, 4.0) * -0.12, -0.15, gaps);
+        (1.0 - smoothstep(b * 0.75, b, edge)) * cont
+    }
+
+    /// Monte del raster `bosque.bin` en manchas.
+    fn raster_forest(&self, x: f32, z: f32) -> f32 {
         let c = self.forest_cover(x, z);
         if c < 0.015 {
             return 0.0;
@@ -957,7 +992,7 @@ impl TerrainGen {
         // Monte nativo (bosque.bin): suelo de hojarasca bajo el monte cerrado; en el borde de
         // las manchas, pasto verde a la sombra entre la hojarasca.
         let grain = self.n_detail.get_noise_2d(x * 14.0, z * 14.0) * 0.18;
-        let dens = self.forest_density(x, z);
+        let dens = self.forest_density_at(x, z, da, hw);
         // Bordes mezclados vóxel a vóxel (banda de unos metros), no una línea.
         if dens > 0.78 + fine * 0.15 + dith * 0.25 {
             return FOREST_FLOOR;
@@ -1003,8 +1038,8 @@ impl TerrainGen {
                 if roll >= 0.88 {
                     continue;
                 }
-                let dens = self.forest_density(x, z);
                 let (da, hw) = self.arroyo_query(x, z);
+                let dens = self.forest_density_at(x, z, da, hw);
                 let edge = da - hw;
                 if edge < 0.7 {
                     continue; // en el agua
