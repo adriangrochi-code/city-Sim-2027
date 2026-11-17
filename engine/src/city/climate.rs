@@ -104,6 +104,8 @@ pub struct Climate {
     rng: Rng,
     /// Evapotranspiración potencial normal de cada mes (Thornthwaite).
     pet_norm: [f32; 12],
+    /// Últimos 12 meses (el más reciente al final), para el panel del clima.
+    pub history: std::collections::VecDeque<Weather>,
 }
 
 /// Evapotranspiración potencial mensual (mm) de Thornthwaite para las temperaturas normales.
@@ -132,6 +134,7 @@ impl Default for Climate {
             pasture: 0.8,
             rng: Rng::new(1724),
             pet_norm: thornthwaite().0,
+            history: std::collections::VecDeque::new(),
         }
     }
 }
@@ -234,6 +237,10 @@ impl Climate {
         let w = Weather { month: m, temp, tmin, rain, rain_days, frost_days, pet, soil: self.soil, drought, deluge };
         self.crops_tick(&w, &mut news);
         self.last = w.clone();
+        self.history.push_back(w.clone());
+        while self.history.len() > 12 {
+            self.history.pop_front();
+        }
         (w, news)
     }
 

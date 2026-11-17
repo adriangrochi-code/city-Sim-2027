@@ -128,6 +128,9 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-barra", ui_toolbar),
         UiShot("motor-ui-cajon-servicios", ui_services),
         UiShot("motor-ui-zonas", ui_zones),
+        UiShot("motor-ui-detalle-pan", |s, u| ui_detail(s, u, ui::Detail::Recurso(crate::city::economy::Res::Pan))),
+        UiShot("motor-ui-detalle-clima", |s, u| ui_detail(s, u, ui::Detail::Clima)),
+        UiShot("motor-ui-detalle-vecinos", |s, u| ui_detail(s, u, ui::Detail::Opinion(0))),
         UiShot("motor-ui-ficha", ui_inspect),
         UiShot("motor-ui-gaceta", ui_gazette),
         UiShot("motor-ui-panel", ui_panel),
@@ -212,6 +215,15 @@ fn ui_services(s: &mut Session, u: &mut GameUi) {
     g.set_tool(4);
     g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
     u.open = Some(ui::Category::Servicios);
+}
+
+/// Panel de detalle de una ficha de la barra superior.
+fn ui_detail(s: &mut Session, u: &mut GameUi, d: ui::Detail) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    u.open = None;
+    u.budget = false;
+    u.detail = Some(d);
 }
 
 /// Cajón de zonas: residencial, comercial e industrial, densidad y medidor de demanda.

@@ -475,11 +475,13 @@ pub struct GameUi {
     drawer_h: f32,
     /// ¿Estaba abierto el cajón de zonas el cuadro anterior? (al cerrarlo se deja de zonificar)
     zones_were_open: bool,
+    /// Panel de detalle abierto desde una ficha de la barra (recurso, opinión o clima).
+    pub detail: Option<Detail>,
 }
 
 impl Default for GameUi {
     fn default() -> Self {
-        GameUi { zones_were_open: false, list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
+        GameUi { zones_were_open: false, detail: None, list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
     }
 }
 
@@ -559,6 +561,12 @@ impl GameUi {
             inspect_panel(ctx, &info, &mut acts);
         }
         self.gazette(ctx);
+        if let Some(d) = self.detail {
+            let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
+            if detail_panel(ctx, game, d, reserved) {
+                self.detail = None;
+            }
+        }
         if self.budget {
             let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
             if budget_panel(ctx, game, reserved, &mut acts) {
@@ -572,7 +580,7 @@ impl GameUi {
         acts
     }
 
-    fn top_bar(&self, ctx: &egui::Context, game: &Game, hour: f32, extra: &str, acts: &mut Vec<UiAction>) {
+    fn top_bar(&mut self, ctx: &egui::Context, game: &Game, hour: f32, extra: &str, acts: &mut Vec<UiAction>) {
         let st = stats(game, hour, month_balance(game).or(self.balance));
         // Una franja de papel con tres grupos: ciudad y tiempo · tesoro y gente · fichas.
         let frame = egui::Frame::none().fill(theme::PAPER).stroke(egui::Stroke::new(1.5_f32, theme::BORDER)).inner_margin(egui::Margin::symmetric(12.0, 4.0));
@@ -607,8 +615,16 @@ impl GameUi {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 5.0;
                     // De derecha a izquierda: se invierten para leerlas en orden.
-                    for (icon, value, tip) in chips(game).into_iter().rev() {
-                        chip(ui, icon, &value).on_hover_text(tip);
+                    let targets = chip_details();
+                    for (i, (icon, value, tip)) in chips(game).into_iter().enumerate().rev() {
+                        let d = targets.get(i).copied();
+                        let selected = d.is_some() && self.detail == d;
+                        if chip(ui, icon, &value, selected).on_hover_text(format!("{tip}\n(clic: más información)")).clicked() {
+                            self.detail = if selected { None } else { d };
+                            if self.detail.is_some() {
+                                self.budget = false;
+                            }
+                        }
                     }
                     if !extra.is_empty() {
                         ui.label(RichText::new(extra).small().color(theme::INK_SOFT));
@@ -788,14 +804,15 @@ fn card_button(ui: &mut egui::Ui, c: &Card) -> egui::Response {
 
 /// Ficha pequeña de la barra superior: ícono y valor (dibujada a mano para que no dependa
 /// de la dirección del renglón).
-fn chip(ui: &mut egui::Ui, icon: Icon, value: &str) -> egui::Response {
+fn chip(ui: &mut egui::Ui, icon: Icon, value: &str, selected: bool) -> egui::Response {
     let font = egui::FontId::proportional(theme::BODY * 0.8);
     let galley = ui.painter().layout_no_wrap(value.to_string(), font, theme::INK);
     let (icon_w, pad, gap) = (16.0, 8.0, 4.0);
     let size = vec2(pad + icon_w + gap + galley.size().x + pad, 22.0);
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let p = ui.painter();
-    p.rect_filled(rect, 11.0, theme::PAPER_DARK);
+    let bg = if selected { theme::PRESSED.gamma_multiply(0.35) } else if resp.hovered() { theme::PAPER } else { theme::PAPER_DARK };
+    p.rect_filled(rect, 11.0, bg);
     let ir = egui::Rect::from_center_size(egui::pos2(rect.left() + pad + icon_w / 2.0, rect.center().y), vec2(icon_w, icon_w));
     icons::paint(p, ir, icon, theme::INK);
     p.galley(egui::pos2(ir.right() + gap, rect.center().y - galley.size().y / 2.0), galley, theme::INK);
@@ -872,6 +889,191 @@ fn section(ui: &mut egui::Ui, title: &str) {
     let r = ui.available_rect_before_wrap();
     ui.painter().hline(r.x_range(), r.top() - 2.0, egui::Stroke::new(1.0_f32, theme::BORDER.gamma_multiply(0.5)));
     ui.add_space(2.0);
+}
+
+/// Paneles de detalle que se abren desde las fichas de la barra superior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Detail {
+    Clima,
+    Recurso(Res),
+    Opinion(usize),
+}
+
+/// A qué panel lleva cada ficha de `chips()` (mismo orden).
+pub fn chip_details() -> [Detail; 7] {
+    [Detail::Clima, Detail::Recurso(Res::Ladrillos), Detail::Recurso(Res::Piedra), Detail::Recurso(Res::Pan), Detail::Opinion(0), Detail::Opinion(1), Detail::Opinion(2)]
+}
+
+/// Gráfico de barras simple (los últimos meses, el más reciente a la derecha). `marks` dibuja
+/// una raya por barra (por ejemplo, la lluvia normal de ese mes).
+fn bars(ui: &mut egui::Ui, values: &[f32], marks: Option<&[f32]>, color: Color32, label: &str) {
+    let w = ui.available_width().min(340.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 54.0), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 3.0, theme::PAPER_DARK.gamma_multiply(0.5));
+    if values.is_empty() {
+        p.text(rect.center(), Align2::CENTER_CENTER, "Sin datos todavía", egui::FontId::proportional(11.0), theme::INK_SOFT);
+        return;
+    }
+    let top = values.iter().chain(marks.unwrap_or(&[]).iter()).cloned().fold(1e-6f32, f32::max);
+    let n = values.len().max(12) as f32;
+    let bw = rect.width() / n;
+    let off = (n as usize - values.len()) as f32 * bw;
+    for (i, v) in values.iter().enumerate() {
+        let x = rect.left() + off + i as f32 * bw;
+        let h = (v / top).clamp(0.0, 1.0) * (rect.height() - 14.0);
+        p.rect_filled(egui::Rect::from_min_max(egui::pos2(x + 1.0, rect.bottom() - 12.0 - h), egui::pos2(x + bw - 1.0, rect.bottom() - 12.0)), 1.0, color);
+        if let Some(m) = marks.and_then(|m| m.get(i)) {
+            let y = rect.bottom() - 12.0 - (m / top).clamp(0.0, 1.0) * (rect.height() - 14.0);
+            p.line_segment([egui::pos2(x, y), egui::pos2(x + bw, y)], egui::Stroke::new(1.5_f32, theme::INK));
+        }
+    }
+    p.text(egui::pos2(rect.left() + 3.0, rect.bottom() - 1.0), Align2::LEFT_BOTTOM, label, egui::FontId::proportional(10.0), theme::INK_SOFT);
+    p.text(egui::pos2(rect.right() - 3.0, rect.top() + 1.0), Align2::RIGHT_TOP, format!("máx. {}", fmt_dec(top, if top < 10.0 { 2 } else { 0 })), egui::FontId::proportional(10.0), theme::INK_SOFT);
+    resp.on_hover_text(values.iter().map(|v| fmt_dec(*v, if top < 10.0 { 2 } else { 0 })).collect::<Vec<_>>().join(" · "));
+}
+
+/// Una fila "nombre: valor" en una grilla de dos columnas.
+fn kv(ui: &mut egui::Ui, k: &str, v: String, col: Color32) {
+    ui.label(RichText::new(k).small());
+    ui.label(RichText::new(v).small().color(col));
+    ui.end_row();
+}
+
+/// Panel de detalle de una ficha. Devuelve `true` si se pidió cerrarlo.
+fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f32) -> bool {
+    use crate::city::{climate, water};
+    let c = &game.city;
+    let e = &c.economy;
+    let mut close = false;
+    egui::Area::new("detalle".into()).anchor(Align2::LEFT_TOP, vec2(10.0, 52.0)).show(ctx, |ui| {
+        theme::paper_frame().show(ui, |ui| {
+            ui.set_width(360.0);
+            let (icon, title) = match d {
+                Detail::Clima => (Icon::Agua, "Clima, río y campo".to_string()),
+                Detail::Recurso(r) => (match r { Res::Pan => Icon::Pan, Res::Piedra => Icon::Piedra, _ => Icon::Ladrillo }, r.name().to_string()),
+                Detail::Opinion(i) => ([Icon::Vecinos, Icon::Comercio, Icon::Hacienda][i], format!("Opinión de los {}", Sector::ALL[i].name().to_lowercase())),
+            };
+            ui.horizontal(|ui| {
+                icons::show(ui, icon, 22.0, theme::INK);
+                ui.heading(title);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("×").on_hover_text("Cerrar").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            let max_h = (ctx.screen_rect().height() - 52.0 - reserved_bottom - 24.0).max(160.0);
+            egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| match d {
+                Detail::Recurso(r) => {
+                    let s = e.stock(r);
+                    egui::Grid::new("rec").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        kv(ui, "En depósito", format!("{} (caben {})", fmt_thousands(s.amount.round() as i64), fmt_thousands(s.capacity.round() as i64)), theme::INK);
+                        let pc = if s.price > 1.3 { theme::BAD } else if s.price < 0.9 { theme::GOOD } else { theme::INK };
+                        kv(ui, "Precio", format!("{} (1,00 es el normal)", fmt_dec(s.price, 2)), pc);
+                    });
+                    section(ui, "Último mes");
+                    egui::Grid::new("mes").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        kv(ui, "Producido", format!("+{}", fmt_thousands(s.produced.round() as i64)), theme::GOOD);
+                        kv(ui, "Traído por el puerto", format!("+{}", fmt_thousands(s.imported.round() as i64)), theme::GOOD);
+                        kv(ui, "Usado", format!("−{}", fmt_thousands(s.consumed.round() as i64)), theme::BAD);
+                        kv(ui, "Embarcado", format!("−{}", fmt_thousands(s.exported.round() as i64)), theme::BAD);
+                    });
+                    section(ui, "De dónde sale y para qué se usa");
+                    let text = match r {
+                        Res::Pan => format!(
+                            "Las chacras del ejido: el trigo se siembra en otoño y se cosecha en diciembre (y se trilla en enero); el maíz, en marzo y abril. La última cosecha de trigo rindió {} % y la de maíz {} %. Cada vecino come una ración por mes: el grano de la cosecha tiene que durar hasta la próxima.{}",
+                            (c.climate.trigo.last_yield * 100.0).round() as i32,
+                            (c.climate.maiz.last_yield * 100.0).round() as i32,
+                            if e.is_on(crate::city::economy::Ordinance::Posito) { format!(" El pósito guarda {} raciones para los años malos.", fmt_thousands(e.posito.round() as i64)) } else { " Con el pósito (Ordenanzas) se guarda grano para los años malos.".into() }
+                        ),
+                        Res::Ladrillos => format!("Los hornos del ejido y los talleres de las zonas industriales. Con lluvia y frío el adobe no seca: este mes rinden al {} %. Los piden las casas de azotea y de altos.", (c.climate.brick_factor() * 100.0).round() as i32),
+                        Res::Piedra => "Por ahora llega por el puerto (las canteras todavía no están en el motor). La usan las calles empedradas y, más adelante, la muralla.".into(),
+                        Res::Carne => format!("Las estancias del campo: dependen de las pasturas, hoy al {} %.", (c.climate.pasture * 100.0).round() as i32),
+                        _ => String::new(),
+                    };
+                    ui.label(RichText::new(text).small());
+                    section(ui, "Últimos meses");
+                    let k = r as usize;
+                    let amounts: Vec<f32> = e.history.iter().rev().take(12).rev().map(|h| h.stocks[k][0]).collect();
+                    let prices: Vec<f32> = e.history.iter().rev().take(12).rev().map(|h| h.stocks[k][1]).collect();
+                    bars(ui, &amounts, None, theme::GOOD, "En depósito");
+                    bars(ui, &prices, Some(&vec![1.0; prices.len()]), theme::PRESSED, "Precio (raya: el normal)");
+                }
+                Detail::Opinion(i) => {
+                    let v = e.opinion[i];
+                    let mood = if v >= 65.0 { "contentos" } else if v >= 40.0 { "conformes" } else { "enojados" };
+                    ui.label(RichText::new(format!("{} de 100: {mood}", v.round() as i32)).strong());
+                    section(ui, "Qué la mueve");
+                    egui::Grid::new("op").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        for &o in &e.active {
+                            let info = crate::city::economy::ord_info(o);
+                            let x = info.opinion[i];
+                            if x != 0 {
+                                kv(ui, info.name, format!("{x:+}"), if x > 0 { theme::GOOD } else { theme::BAD });
+                            }
+                        }
+                        for t in Tax::ALL {
+                            let over = e.tax(t) - t.normal();
+                            if over != 0 {
+                                let w = if t.sector() as usize == i { 2.5 } else { 0.5 };
+                                let x = -(over as f32) * w;
+                                kv(ui, &format!("{} al {} %", t.name(), e.tax(t)), format!("{:+.0}", x), if x > 0.0 { theme::GOOD } else { theme::BAD });
+                            }
+                        }
+                        match i {
+                            0 => {
+                                let pan = -(e.price(Res::Pan) - 1.0) * 25.0;
+                                kv(ui, "Precio del pan", format!("{pan:+.0}"), if pan >= 0.0 { theme::GOOD } else { theme::BAD });
+                                let carne = -(e.price(Res::Carne) - 1.0) * 10.0;
+                                kv(ui, "Precio de la carne", format!("{carne:+.0}"), if carne >= 0.0 { theme::GOOD } else { theme::BAD });
+                            }
+                            1 => kv(ui, "Barcos y comercio", "más barcos, más conformes".into(), theme::INK),
+                            _ => {
+                                if c.climate.last.drought {
+                                    kv(ui, "Sequía", "−10".into(), theme::BAD);
+                                }
+                                kv(ui, "Precio de los cueros en el mundo", "sube con las guerras lejanas".into(), theme::INK);
+                            }
+                        }
+                    });
+                    ui.label(RichText::new("La opinión se acerca de a poco a lo que piden estas causas, mes a mes.").small().color(theme::INK_SOFT));
+                    section(ui, "Últimos meses");
+                    let h: Vec<f32> = e.history.iter().rev().take(12).rev().map(|h| h.opinion[i]).collect();
+                    bars(ui, &h, Some(&vec![50.0; h.len()]), theme::PRESSED, "Opinión (raya: 50)");
+                }
+                Detail::Clima => {
+                    let m = (c.month % 12) as usize;
+                    let w = &c.climate.last;
+                    egui::Grid::new("cl").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        kv(ui, "Estación", format!("{} ({})", capitalize(climate::season(m)), climate::MESES[m]), theme::INK);
+                        kv(ui, "Temperatura media", format!("{} °C (normal {} °C)", fmt_dec(w.temp, 1), fmt_dec(climate::T_MEDIA[m] + climate::EPOCA_C, 1)), theme::INK);
+                        kv(ui, "Lluvia del mes", format!("{} mm (normal {} mm)", w.rain.round() as i32, climate::LLUVIA_MM[m] as i32), theme::INK);
+                        kv(ui, "Agua en el suelo", format!("{} %", (c.climate.soil / climate::SUELO_MAX * 100.0).round() as i32), if c.climate.soil < 30.0 { theme::BAD } else { theme::GOOD });
+                        kv(ui, "Heladas", format!("{} días", w.frost_days.round() as i32), theme::INK);
+                        kv(ui, "Años", match c.climate.regime { climate::Regime::Lluvioso => "lluviosos", climate::Regime::Seco => "secos", climate::Regime::Normal => "normales" }.into(), theme::INK);
+                        kv(ui, "Pasturas", format!("{} %", (c.climate.pasture * 100.0).round() as i32), theme::INK);
+                    });
+                    section(ui, "Río, viento y luna");
+                    egui::Grid::new("rio").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        kv(ui, "Nivel del río", format!("{} m", fmt_dec(c.water_level(12.0), 2)), theme::INK);
+                        kv(ui, "Viento", format!("{}, {} km/h", water::wind_name(c.water.wind_dir), (c.water.wind_speed * 3.6).round() as i32), theme::INK);
+                        kv(ui, "Luna", water::moon_name(c.moon_phase()).into(), theme::INK);
+                    });
+                    section(ui, "El campo: qué se puede sembrar");
+                    for line in c.climate.sowing_advice(c.month) {
+                        ui.label(RichText::new(capitalize(&line)).small());
+                    }
+                    section(ui, "Lluvia de los últimos meses");
+                    let rain: Vec<f32> = c.climate.history.iter().map(|w| w.rain).collect();
+                    let normal: Vec<f32> = c.climate.history.iter().map(|w| climate::LLUVIA_MM[w.month]).collect();
+                    bars(ui, &rain, Some(&normal), Color32::from_rgb(90, 120, 160), "mm (raya: normal del INUMET)");
+                    ui.label(RichText::new("Normales 1991–2020 de la estación Prado (INUMET), algo más frescas por la época.").small().color(theme::INK_SOFT));
+                }
+            });
+        });
+    });
+    close
 }
 
 /// Panel de presupuesto: impuestos (con − y +) y el detalle del último mes cerrado.

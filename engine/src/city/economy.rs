@@ -266,6 +266,15 @@ impl MonthReport {
 
 // --- Economía -----------------------------------------------------------------------------
 
+/// Foto de un mes cerrado para los gráficos.
+#[derive(Clone, Debug, Default)]
+pub struct MonthSnap {
+    /// Por recurso: existencias, precio, producido, consumido, importado, exportado.
+    pub stocks: [[f32; 6]; 6],
+    pub opinion: [f32; 3],
+    pub balance: i64,
+}
+
 pub const POSITO_CAP: f32 = 3000.0;
 
 #[derive(Clone, Debug)]
@@ -282,6 +291,8 @@ pub struct Economy {
     /// Último presupuesto cerrado (para el panel).
     pub last: MonthReport,
     pub last_subsidy: i64,
+    /// Últimos 24 meses (el más reciente al final): para los gráficos de los paneles.
+    pub history: std::collections::VecDeque<MonthSnap>,
     pub(crate) rng: Rng,
 }
 
@@ -308,6 +319,7 @@ impl Default for Economy {
             climate_drought: None,
             last: MonthReport::default(),
             last_subsidy: 0,
+            history: std::collections::VecDeque::new(),
             rng: Rng::new(1780),
         }
     }
@@ -637,6 +649,15 @@ impl Economy {
         }
 
         self.last = rep.clone();
+        let mut snap = MonthSnap { opinion: self.opinion, balance: rep.balance(), ..Default::default() };
+        for r in Res::ALL {
+            let s = &self.stocks[r.idx()];
+            snap.stocks[r.idx()] = [s.amount, s.price, s.produced, s.consumed, s.imported, s.exported];
+        }
+        self.history.push_back(snap);
+        while self.history.len() > 24 {
+            self.history.pop_front();
+        }
         rep
     }
 
