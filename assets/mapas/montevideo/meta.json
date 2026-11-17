@@ -144,17 +144,27 @@
     {
       "capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2)",
       "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query",
-      "uso": "recursos: geologia.bin, minerales.bin"
+      "uso": "recursos: geologia.bin, materiales.bin"
     },
     {
-      "capa": "Dinamige_GeoS/CatastroMineroGeoS (4, 5)",
-      "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/CatastroMineroGeoS/MapServer/{4,5}/query",
-      "uso": "recursos: minerales.bin (sitios explotados)"
+      "capa": "Dinamige_ConsMin/Consulta_Minera_2026 (2, 3, 4, 5: títulos con su sustancia)",
+      "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_ConsMin/Consulta_Minera_2026/MapServer/{2,3,4,5}/query",
+      "uso": "recursos: materiales.bin (sitios explotados, con el material), assets/datos/uruguay/titulos_mineros.json"
     },
     {
       "capa": "hidrografia:actividad_minera_abandonada_a, hidrografia_urbana:actividad_minera_abandonada_a",
       "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
-      "uso": "recursos: minerales.bin (canteras abandonadas)"
+      "uso": "recursos: materiales.bin (canteras abandonadas)"
+    },
+    {
+      "capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2), todo el país",
+      "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query",
+      "uso": "recursos: assets/datos/uruguay/geologia_pais.bin"
+    },
+    {
+      "capa": "Dinamige_GeoS/GeologiaGeoS (0, regiones mineras)",
+      "servicio": "ArcGIS REST https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/GeologiaGeoS/MapServer/0/query",
+      "uso": "recursos: assets/datos/uruguay/pais.json"
     }
   ],
   "biomas": {
@@ -760,20 +770,56 @@
       "suelos": "suelos.bin / suelos_contexto.bin: uint8, índice del grupo en suelos.json (bits 0-6) + 128 si es estimación; 0 = agua",
       "productividad": "productividad.bin / productividad_contexto.bin: uint8, índice de productividad CONEAT (media nacional 100); 0 en el agua",
       "geologia": "geologia.bin / geologia_contexto.bin: uint8, índice de la unidad en suelos.json (geologia); 0 = sin dato",
-      "minerales": "minerales.bin (grilla de 40 m, 601 × 601) / minerales_contexto.bin (grilla de contexto): 4 bytes por muestra: piedra, arcilla, arena, canto rodado; 0..255 = 0..1"
+      "materiales": "materiales.bin (grilla de 40 m, 601 × 601) / materiales_contexto.bin (grilla de 200 m desde -25000 m, 371 × 371): 11 bytes por muestra, en el orden de «materiales»; 0..255 = ley 0..1"
     },
-    "minerales_paso_m": 40.0,
-    "minerales_muestras": 601,
+    "materiales": [
+      "granito",
+      "gneis",
+      "balasto",
+      "canto_rodado",
+      "arena",
+      "arcilla_roja",
+      "arcilla_gris",
+      "tosca",
+      "conchilla",
+      "caliza",
+      "turba"
+    ],
+    "materiales_paso_m": 40.0,
+    "materiales_muestras": 601,
+    "materiales_contexto_paso_m": 200.0,
+    "materiales_contexto_muestras": 371,
     "fuente_ip": "servicio",
     "fuente_aptitud_cultivo": "servicio",
     "fraccion_estimada": 0.012,
     "ip_medio_tierra": 146.0,
-    "celdas_con_mineria": 2923,
-    "media_minerales": {
-      "piedra": 0.168,
-      "arcilla": 0.509,
-      "arena": 0.088,
-      "canto_rodado": 0.064
+    "celdas_con_mineria": 3209,
+    "titulos_mineros_en_la_ventana": 181,
+    "media_materiales": {
+      "granito": 0.033,
+      "gneis": 0.138,
+      "balasto": 0.059,
+      "canto_rodado": 0.062,
+      "arena": 0.053,
+      "arcilla_roja": 0.515,
+      "arcilla_gris": 0.099,
+      "tosca": 0.316,
+      "conchilla": 0.006,
+      "caliza": 0.0,
+      "turba": 0.013
+    },
+    "fraccion_con_material": {
+      "granito": 0.041,
+      "gneis": 0.148,
+      "balasto": 0.199,
+      "canto_rodado": 0.175,
+      "arena": 0.112,
+      "arcilla_roja": 0.74,
+      "arcilla_gris": 0.238,
+      "tosca": 0.665,
+      "conchilla": 0.018,
+      "caliza": 0.0,
+      "turba": 0.021
     }
   }
 }

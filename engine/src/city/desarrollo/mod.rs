@@ -130,12 +130,32 @@ pub enum Prod {
     Suela,
     Carenas,
     Impresos,
+    // Materiales de canteras, hornos y caleras (ver `recursos::materiales`).
+    Adoquines,
+    Silleria,
+    Arena,
+    Tejas,
+    Cal,
 }
 
-pub const NPROD: usize = 8;
+pub const NPROD: usize = 13;
 
 impl Prod {
-    pub const ALL: [Prod; NPROD] = [Prod::Cueros, Prod::Sebo, Prod::Carne, Prod::Trigo, Prod::Tasajo, Prod::Suela, Prod::Carenas, Prod::Impresos];
+    pub const ALL: [Prod; NPROD] = [
+        Prod::Cueros,
+        Prod::Sebo,
+        Prod::Carne,
+        Prod::Trigo,
+        Prod::Tasajo,
+        Prod::Suela,
+        Prod::Carenas,
+        Prod::Impresos,
+        Prod::Adoquines,
+        Prod::Silleria,
+        Prod::Arena,
+        Prod::Tejas,
+        Prod::Cal,
+    ];
     pub fn i(self) -> usize {
         self as usize
     }
@@ -211,12 +231,30 @@ pub struct Proyecto {
     pub invertido: i64,
 }
 
+/// Arreglos por producto de las partidas guardadas: las viejas tienen menos productos (se
+/// completan con `relleno`).
+fn por_producto<'de, D: serde::Deserializer<'de>>(d: D, relleno: f32) -> Result<[f32; NPROD], D::Error> {
+    let v: Vec<f32> = Vec::deserialize(d)?;
+    let mut out = [relleno; NPROD];
+    for (o, x) in out.iter_mut().zip(v) {
+        *o = x;
+    }
+    Ok(out)
+}
+fn por_producto_cero<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[f32; NPROD], D::Error> {
+    por_producto(d, 0.0)
+}
+fn por_producto_uno<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[f32; NPROD], D::Error> {
+    por_producto(d, 1.0)
+}
+
 /// Foto mensual del comercio y del desarrollo (para los gráficos).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Foto {
     pub mes: i32,
     /// Valor exportado por producto (pesos).
+    #[serde(deserialize_with = "por_producto_cero")]
     pub exportado: [f32; NPROD],
     /// Valor importado (pesos).
     pub importado: f32,
@@ -226,6 +264,7 @@ pub struct Foto {
     pub renuncia: f32,
     pub saberes: [u32; 6],
     /// Precio de cada producto en el mundo (1,0 = normal).
+    #[serde(deserialize_with = "por_producto_uno")]
     pub precios: [f32; NPROD],
 }
 
@@ -274,6 +313,9 @@ pub struct Resultado {
     pub inversion: Option<(Ind, Dueno)>,
     /// Multiplicador del precio de los cueros en el mundo (choques y pilotos).
     pub factor_cueros: f32,
+    /// Cal que la ciudad tuvo que traer por barco (fanegas): la que piden las obras y no dan
+    /// las caleras.
+    pub cal_importada: f32,
 }
 
 /// Lo que la ciudad le cuenta al desarrollo cada mes.
@@ -309,6 +351,12 @@ pub struct Contexto {
     /// Lo que la economía embarcó y trajo el último mes (por recurso).
     pub exportado: [f32; 6],
     pub importado: [f32; 6],
+    /// Productos de las canteras, hornos y caleras del mes (adoquines, sillería, arena, tejas,
+    /// cal), por producto.
+    pub prod_sitios: [f32; NPROD],
+    /// Cal que piden las obras de la ciudad este mes (fanegas; morteros de los ladrillos y la
+    /// piedra que se usaron).
+    pub cal_demanda: f32,
 }
 
 impl Contexto {
@@ -340,6 +388,21 @@ pub const RINDE_MINIMO: f32 = 0.10;
 pub const MESES_EXENCION: i32 = 120;
 /// Manufacturas importadas por habitante y por mes (telas, herramientas, loza: pesos).
 pub const MANUFACTURAS_POR_HABITANTE: f32 = 0.25;
+/// La cal traída por agua (de Colonia o de ultramar) cuesta el precio del mundo más el flete.
+pub const FLETE_CAL: f32 = 1.25;
+
+/// Parte de los productos de canteras y hornos que se embarca (lo demás lo usa la ciudad):
+/// estimación; la arena y el canto se exportaban a Buenos Aires (ver
+/// `docs/sistemas/recursos-de-uruguay.md`).
+pub fn exporta_sitio(p: Prod) -> f32 {
+    match p {
+        Prod::Arena => 0.8,
+        Prod::Adoquines => 0.4,
+        Prod::Silleria => 0.3,
+        Prod::Tejas => 0.2,
+        _ => 0.0,
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -358,12 +421,14 @@ pub struct Desarrollo {
     /// Plazas de las escuelas que quedaron vacías el último mes por falta de alumnos que lean.
     pub sin_alumnos: f32,
     /// Precios de los productos en el mundo (1,0 = normal).
+    #[serde(deserialize_with = "por_producto_uno")]
     pub precios: [f32; NPROD],
     /// Choque de precios en curso (índice en `CHOQUES`, meses que quedan).
     pub choque: Option<(usize, u32)>,
     /// Últimos 24 meses.
     pub historia: VecDeque<Foto>,
     /// Lo que se exportó el último mes (cantidad por producto).
+    #[serde(deserialize_with = "por_producto_cero")]
     pub cantidades: [f32; NPROD],
     /// Cómo ven los inversores cada industria (último mes).
     pub evaluaciones: Vec<Evaluacion>,
@@ -897,6 +962,32 @@ impl Desarrollo {
         if self.hecha(Tec::HornoMejorado) {
             r.produccion[Res::Ladrillos as usize] += ctx.ladrillos_base * 0.4;
         }
+        // Canteras, hornos y caleras: la ciudad usa lo suyo (la cal, hasta lo que piden las
+        // obras; de lo demás, una parte) y lo que sobra se embarca. Lo vende el cabildo, que es
+        // el dueño.
+        let mut ventas_sitios = 0.0f32;
+        for p in Prod::ALL {
+            let q = ctx.prod_sitios[p.i()];
+            if q <= 0.0 {
+                continue;
+            }
+            let local = if p == Prod::Cal { q.min(ctx.cal_demanda) } else { q * (1.0 - exporta_sitio(p)) };
+            ventas_sitios += local * prod_info(p).precio;
+            let exp = q - local;
+            if exp > 0.0 && !ctx.bloqueo {
+                let v = exp * self.precio_mundo(p) * if ctx.muelle { 1.0 } else { 0.7 };
+                exp_q[p.i()] += exp;
+                exp_v[p.i()] += v;
+                derechos += v * ctx.tasa_aduana;
+                ventas_sitios += v * (1.0 - ctx.tasa_aduana);
+            }
+        }
+        if ventas_sitios >= 1.0 {
+            r.lineas.push(("Canteras, hornos y caleras: ventas".into(), ventas_sitios as i64));
+        }
+        // La cal que piden las obras y no dan las caleras se trae por barco (con el flete).
+        r.cal_importada = (ctx.cal_demanda - ctx.prod_sitios[Prod::Cal.i()]).max(0.0);
+        let cal_de_afuera = r.cal_importada * self.precio_mundo(Prod::Cal) * FLETE_CAL;
         // Lo que embarcó la economía (cueros, sebo, carne, trigo) al precio del mundo.
         for res in Res::ALL {
             if let Some(p) = prod_de_res(res) {
@@ -909,7 +1000,7 @@ impl Desarrollo {
         // ahora se hace en la ciudad).
         let manuf = ctx.habitantes.max(0) as f32 * MANUFACTURAS_POR_HABITANTE;
         let sustituye = local_manuf.min(manuf * 0.6);
-        let importado: f32 = Res::ALL.iter().map(|r| ctx.importado[*r as usize] * r.base_price()).sum::<f32>() + sal + (manuf - sustituye);
+        let importado: f32 = Res::ALL.iter().map(|r| ctx.importado[*r as usize] * r.base_price()).sum::<f32>() + sal + (manuf - sustituye) + cal_de_afuera;
         if self.incentivo(Incentivo::Arancel) {
             r.lineas.push(("Aranceles protectores".into(), ((manuf - sustituye) * 0.1) as i64));
         }

@@ -668,15 +668,19 @@ impl Game {
                     let (c, f) = self.city.service_site(k, h);
                     let i = services::info(k);
                     help = format!("{help}\nCosto: {} pesos{}{}", fmt_thousands(i.cost), if i.ladrillos > 0.0 { format!(" · {} ladrillos", i.ladrillos as i32) } else { String::new() }, if i.piedra > 0.0 { format!(" · {} de piedra", i.piedra as i32) } else { String::new() });
-                    if matches!(k, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera) {
+                    if matches!(k, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera | Kind::Calera) {
                         let r = super::recursos::Recursos::de(t).en_area(c, f, i.size.0, i.size.1);
                         let (que, x) = match k {
                             Kind::Chacra => ("tierra para cultivo", r.cultivo),
                             Kind::Estancia => ("pasturas", r.pastoreo),
                             Kind::Horno => ("arcilla", r.arcilla),
-                            _ => ("piedra", r.piedra),
+                            Kind::Calera => ("piedra de cal", r.de(super::recursos::Uso::Cal)),
+                            _ => ("material", super::recursos::materiales::ley_cantera(&r)),
                         };
                         help = format!("{help}\nSitio: {que} {} (IP {}) · rinde {} %", super::recursos::calidad(x), r.ip.round() as i32, (super::recursos::rinde(k, &r) * 100.0).round() as i32);
+                        if let Some(p) = super::recursos::produccion_sitio(k, &r) {
+                            help = format!("{help}\nSaca: {}", p.texto());
+                        }
                     }
                     (None, self.city.service_problem(t, k, c, f))
                 }
@@ -791,6 +795,7 @@ impl Game {
             (Tool::Service, Placeable::Building(Kind::Estancia)) => Some(Layer::Pasturas),
             (Tool::Service, Placeable::Building(Kind::Horno)) => Some(Layer::Arcilla),
             (Tool::Service, Placeable::Building(Kind::Cantera)) => Some(Layer::Piedra),
+            (Tool::Service, Placeable::Building(Kind::Calera)) => Some(Layer::Cal),
             _ => None,
         } });
         if let Some(layer) = layer {
@@ -997,7 +1002,7 @@ impl Game {
                     }
                 }
                 // Recursos: los solares no se pintan (se ve el terreno).
-                Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena => continue,
+                Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena | Layer::Cal => continue,
             };
             quad(out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
@@ -1015,15 +1020,16 @@ impl Game {
                 Layer::Molestias => super::recursos::molestias::perfil_de_servicio(b.kind).is_some(),
                 Layer::Cultivo => b.kind == Kind::Chacra,
                 Layer::Pasturas => b.kind == Kind::Estancia,
-                Layer::Piedra => b.kind == Kind::Cantera,
+                Layer::Piedra | Layer::Arena => b.kind == Kind::Cantera,
                 Layer::Arcilla => b.kind == Kind::Horno,
-                Layer::Arena | Layer::Valor => false,
+                Layer::Cal => b.kind == Kind::Calera,
+                Layer::Valor => false,
             };
             if show {
                 let r = match layer {
                     Layer::Fuego => b.info().fire_reach,
                     Layer::Molestias => super::recursos::molestias::perfil_de_servicio(b.kind).map_or(0.0, |p| p.radio),
-                    Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla => 0.0,
+                    Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena | Layer::Cal => 0.0,
                     _ => b.info().radius,
                 };
                 if r > 0.0 {
@@ -1071,9 +1077,10 @@ impl Game {
                     if t.height(p.x, p.y) <= 0.2 {
                         continue;
                     }
-                    let col = match layer.uso() {
-                        Some(u) => uso_color(u, rec.aptitud(u, p.x, p.y)),
-                        None => {
+                    let col = match (layer.uso(), layer.grupo_mat()) {
+                        (Some(u), _) => uso_color(u, rec.aptitud(u, p.x, p.y)),
+                        (None, Some(g)) => material_color(g, &rec.en_punto(p)),
+                        (None, None) => {
                             let m = self.city.suelo.campo.en(p, None);
                             let x = m.total();
                             if x < 0.03 {
@@ -1160,9 +1167,47 @@ pub fn lineas_terreno(t: &TerrainGen, p: Vec2, todo: bool) -> Vec<String> {
         out.push(format!("Para chacra: {} · para estancia: {}", super::recursos::calidad(r.cultivo), super::recursos::calidad(r.pastoreo)));
     }
     if todo {
-        out.push(format!("Piedra {} · arcilla {} · arena {} · canto rodado {}", super::recursos::calidad(r.piedra), super::recursos::calidad(r.arcilla), super::recursos::calidad(r.arena), super::recursos::calidad(r.grava)));
+        out.extend(lineas_materiales(&r));
     }
     out
+}
+
+/// Los materiales de un punto para la ficha del terreno: los que hay (ley ≥ 0,15), del de más
+/// ley al de menos, con su calidad y para qué sirven; y lo que no hay y se trae de afuera.
+pub fn lineas_materiales(r: &super::recursos::RecursosLote) -> Vec<String> {
+    use super::recursos::materiales::Material;
+    let mut hay: Vec<(Material, f32)> = Material::TODOS.into_iter().map(|m| (m, r.mat[m.i()])).filter(|x| x.1 >= super::recursos::MINIMO_MATERIAL).collect();
+    hay.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut out = Vec::new();
+    if hay.is_empty() {
+        out.push("Materiales: nada que sacar".into());
+    } else {
+        let txt: Vec<String> = hay.iter().map(|(m, x)| format!("{} {} ({} %)", m.nombre(), super::recursos::calidad(*x), (x * 100.0).round() as i32)).collect();
+        out.push(format!("Materiales: {}", txt.join(" · ")));
+        let usos: Vec<String> = hay.iter().take(3).map(|(m, _)| format!("{}: {}", m.nombre(), m.entrada().usos.first().cloned().unwrap_or_default())).collect();
+        out.push(format!("Sirven para: {}", usos.join(" · ")));
+    }
+    if r.mat[Material::Caliza.i()] < super::recursos::MINIMO_MATERIAL {
+        out.push("Caliza: no hay en la zona (la cal se trae de Colonia o de Minas)".into());
+    }
+    out
+}
+
+/// Color de una celda en una capa de materiales: el del material de más ley del grupo, más
+/// intenso cuanto más ley (alfa 0 = no se dibuja).
+pub fn material_color(g: super::recursos::materiales::GrupoMat, r: &super::recursos::RecursosLote) -> [f32; 4] {
+    let mut mejor = (g.materiales()[0], 0.0f32);
+    for &m in g.materiales() {
+        let x = r.mat[m.i()];
+        if x > mejor.1 + 1e-6 {
+            mejor = (m, x);
+        }
+    }
+    if mejor.1 < 0.08 {
+        return [0.0; 4];
+    }
+    let c = mejor.0.color();
+    [c[0], c[1], c[2], 0.3 + 0.6 * mejor.1.clamp(0.0, 1.0)]
 }
 
 /// Color del valor del suelo (0 a 1): azul pálido, verde, amarillo, naranja, rojo.

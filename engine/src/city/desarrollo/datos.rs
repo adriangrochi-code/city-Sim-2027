@@ -6,7 +6,7 @@
 //! `docs/sistemas/desarrollo-y-tecnologia.md`); el resto es licencia de diseño y lo dice.
 //! Montos en pesos de plata por mes: ESTIMACIONES de orden de magnitud para el juego.
 
-use super::{Bien, Ind, Prod, Saber, Tec};
+use super::{Bien, Ind, Prod, Saber, Tec, NPROD};
 use crate::city::economy::Res;
 use crate::city::poblacion::Epoca;
 use crate::city::services::Kind;
@@ -160,7 +160,7 @@ pub struct ProdInfo {
     pub unidad: &'static str,
 }
 
-pub const PRODUCTOS: [ProdInfo; 8] = [
+pub const PRODUCTOS: [ProdInfo; NPROD] = [
     ProdInfo { id: Prod::Cueros, nombre: "Cueros", precio: 2.0, unidad: "cuero" },
     ProdInfo { id: Prod::Sebo, nombre: "Sebo", precio: 0.8, unidad: "arroba" },
     ProdInfo { id: Prod::Carne, nombre: "Carne", precio: 0.15, unidad: "ración" },
@@ -169,6 +169,12 @@ pub const PRODUCTOS: [ProdInfo; 8] = [
     ProdInfo { id: Prod::Suela, nombre: "Suela", precio: 4.0, unidad: "suela" },
     ProdInfo { id: Prod::Carenas, nombre: "Carenas y lanchas", precio: 60.0, unidad: "trabajo" },
     ProdInfo { id: Prod::Impresos, nombre: "Impresos", precio: 1.5, unidad: "pliego" },
+    // Materiales (precios estimados, ver docs/sistemas/recursos-de-uruguay.md).
+    ProdInfo { id: Prod::Adoquines, nombre: "Adoquines de granito", precio: 0.3, unidad: "adoquín" },
+    ProdInfo { id: Prod::Silleria, nombre: "Sillería", precio: 3.0, unidad: "sillar" },
+    ProdInfo { id: Prod::Arena, nombre: "Arena", precio: 0.5, unidad: "carretada" },
+    ProdInfo { id: Prod::Tejas, nombre: "Tejas", precio: 1.2, unidad: "ciento" },
+    ProdInfo { id: Prod::Cal, nombre: "Cal", precio: 0.8, unidad: "fanega" },
 ];
 
 pub fn prod_info(p: Prod) -> &'static ProdInfo {

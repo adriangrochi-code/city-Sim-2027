@@ -33,6 +33,22 @@ pub fn rinde_del_sitio(ind: Ind, c: Vec2, t: &TerrainGen) -> f32 {
     0.75 + 0.25 * base
 }
 
+/// Cal (fanegas) por unidad de ladrillos y de piedra que usan las obras (estimación).
+pub const CAL_POR_LADRILLO: f32 = 0.35;
+pub const CAL_POR_PIEDRA: f32 = 0.2;
+
+/// El producto del comercio de cada producto propio de un sitio (`recursos::materiales`).
+pub fn prod_de_extra(e: crate::city::recursos::materiales::Extra) -> Prod {
+    use crate::city::recursos::materiales::Extra;
+    match e {
+        Extra::Adoquines => Prod::Adoquines,
+        Extra::Silleria => Prod::Silleria,
+        Extra::Arena => Prod::Arena,
+        Extra::Tejas => Prod::Tejas,
+        Extra::Cal => Prod::Cal,
+    }
+}
+
 /// Distancias a la plaza (mínima y máxima, m) donde un inversor busca sitio para cada edificio.
 fn distancias(k: Kind) -> (f32, f32) {
     match k {
@@ -53,6 +69,21 @@ const APRENDIZAJE: f32 = 0.0005;
 pub(crate) const TOPE_APRENDIZAJE: usize = 3;
 
 impl City {
+    /// Productos propios de las canteras, hornos y caleras este mes, por producto (rinde del
+    /// sitio; las tejas, además, con el tiempo como los ladrillos).
+    pub fn productos_de_sitios(&self) -> [f32; NPROD] {
+        let mut v = [0.0f32; NPROD];
+        for b in self.services.buildings.values() {
+            let Some(p) = self.suelo.sitios.get(&b.id) else { continue };
+            let rinde = if b.rinde < 0.0 { 1.0 } else { b.rinde };
+            let clima = if b.kind == Kind::Horno { self.climate.brick_factor() } else { 1.0 };
+            for &(e, q) in &p.extras {
+                v[prod_de_extra(e).i()] += q * rinde * clima;
+            }
+        }
+        v
+    }
+
     /// Cuántos edificios de cada tipo hay (para los requisitos).
     fn edificios_por_tipo(&self) -> Vec<(Kind, u32)> {
         let mut v: Vec<(Kind, u32)> = Vec::new();
@@ -124,6 +155,10 @@ impl City {
             desocupados: self.candidatos_peon().len() as u32,
             exportado: Res::ALL.map(|r| eco.stock(r).exported),
             importado: Res::ALL.map(|r| eco.stock(r).imported),
+            prod_sitios: self.productos_de_sitios(),
+            // Morteros: cal por cada unidad de ladrillos y de piedra que usaron las obras el
+            // último mes (estimación).
+            cal_demanda: eco.stock(Res::Ladrillos).consumed * CAL_POR_LADRILLO + eco.stock(Res::Piedra).consumed * CAL_POR_PIEDRA,
         }
     }
 

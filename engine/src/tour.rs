@@ -286,6 +286,15 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-capa-arcilla", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Arcilla, Vec2::new(1500.0, -1700.0))),
         UiShot("motor-ui-capa-arena", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Arena, Vec2::new(1500.0, -1700.0))),
         UiShot("motor-ui-ficha-terreno", ui_ficha_terreno),
+        UiShot("motor-ui-capa-cal", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Cal, Vec2::new(1500.0, -1700.0))),
+        // Materiales con tipo: la bahía con el Cerro (gneis), la Ciudad Vieja y el oeste.
+        Cam([c.x - 2800.0, c.y - 1200.0, 6200.0, 200.0, 60.0]),
+        WaitIdle("la bahía de lejos"),
+        UiShot("motor-ui-capa-piedra-bahia", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Piedra, Vec2::new(-4600.0, -1600.0))),
+        UiShot("motor-ui-capa-arcilla-bahia", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Arcilla, Vec2::new(-4600.0, -1600.0))),
+        UiShot("motor-ui-capa-arena-bahia", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Arena, Vec2::new(-4600.0, -1600.0))),
+        UiShot("motor-ui-capa-cal-bahia", |s, u| ui_capa_terreno(s, u, crate::city::services::Layer::Cal, Vec2::new(-4600.0, -1600.0))),
+        UiShot("motor-ui-ficha-terreno-cerro", |s, u| ui_ficha_terreno_en(s, u, crate::terrain::CERRO_REAL + Vec2::new(150.0, 150.0) - crate::city::game_demo::PLAZA)),
         CamFn(|s| d::view_of(s, crate::city::services::Kind::Cantera, 90.0)),
         WaitIdle("ficha de la cantera"),
         UiShot("motor-ui-ficha-cantera", |s, u| ui_ficha_servicio(s, u, crate::city::services::Kind::Cantera)),
@@ -532,6 +541,17 @@ fn ui_ficha_terreno(s: &mut Session, u: &mut GameUi) {
     g.layer = Some(crate::city::services::Layer::Cultivo);
     g.set_tool(7);
     let p = crate::city::game_demo::PLAZA + Vec2::new(1500.0, -1700.0);
+    g.inspected = Some(p);
+    g.hover = Some(p);
+}
+
+/// Ficha del terreno en un punto relativo a la plaza, con la capa de piedra.
+fn ui_ficha_terreno_en(s: &mut Session, u: &mut GameUi, rel: Vec2) {
+    u.open = None;
+    let g = s.game.as_mut().unwrap();
+    g.layer = Some(crate::city::services::Layer::Piedra);
+    g.set_tool(7);
+    let p = crate::city::game_demo::PLAZA + rel;
     g.inspected = Some(p);
     g.hover = Some(p);
 }

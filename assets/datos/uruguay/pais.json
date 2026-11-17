@@ -1,0 +1,1238 @@
+{
+  "descripcion": "Recursos naturales del Uruguay a escala país (1 km aprox.) para el mapa futuro del país. Ver docs/sistemas/recursos-de-uruguay.md.",
+  "grilla": {
+    "lon_oeste": -58.5,
+    "lat_norte": -30.05,
+    "dlon": 0.0107,
+    "dlat": 0.009,
+    "columnas": 510,
+    "filas": 557,
+    "archivo": "geologia_pais.bin",
+    "codificacion": "uint8 por celda, filas de norte a sur: código DINAMIGE de la unidad + 1; 0 = fuera del país o agua"
+  },
+  "unidades": [
+    {
+      "codigo": 0,
+      "unidad": "Bloque Pavas",
+      "periodo": "",
+      "descripcion": "Anfibolitas de grano fino a medio, gneisses anfibolicos y graniticos. Esquistos cloriticos y micaceos e intercalaciones graniticas.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 986
+    },
+    {
+      "codigo": 1,
+      "unidad": "Complejo Basal del CRP",
+      "periodo": "Riacico",
+      "descripcion": "Gneises muscoviticos y/o biotiticos, gneises anfibolicos y anfibolitas. Ortogneises acidos y basicos, cuarcitas, granulitas y esquistos. Migmatitas de texturas variadas predominando las oftalmiticas y granudas. Frecuente intercalacion de rocas graniticas.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 13513
+    },
+    {
+      "codigo": 2,
+      "unidad": "Complejo Granulitico Valentines-Rivera",
+      "periodo": "Siderico",
+      "descripcion": "Gneises oligoclasicos y granuliticos, metapiroxenitas, cuarcitas magnetito-augiticas  y magnetito-anfibolicas (BIF), anfibolitas. Migmatitas y granitos autoctonos.",
+      "materiales": {
+        "gneis": 0.6,
+        "oro": 0.1,
+        "hierro": 0.4
+      },
+      "celdas_km2": 4760
+    },
+    {
+      "codigo": 3,
+      "unidad": "Migmatitas y Granitos Autoctonos de Suarez",
+      "periodo": "Riacico",
+      "descripcion": "Migmatitas heterogeneas (metatexitas) con estructuras dyktioniticas y estromaticas compuestas por oligoclasa con frecuentes antipertitas y mirmequitas, microclina, cuarzo, biotita, epidoto, apatito y esfeno. Los granitos autoctonos son biotiticos, equigranulares de grano fino a medio compuestos por cuarzo, microclina xenomorfa, plagioclasa, biotita, epidoto y muscovita. Se asocian anfibolitas con recortes graniticos en estructuras ‘pinch and swell’.",
+      "materiales": {
+        "granito": 0.7,
+        "balasto": 0.4
+      },
+      "celdas_km2": 33
+    },
+    {
+      "codigo": 4,
+      "unidad": "Ortogneises",
+      "periodo": "Riacico",
+      "descripcion": "Ortogneisses de grano fino a medio compuestos por oligoclasa, cuarzo, biotita, epidoto, alanita, muscovita, apatito y microclina.",
+      "materiales": {
+        "gneis": 0.9
+      },
+      "celdas_km2": 189
+    },
+    {
+      "codigo": 5,
+      "unidad": "Formacion Montevideo",
+      "periodo": "Riacico",
+      "descripcion": "Gneises oligoclasicos, anfibolitas, esquistos micaceos y cuarcitas micaceas. Esquistos micaceos con estaurolita y granate, gneises granatiferos, cuarcitas, granulitas y metalavas acidas y basicas.",
+      "materiales": {
+        "gneis": 1.0
+      },
+      "celdas_km2": 375
+    },
+    {
+      "codigo": 6,
+      "unidad": "Formacion Arroyo Grande",
+      "periodo": "Riacico",
+      "descripcion": "Cuarcitas, cuarcitas feldespaticas, muscoviticas y metaconglomerados con clastos de cuarcita y cuarzo de hasta 20 cm, redondeados. Metalavas basicas y anfibolitas. Excepcionalmente esquistos cloriticos.",
+      "materiales": {},
+      "celdas_km2": 242
+    },
+    {
+      "codigo": 7,
+      "unidad": "Formaciones Paso Severino y Cerros de San Juan",
+      "periodo": "Riacico",
+      "descripcion": "Rocas de muy bajo grado de metamorfismo: pizarras, filitas, cuarcitas, metaarcosas, metalavas acidas y basicas. Excepcionalmente calizas, dolomitas y esquistos con talco.\t",
+      "materiales": {
+        "piedra_laja": 0.5
+      },
+      "celdas_km2": 1040
+    },
+    {
+      "codigo": 8,
+      "unidad": "Unidad Berrondo",
+      "periodo": "Riacico",
+      "descripcion": "Anfibolitas granonematoblasticas.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 57
+    },
+    {
+      "codigo": 9,
+      "unidad": "Metagabro Cerros Negros",
+      "periodo": "Riacico",
+      "descripcion": "Incluye leucogabros, gabros y piroxenitas, con bandeado composicional de direccion  320-330ºcon inclinaciones verticales. Fue afectado por deformacion y metamorfismo de bajo grado y es cortado, al sur por la zona de cizalla Cufre-Mal Abrigo y al este, por la zona de cizalla de Guaycuru.",
+      "materiales": {},
+      "celdas_km2": 3
+    },
+    {
+      "codigo": 10,
+      "unidad": "Intrusiones Basicas a Intermedias Tardipostectonicas Transamazonicas",
+      "periodo": "Riacico",
+      "descripcion": "Granodioritas, tonalitas y  gabros (Gabros de Carreta Quemada, Mahoma, Tia Josefa, Complejo Puntas del Arroyo Carreta  Quemada  entre otros).",
+      "materiales": {
+        "granito": 0.6
+      },
+      "celdas_km2": 226
+    },
+    {
+      "codigo": 11,
+      "unidad": "Granitos Transamazonicos Indiferenciados",
+      "periodo": "Riacico",
+      "descripcion": "Granitos calcoalcalinos de grano medio a porfiroide, generalmente hornblendo-biotiticos; leucogranitos de grano medio a grueso; granodioritas hornblendo-biotiticas; granitos anatecticos y granitos orientados.",
+      "materiales": {
+        "granito": 0.9,
+        "balasto": 0.5,
+        "feldespato_cuarzo": 0.1,
+        "ganado_vacuno": 0.7
+      },
+      "celdas_km2": 3942
+    },
+    {
+      "codigo": 12,
+      "unidad": "Granitoides Tardipostectonicos Transamazonicos",
+      "periodo": "Riacico",
+      "descripcion": "Leucogranitos de grano medio a grueso, isoxenomorficos a biotita y/o hornblenda. Granitos de grano grueso a porfiroides biotiticos y/o a dos micas. Granitos de grano fino a biotita. Granodioritas de textura granuda, hornblendo-biotiticas. Microgranodioritas biotiticas. Dioritas de grano medio a grueso. 1. Isla Mala, 2. Ao. de la Virgen, 3. Tia Josefa, 4. Co. San Jose, 5. Mahoma, 6. Mal Abrigo, 7. Cufre, 8. Pichinango, 9. Ao. Navarro, 10. Ao. Colla, 11. Cda. Algarin, 12. Ao. de las Conchas, 13. Ptas. del Ao. San Juan, 14. Rio San Salvador, 15. Ao. Miguelete, 16. Ao. Marincho, 17. Ao. Malo, 18. Carpinteria, 19. Ao. Grande, 20. Ao. Minero, 21. Rossel y Rius, 22. Paso Cames, 23. Ojosmin, 24. Sosa Diaz, 25. Empalme Olmos, 26. Soca.",
+      "materiales": {
+        "granito": 0.9,
+        "balasto": 0.5,
+        "feldespato_cuarzo": 0.1,
+        "ganado_vacuno": 0.7
+      },
+      "celdas_km2": 843
+    },
+    {
+      "codigo": 13,
+      "unidad": "Zonas de Cizalla Transamazonicas",
+      "periodo": "Estaterico",
+      "descripcion": "Zonas de cizalla asociadas al ciclo Transamazonico. Litologicamente corresponden a cataclasitas  y milonitas. 1.Cuchilla Cabo de Hornos, 2. Cufre – Tabarez, 3. Ecilda Paulier, 4. Hornos – Riachuelo, 5. San Gabriel.",
+      "materiales": {
+        "gneis": 0.7
+      },
+      "celdas_km2": 180
+    },
+    {
+      "codigo": 14,
+      "unidad": "Unidad Campanero",
+      "periodo": "Estaterico",
+      "descripcion": "Comprende litologias de un basamento gneisico: ortogneises, granitoides foliados, esquistos granitizados, gneises con escapolita, migmatitas y ocasionalmente anfibolitas.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 868
+    },
+    {
+      "codigo": 15,
+      "unidad": "Granitos Indiferenciados del TNP",
+      "periodo": "Riacico",
+      "descripcion": "Granitos de grano medio a porfiriticos calcoalcalinos, comunmente hornblendo-biotiticos; leucogranitos de grano medio a grueso; granodioritas hornblendo-biotiticas; granitos orientados. 1. Arevalo, 2. Cerro Chato.",
+      "materiales": {
+        "granito": 0.9
+      },
+      "celdas_km2": 1059
+    },
+    {
+      "codigo": 16,
+      "unidad": "Granito Rapakivi de Illescas",
+      "periodo": "Estaterico",
+      "descripcion": "Compuesto por facies graniticas y cuarzo-sieniticas. Presenta cuarzo celeste rutilado y textura rapakivi.",
+      "materiales": {
+        "granito": 0.9
+      },
+      "celdas_km2": 868
+    },
+    {
+      "codigo": 17,
+      "unidad": "Complejo Cerro Olivo",
+      "periodo": "Criogenico",
+      "descripcion": "Gneises oftalmiticos leucocratas con biotita, muscovita y granate, migmatitas y granulitas.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 1547
+    },
+    {
+      "codigo": 18,
+      "unidad": "Migmatitas ortogneises y granitos indiferenciados",
+      "periodo": "Criogenico",
+      "descripcion": "Rocas metamorficas de alto grado y anatexitas: migmatitas, ortogneisses y granitos indiferenciados.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 1315
+    },
+    {
+      "codigo": 19,
+      "unidad": "Rocas metamorficas indiferenciadas",
+      "periodo": "Ediacarico",
+      "descripcion": "Ortogneises acidos y basicos, gneises cuarzo-feldespaticos y anfibolicos, anfibolitas, granulitas y esquistos de naturaleza variada.",
+      "materiales": {
+        "gneis": 0.8
+      },
+      "celdas_km2": 283
+    },
+    {
+      "codigo": 20,
+      "unidad": "Complejo Paso del Dragon",
+      "periodo": "Ediacarico",
+      "descripcion": "Esquistos cuarzo-feldspaticos con muscovita con intercalaciones de cuarcitas, meta-volcánicas felsicas y esquistos anfibolicos con granate, y rocas maficas-ultramaficas (serpentinitas, esquistos magnesianos y esquistos anfibolicos).",
+      "materiales": {
+        "piedra_laja": 0.4
+      },
+      "celdas_km2": 217
+    },
+    {
+      "codigo": 21,
+      "unidad": "Complejo Zanja del Tigre",
+      "periodo": "Criogenico",
+      "descripcion": "Secuencia metavolcanosedimentaria con presencia de metagabros. El metamorfismo alcanza la facies anfibolita. Litologias: orto- y paraanfibolitas, rocas calcosilicatadas, micaesquistos, cuarcitas, marmoles y rocas ferriferas (BIFS?).",
+      "materiales": {},
+      "celdas_km2": 224
+    },
+    {
+      "codigo": 22,
+      "unidad": "Grupo Lavalleja",
+      "periodo": "Ediacarico",
+      "descripcion": "Comprende litologias muy variadas: metasedimentitas (metaconglomerados, metaarcosas, cuarcitas, metapelitas, mármoles y metacalizas estromatoliticas, brechosas,  laminadas y masivas) ; metavolcanicas acidas y basicas (metariolitas, metahialoclastitas basicas, metabasaltos) y  metagabros hornblendicos . Las litologias mas abundantes corresponden a rocas metabasicas, metapelitas y metacalcareos. Las condiciones de metamorfismo aumentan hacia el E desde anquimetamorfismo a  grado bajo.",
+      "materiales": {
+        "marmol": 0.5,
+        "piedra_laja": 0.6,
+        "caliza": 0.6,
+        "dolomita": 0.4,
+        "oro": 0.05
+      },
+      "celdas_km2": 3740
+    },
+    {
+      "codigo": 23,
+      "unidad": "Formacion Rocha",
+      "periodo": "",
+      "descripcion": "Secuencia metasedimentaria con metamorfismo de grado bajo y muy bajo. Las litologias dominantes son metaareniscas, metapelitas, metalimolitas, con algunos niveles intercalados de metaconglomerados. Se intercalan escamas tectonicas de granitos y cuarcitas.",
+      "materiales": {},
+      "celdas_km2": 401
+    },
+    {
+      "codigo": 24,
+      "unidad": "Granitos Miloniticos Brasilianos",
+      "periodo": "Ediacarico",
+      "descripcion": "Granitos miloniticos asociados a las Zonas de Cizalla del Ciclo Orogenico Brasiliano.",
+      "materiales": {
+        "granito": 0.6
+      },
+      "celdas_km2": 452
+    },
+    {
+      "codigo": 25,
+      "unidad": "Granitoides Pre y Sintectonicos Brasilianos",
+      "periodo": "Ediacarico",
+      "descripcion": "Granitos heterogranulares, gruesos, porfiroblasticos, de texturas variadas. Pueden desarrollar mineralogias mas basicas. Metagranitos y granitos orientados. 1, Co. De las Cuentas, 2. Cerrezuelo, 3. Cda. Del Sauce, 4. El Renegado, 5. Ptas del Mataojo, 6. Buey Muerto, 7. Carape, 8. Penitente",
+      "materiales": {
+        "granito": 0.8,
+        "feldespato_cuarzo": 0.1,
+        "ganado_vacuno": 0.6
+      },
+      "celdas_km2": 3634
+    },
+    {
+      "codigo": 26,
+      "unidad": "Unidad Cerro Catedral",
+      "periodo": "Ediacarico",
+      "descripcion": "Riolitas y traquitas cuarzosas, dacitas porfiricas y microgranitos porfiriticos con biotita, opacos, epidoto, sericita, oxidos y ocasionalmente clorita, apatito y circon.",
+      "materiales": {},
+      "celdas_km2": 75
+    },
+    {
+      "codigo": 27,
+      "unidad": "Granitoides Tardipostectonicos Brasilianos",
+      "periodo": "Ediacarico",
+      "descripcion": "Leucogranitos de grano grueso, generalmente isoxenomorficos a biotica y/o hornblenda. Leucogranitos de grano fino a medio a moscovita, de color rosado. Granitos de grano grueso, hornblendobiotiticos a veces heterogranulares. Granitos porfiroides a biotita y/ hornblenda. Granodioritas de grano grueso hornblendo -biotiticas.  1.Guazunambi, 2. Policlinica, 3. Yerbal, 4. Olimar Grande, 5. Maria Albina, 6. Ao. De los Molles, 7. Treinta y Tres, 8. Jose Pedro Varela, 9. Pueblo Sauce, 10. Polanco, 11. Marmaraja, 12. Minas, 13. Santa Teresa, 14. Garzon, 15. Barriga Negra, 16. Co. Partido, 17. Ao. del Soldado, 18. Campamento, 19. Bombero, 20. Co. Mateo, 21. Piedra del Sombrero, 22. Dos Hermanos, 23. La Calera, 24. Jose Ignacio, 25. Las Flores, 26. Amarillo, 27. Ao. de las Pitangueras, 28. Sobresaliente, 29. Aigua, 30. Florencia, 31. Los Cerrillos, 32. Valdivia, 33. Ptas del Ao. Rocha, 34. Maldonado.",
+      "materiales": {
+        "granito": 0.9
+      },
+      "celdas_km2": 3290
+    },
+    {
+      "codigo": 28,
+      "unidad": "Formacion Cerros de Aguirre",
+      "periodo": "Ediacarico",
+      "descripcion": "Secuencia volcanica y piroclastica representada por dacitas, hialoclastitas, tobas y andesitas.",
+      "materiales": {},
+      "celdas_km2": 44
+    },
+    {
+      "codigo": 29,
+      "unidad": "Formacion Sierra de Los Rios",
+      "periodo": "Ediacarico",
+      "descripcion": "Diques de granofiros rioliticos porfiricos y microgranitos. Derrames riolíticos representados por riolitas porfíricas con textura fluidal y fenocristales de feldespato alcalino y cuarzo, escasas traquitas cuarzosas y brechas riolíticas.",
+      "materiales": {},
+      "celdas_km2": 32
+    },
+    {
+      "codigo": 30,
+      "unidad": "Complejo Sierra de Animas: Basalto Las Flores",
+      "periodo": "Ediacarico",
+      "descripcion": "Basaltos vesiculares, diques amigdaloides, brechas autoclasticas, basaltos masivos, traquibasaltos, diques doleriticos. El mafico dominante es clinopiroxeno. Las amigdalas presentan rellenos de calcedonia, cuarzo, clorita, epidoto, calcita y ceolita.",
+      "materiales": {
+        "basalto": 0.6
+      },
+      "celdas_km2": 61
+    },
+    {
+      "codigo": 31,
+      "unidad": "Complejo Sierra de Animas: Granitos Sienitas y Microsienitas",
+      "periodo": "Ediacarico",
+      "descripcion": "Granitos, sienitas, sienitas cuarzosas y microsienitas con augita, anfibol sodico y biotita.",
+      "materiales": {
+        "granito": 0.8
+      },
+      "celdas_km2": 65
+    },
+    {
+      "codigo": 32,
+      "unidad": "Complejo Sierra de Animas Indiferenciado",
+      "periodo": "Ediacarico",
+      "descripcion": "Traquitas, riolitas, ignimbritas, microsienitas, sienitas.",
+      "materiales": {},
+      "celdas_km2": 168
+    },
+    {
+      "codigo": 33,
+      "unidad": "Complejo Sierra de Animas: Volcanitas Acidas",
+      "periodo": "Ediacarico",
+      "descripcion": "Traquitas, porfidos traquiticos, riolitas, riolitas esferuliticas, ignimbritas con texuras de flujo. Estas litologias presentan maficos muy escasos donde predomina el anfibol.",
+      "materiales": {},
+      "celdas_km2": 40
+    },
+    {
+      "codigo": 34,
+      "unidad": "Grupo Maldonado",
+      "periodo": "Ediacarico",
+      "descripcion": "Integrado por los depositos de  las Formaciones Playa Hermosa (en la base), Las Ventanas y San Carlos (en el tope) de edad Ediacarense con un espesor total del orden de 1600 metros. El conjunto, comprende depositos sedimentarios (conglomerados, areniscas conglomeradicas, areniscas y areniscas arcosicas, limolitas y pelitas) y rocas volcanicas, subvolcanicas y piroclasticas basicas y acidas.",
+      "materiales": {},
+      "celdas_km2": 137
+    },
+    {
+      "codigo": 35,
+      "unidad": "Zona de Cizalla Sarandi de Yi - Piriapolis",
+      "periodo": "Ediacarico",
+      "descripcion": "Zona de cizalla de sentido sinestral  sobreimpuesto a una anterior fase dextral. Corresponde al limite entre el Terreno Piedra Alta (Craton del Rio de la Plata) y el Terreno Nico Perez (Metacraton) al Norte y entre el Terreno Piedra Alta y el Cinturon Dom Feliciano al Sur. Litologicamente compuesto por milonitas y cataclasitas.",
+      "materiales": {
+        "gneis": 0.6
+      },
+      "celdas_km2": 1203
+    },
+    {
+      "codigo": 36,
+      "unidad": "Zona de Cizalla de Rivera",
+      "periodo": "Ediacarico",
+      "descripcion": "Zona de Cizalla asociada a la Orogenia Brasiliana. Tiene sentido sinestral y se compone litologicamente por milonitas y cataclasitas.",
+      "materiales": {
+        "gneis": 0.6,
+        "oro": 0.15
+      },
+      "celdas_km2": 250
+    },
+    {
+      "codigo": 37,
+      "unidad": "Zona de Cizalla Sierra Ballena",
+      "periodo": "Ediacarico",
+      "descripcion": "Zona de Cizalla asociada a la Orogenia Brasiliana bajo un sistema transpresivo sinestral. Se compone litológicamente por cataclasitas y milonitas con pliegues, crenulacion y microbudinado.",
+      "materiales": {
+        "gneis": 0.6
+      },
+      "celdas_km2": 265
+    },
+    {
+      "codigo": 38,
+      "unidad": "Zonas de Cizalla Brasilianas",
+      "periodo": "Ediacarico",
+      "descripcion": "Fajas de cataclasitas y milonitas asociadas a la Orogenia Brasiliana.",
+      "materiales": {
+        "gneis": 0.6
+      },
+      "celdas_km2": 1087
+    },
+    {
+      "codigo": 39,
+      "unidad": "Formacion Piedras de Afilar",
+      "periodo": "Ediacarico",
+      "descripcion": "Cuarcitas, arenicas con estratificacion cruzada y marcas de onda, lutitas, pizarras, conglomerados y calizas. Ambiente de sedimentacion de plataforma. Se desconoce la correlacion que puede existir entre esta formacion y el Grupo Barriga Negra. En ambos casos su ubicacion estratigrafica es tentativa.",
+      "materiales": {
+        "caliza": 0.4
+      },
+      "celdas_km2": 19
+    },
+    {
+      "codigo": 40,
+      "unidad": "Grupo Barriga Negra",
+      "periodo": "Ediacarico",
+      "descripcion": "Conglomerados de granulometrias variables. Calizas, limolitas, limolitas calcareas, con intercalaciones de niveles de arenisca. Areniscas, arcosas, cuarcitas e intercalaciones de niveles conglomeradicos.",
+      "materiales": {
+        "marmol": 0.4,
+        "caliza": 0.7,
+        "dolomita": 0.3
+      },
+      "celdas_km2": 304
+    },
+    {
+      "codigo": 41,
+      "unidad": "Granitos Anorogenicos  - Granito de La Paz",
+      "periodo": "Ediacarico",
+      "descripcion": "Presenta dos facies principales. La facies porfiritica (predominante) corresponde a un granito con megablastos de microclina pertitica zonados de hasta 4 cm que incluyen a los demas minerales intensamente, albita, dos generaciones de cuarzo, escasa ortoclasa conformando texturas tipo Rapakivi,  biotita, anfibol, circon, apatito y opacos.  La facies eqigranular es de grano medio y esta constituido por ortosa y microclina pertitica, cuarzo en dos generaciones, albita, biotita, epidoto, calcita, opacos y anfibol. Ocurren ademas enclaves maficos biotiticos, enclaves micrograniticos, asi como una importante actividad filoniana basica y acida recortando el macizo.",
+      "materiales": {
+        "granito": 1.0,
+        "balasto": 0.8
+      },
+      "celdas_km2": 24
+    },
+    {
+      "codigo": 42,
+      "unidad": "Formacion Cerrezuelo",
+      "periodo": "Devonico Devonico Inferior",
+      "descripcion": "Miembro Superior: areniscas finas y medias, arcillosas, micaceas, de seleccion variable, masivas o con estratificacion cruzada de colores pardo y rojo. Se intercalan niveles lutiticos, gravillosos y conglomeradicos. Miembro Inferior: Arenicas, gravillosa a conglomeradicas con estratificacion cruzada de color blanco amarillento. Se intercalan lutitas caoliniticas y areniscas muy finas. Sedimentacion fluvial.",
+      "materiales": {
+        "yeso": 0.05,
+        "caolin": 0.5
+      },
+      "celdas_km2": 1457
+    },
+    {
+      "codigo": 43,
+      "unidad": "Formacion Cordobes",
+      "periodo": "Devonico Devonico Inferior",
+      "descripcion": "Areniscas muy finas y lutitas caoliniticas, micaceas, de colores gris y ocre. Se intercalan niveles fosiliferos y de yeso. Sedimentacion marina.",
+      "materiales": {
+        "caolin": 0.8
+      },
+      "celdas_km2": 500
+    },
+    {
+      "codigo": 44,
+      "unidad": "Formacion La Paloma",
+      "periodo": "Devonico Devonico Inferior",
+      "descripcion": "Areniscas finas a medias, arcillosas, micaceas, masivas y/o con estratificacion paralela fina de color violaceo. Se intercalan lechos gravillosos. Sedimentacion litoral fluvial.",
+      "materiales": {
+        "caolin": 0.3
+      },
+      "celdas_km2": 116
+    },
+    {
+      "codigo": 45,
+      "unidad": "Formacion San Gregorio",
+      "periodo": "Carbonifero-Permico Pensilvaniense-Cisuraliano",
+      "descripcion": "Limolitas, fangolitas, lutitas varvicas y tillitas, de colores variables. Se intercalan conglomerados y areniscas gravillosas de seleccion regular, arcillosas y masivas, de color gris y blanco amarillento. Sedimentacion fluvio-torrencial, lacustre y glacial.",
+      "materiales": {},
+      "celdas_km2": 3004
+    },
+    {
+      "codigo": 46,
+      "unidad": "Formacion Tres Islas",
+      "periodo": "Permico Cisuraliano",
+      "descripcion": "Areniscas finas a conglomeradicas, de seleccion regular, arcillosas, masivas, estratificacion ondulante y cruzada, de color blanco amarillento. Se intercalan limolitas y lechos carbonosos. Sedimentacion litoral.",
+      "materiales": {
+        "carbon": 0.1
+      },
+      "celdas_km2": 1020
+    },
+    {
+      "codigo": 47,
+      "unidad": "Permico Medio Indiferenciado",
+      "periodo": "Permico Guadalupiano",
+      "descripcion": "Rocas sedimentarias indifereciadas.",
+      "materiales": {},
+      "celdas_km2": 750
+    },
+    {
+      "codigo": 48,
+      "unidad": "Formacion Fraile Muerto",
+      "periodo": "Permico Guadalupiano",
+      "descripcion": "Limolitas y areniscas finas, micaceas, finamente estratificadas de tipo entrecruzado, de colores gris a blanco grisaceo. Sedimentacion marina neritica.",
+      "materiales": {},
+      "celdas_km2": 1081
+    },
+    {
+      "codigo": 49,
+      "unidad": "Formaciones Paso Aguiar y Mangrullo",
+      "periodo": "Permico Guadalupiano",
+      "descripcion": "Paso Aguiar: Limolitas y areniscas muy finas, arcillosas, con estratificacion paralela y cruzada muy fina de colores gris y verde. Sedimentacion marina epicontinental. Mangrullo: Limolitas, lutitas, lutitas pirobituminosas y niveles calcareos, de estructura masiva y/o estratificada laminar de color gris y negro. Sedimentacion marina epicontinental.",
+      "materiales": {
+        "lutitas_bituminosas": 0.3
+      },
+      "celdas_km2": 1292
+    },
+    {
+      "codigo": 50,
+      "unidad": "Formacion Yaguari Inferior",
+      "periodo": "Permico Lopingiense",
+      "descripcion": "Limolitas, areniscas muy finas y lutitas micaceas de estratificacion laminar paralela. Colores pardo, violaceo, gris,verde y rojizo. Sedimentaciuon fluvio estuarina.",
+      "materiales": {
+        "bentonita": 0.2
+      },
+      "celdas_km2": 1647
+    },
+    {
+      "codigo": 51,
+      "unidad": "Formacion Yaguari Superior",
+      "periodo": "Permico Lopingiense",
+      "descripcion": "Areniscas finas a gruesas de seleccion variable, con intercalaciones de niveles arcillo-arenosos, lutitas, calizas, limolitas y conglomerados. Estratificacion cruzada y paralela de colores rojo, pardo y violaceo.",
+      "materiales": {
+        "caliza": 0.2,
+        "bentonita": 0.3
+      },
+      "celdas_km2": 3847
+    },
+    {
+      "codigo": 52,
+      "unidad": "Basaltos Mezosoicos Indiferenciados",
+      "periodo": "",
+      "descripcion": "Basaltos indiferenciados de la Provincia Parana-Etendeka.",
+      "materiales": {
+        "basalto": 1.0,
+        "ganado_vacuno": 0.9,
+        "ovinos": 0.8
+      },
+      "celdas_km2": 28
+    },
+    {
+      "codigo": 53,
+      "unidad": "Formacion Tacuarembo",
+      "periodo": "Jurasico Jurasico Superior",
+      "descripcion": "Miembro Superior: areniscas finas a medias bien seleccionadas, algo arcillosas con estratificacion cruzada de tipo eolico, de color rojizo. Sedimentacion continental desertica. Miembro Inferior: Areniscas finas a medias, arcillosas de colores blanco y rosado con intercalaciones de lutitas y limolitas grises y verdes, masivas o con estratificacion cruzada de bajo angulo. Sedimentacion fluvial  de planicie de inundacion.",
+      "materiales": {
+        "arenisca": 0.7,
+        "balasto": 0.3,
+        "ganado_vacuno": 0.6,
+        "ovinos": 0.5,
+        "forestacion": 0.9
+      },
+      "celdas_km2": 2986
+    },
+    {
+      "codigo": 54,
+      "unidad": "Formacion Arapey",
+      "periodo": "Jurasico-Cretacico Jurasico Superior - Cretacico Inferior",
+      "descripcion": "Lavas basicas del tipo basaltos toleiticos con estructura en coladas. Presenta intercalaciones de areniscas eolicas.",
+      "materiales": {
+        "basalto": 1.0,
+        "amatista": 0.15,
+        "agata": 0.15,
+        "ganado_vacuno": 0.9,
+        "ovinos": 0.8
+      },
+      "celdas_km2": 43897
+    },
+    {
+      "codigo": 55,
+      "unidad": "Formacion Cuaro",
+      "periodo": "Cretacico Cretacico Inferior",
+      "descripcion": "Rocas hipabisales basicas, con estructura en diques y sills.\tLas doleritas del sill de Cuaro estan compuestas por labradorita, augita, pigeonita, magnetita, ilmenita, relictos de olivino y trazas de apatito, presentando frecuentes texturas glomeroporfiriticas con fenocristales de plagioclasa y/o clinopiroxeno.",
+      "materiales": {
+        "basalto": 0.7
+      },
+      "celdas_km2": 410
+    },
+    {
+      "codigo": 56,
+      "unidad": "Formacion Puerto Gomez",
+      "periodo": "Cretacico Cretacico Inferior",
+      "descripcion": "Se compone litologicamente por coladas de basaltos y secundariamente andesitas. Los basaltos presentan estructura amigdaloide y en menor medida masiva, desarrollan texturas subofitica a intersectal y ocasionalmente glomeroporfirica. Mineralogicamente presentan augita, plagioclasa calcica, olivina y opacos, mientras que las amigdalas contienen ceolitas, calcita, yeso y cuarzo. Estos rellenos se han asociado a un origen subacuatico. Los terminos andesiticos son  porfiricos con matriz afanitica y presentan fenocristales de andesina y maficos serpentinizados.",
+      "materiales": {
+        "basalto": 0.9
+      },
+      "celdas_km2": 831
+    },
+    {
+      "codigo": 57,
+      "unidad": "Conglomerado de La California",
+      "periodo": "Cretacico Cretacico Inferior",
+      "descripcion": "Brechas y conglomerados polimicticos sinbasalticos asociado a litologias limo-arenosas de color pardo amarillento.",
+      "materiales": {
+        "balasto": 0.4,
+        "canto_rodado": 0.5
+      },
+      "celdas_km2": 71
+    },
+    {
+      "codigo": 58,
+      "unidad": "Formacion Valle Chico",
+      "periodo": "Cretacico Cretacico Inferior",
+      "descripcion": "Sienitas, microsienitas, cuarzo-sienitas y porfidos traquiticos, diques de riolitas y traquitas.",
+      "materiales": {},
+      "celdas_km2": 253
+    },
+    {
+      "codigo": 59,
+      "unidad": "Formacion Arequita",
+      "periodo": "Cretacico Cretacico Inferior",
+      "descripcion": "Riolitas y dacitas con estructura en derrame o filones. Flujos y oledas piroclásticas. Hialoclastitas acidas.",
+      "materiales": {},
+      "celdas_km2": 305
+    },
+    {
+      "codigo": 60,
+      "unidad": "Formacion Migues",
+      "periodo": "Cretacico Cretacico Inferior",
+      "descripcion": "Areniscas finas a medias, arcillosas y/o calcareas, estratificadas, de colores rojizos. Lutitas negras y pardas e intercalaciones de niveles conglomeradicos polimicticos. Sedimentacion continental de fosa tectonica.",
+      "materiales": {
+        "balasto": 0.4
+      },
+      "celdas_km2": 649
+    },
+    {
+      "codigo": 61,
+      "unidad": "Cretacico Superior Indiferenciado",
+      "periodo": "Cretacico Cretacico Superior",
+      "descripcion": "Rocas sedimentarias indifereciadas.",
+      "materiales": {
+        "caliza": 0.3
+      },
+      "celdas_km2": 39
+    },
+    {
+      "codigo": 62,
+      "unidad": "Formacion Guichon",
+      "periodo": "Cretacico Cretacico Superior",
+      "descripcion": "Areniscas finas a medias, bien seleccionadas, estratificacion cruzada y/o paralela, de color rojizo. Excepcionalmente niveles conglomeradicos. Sedimentacion continental clima arido.",
+      "materiales": {
+        "arenisca": 0.3,
+        "cultivos_secano": 0.4,
+        "forestacion": 0.7
+      },
+      "celdas_km2": 3413
+    },
+    {
+      "codigo": 63,
+      "unidad": "Formacion Mercedes",
+      "periodo": "Cretacico Cretacico Superior",
+      "descripcion": "Areniscas medias a conglomeradicas, mal seleccionadas, arcillosas, con estratos  silicificados, de estratificacion cruzada, de colores blanco y rosado. Presenta intercalaciones de conglomerados, lutitas y calizas. Sedimentacion continental fluvio torrencial.",
+      "materiales": {
+        "caliza": 0.2,
+        "balasto": 0.5,
+        "canto_rodado": 0.4,
+        "cultivos_secano": 0.4,
+        "forestacion": 0.6
+      },
+      "celdas_km2": 4404
+    },
+    {
+      "codigo": 64,
+      "unidad": "Formacion Asencio",
+      "periodo": "Cretacico-Eoceno Cretacico Superior-Eoceno Medio",
+      "descripcion": "Sucesión silicoclástica roja, se destaca la ocurrencia de trazas fósiles de insectos.  Arenicas finas, bien seleccionadas, arcillosas, masivas, de colores blanco y rosado. Presenta procesos secundarios de ferrificacion y silicificacion, de color rojo herrumbre, con intercalaciones de calizas. Duricostras ferruginosas y estratos nodulares macizos clima subtropical húmedo a tropical seco (generación de Ultisoles).",
+      "materiales": {
+        "caliza": 0.2
+      },
+      "celdas_km2": 5220
+    },
+    {
+      "codigo": 65,
+      "unidad": "Formacion Fray Bentos",
+      "periodo": "Paleogeno Oligoceno",
+      "descripcion": "Areniscas  muy finas y loess, con porcentaje variable de arena fina, a veces muy arcillosas, masivas, de color naranja. En la base desarrolla niveles lodoliticos, fangoliticos y brechoides. Sedimentacion continental peridesertica.",
+      "materiales": {
+        "tosca": 0.8,
+        "arcilla_roja": 0.6,
+        "ganado_vacuno": 0.6,
+        "leche": 0.4,
+        "cultivos_secano": 0.9
+      },
+      "celdas_km2": 6860
+    },
+    {
+      "codigo": 66,
+      "unidad": "Formacion Camacho",
+      "periodo": "Neogeno Mioceno",
+      "descripcion": "Areniscas (y arenas) finas a gruesas, mal seleccionadas, masivas y de estructura lenticular, de colores rosados a gris verdosos con arcillas verdes y lumaquelas grises intercaladas. Sedimentacion marina.",
+      "materiales": {
+        "conchilla": 0.25,
+        "arena": 0.4
+      },
+      "celdas_km2": 879
+    },
+    {
+      "codigo": 67,
+      "unidad": "Formacion Paso del Puerto",
+      "periodo": "Neogeno Plioceno",
+      "descripcion": "Areniscas finas a conglomeradicas, mal seleccionadas, masivas con intercalacion de niveles arcillosos de colores pardos y rojizos. Sedimentacion continental fluvio-torrencial.",
+      "materiales": {
+        "arena": 0.3,
+        "balasto": 0.4
+      },
+      "celdas_km2": 1438
+    },
+    {
+      "codigo": 68,
+      "unidad": "Formacion Salto",
+      "periodo": "Neogeno Plioceno",
+      "descripcion": "Areniscas finas a medias, de color rojizo, con intercalaciones de niveles fangoliticos y conglomeradicos. Estructura lenticular, de estratificacion cruzada y/o paralela. Sedimentacion fluvial.",
+      "materiales": {
+        "arenisca": 0.3,
+        "horticultura_fruticultura": 0.4,
+        "forestacion": 0.5
+      },
+      "celdas_km2": 1293
+    },
+    {
+      "codigo": 69,
+      "unidad": "Formacion Raigon",
+      "periodo": "Neogeno Plioceno",
+      "descripcion": "Areniscas finas a conglomeradicas, mal seleccionadas, con estratificacion cruzada y paralela, de color blanco amarillento. Presenta intercalaciones de arcillas verdes. Sedimentacion fluvial a fluvio-deltaica.",
+      "materiales": {
+        "arena": 0.4,
+        "balasto": 0.5,
+        "canto_rodado": 0.4
+      },
+      "celdas_km2": 1267
+    },
+    {
+      "codigo": 70,
+      "unidad": "Formacion Libertad",
+      "periodo": "Cuaternario Pleistoceno",
+      "descripcion": "Lodolitas, loees y fangolitas con porcentaje variable de arenas y arcillas, de color pardo a pardo rojizo. Sedimentacion continental peridesertica.",
+      "materiales": {
+        "yeso": 0.03,
+        "tosca": 0.8,
+        "arcilla_roja": 0.9,
+        "ganado_vacuno": 0.6,
+        "leche": 0.5,
+        "cultivos_secano": 0.9,
+        "horticultura_fruticultura": 0.5,
+        "vid": 0.4
+      },
+      "celdas_km2": 6849
+    },
+    {
+      "codigo": 71,
+      "unidad": "Arenas Indiferenciadas",
+      "periodo": "Cuaternario Pleistoceno",
+      "descripcion": "Arenas continentales indiferenciadas",
+      "materiales": {
+        "arena": 0.9
+      },
+      "celdas_km2": 185
+    },
+    {
+      "codigo": 72,
+      "unidad": "Formacion Las Arenas",
+      "periodo": "Cuaternario Pleistoceno",
+      "descripcion": "Arenas finas y medias de seleccion regular, de colores blanco, amarillo y rojo. Sedimentacion continental.",
+      "materiales": {
+        "arena": 0.9,
+        "forestacion": 0.5
+      },
+      "celdas_km2": 1034
+    },
+    {
+      "codigo": 73,
+      "unidad": "Formacion Chuy",
+      "periodo": "Cuaternario Pleistoceno",
+      "descripcion": "Sedimentos arenosos, arcillo-arenosos finos a medios de color blanco amarillento a rojizo. Sedimentacion marina.",
+      "materiales": {
+        "arena": 0.7,
+        "arroz": 0.5
+      },
+      "celdas_km2": 435
+    },
+    {
+      "codigo": 74,
+      "unidad": "Formacion Dolores",
+      "periodo": "Cuaternario Pleistoceno",
+      "descripcion": "Lodolitas y areniscas arcillosas muy finas, de colores pardos. Sedimentacion continental, relacionada  a fenomenos eolicos y de coluviacion, con formacion de flujos de barro, que se redepositan en las zonas topograficamente mas bajas.",
+      "materiales": {
+        "tosca": 0.5,
+        "arcilla_roja": 0.8,
+        "leche": 0.4,
+        "cultivos_secano": 0.7
+      },
+      "celdas_km2": 14428
+    },
+    {
+      "codigo": 75,
+      "unidad": "Formacion Villa Soriano",
+      "periodo": "Cuaternario Holoceno",
+      "descripcion": "Sedimentos arenosos a gravillosos, con lechos intercalados de cantos, arcillas y limos de color gris. Sedimentacion mixta.",
+      "materiales": {
+        "conchilla": 0.35,
+        "arena": 0.5,
+        "canto_rodado": 0.4,
+        "arcilla_gris": 0.5
+      },
+      "celdas_km2": 2433
+    },
+    {
+      "codigo": 76,
+      "unidad": "Arenas litorales y fluviales",
+      "periodo": "Cuaternario Holoceno",
+      "descripcion": "Arenas fluviales, costeras y eolicas. Sedimentacion mixta con predominancia continental.",
+      "materiales": {
+        "arena": 1.0,
+        "forestacion": 0.4
+      },
+      "celdas_km2": 719
+    },
+    {
+      "codigo": 77,
+      "unidad": "Actual",
+      "periodo": "Cuaternario Holoceno",
+      "descripcion": "Sedimentos limo-arcillosos, arenosos a veces conglomeradicos (aluviones y coluviones), depositos de turbas.",
+      "materiales": {
+        "canto_rodado": 0.2,
+        "arcilla_gris": 0.7,
+        "turba": 0.15,
+        "arroz": 0.4,
+        "monte_nativo": 0.4,
+        "paja_junco": 0.5
+      },
+      "celdas_km2": 8965
+    }
+  ],
+  "potencial": "ESTIMADO: peso 0..1 de cada material en cada unidad geológica, de los pesos `unidades_dinamige` del catálogo (descripción litológica de la carta y la carta de materias primas de 1987)",
+  "titulos": {
+    "archivo": "titulos_mineros.json",
+    "total": 1975,
+    "por_material": {
+      "agata": {
+        "titulos": 204,
+        "concesiones": 144,
+        "departamentos": {
+          "Artigas": 194,
+          "Salto": 7
+        }
+      },
+      "amatista": {
+        "titulos": 204,
+        "concesiones": 144,
+        "departamentos": {
+          "Artigas": 196,
+          "Salto": 5
+        }
+      },
+      "arcilla_roja": {
+        "titulos": 10,
+        "concesiones": 7,
+        "departamentos": {
+          "Cerro Largo": 5,
+          "Canelones": 3,
+          "Durazno": 1,
+          "San José": 1
+        }
+      },
+      "arena": {
+        "titulos": 74,
+        "concesiones": 66,
+        "departamentos": {
+          "San José": 24,
+          "Maldonado": 14,
+          "Canelones": 10,
+          "Colonia": 9,
+          "Salto": 7,
+          "Paysandú": 3,
+          "Durazno": 2,
+          "Rocha": 2,
+          "Soriano": 2
+        }
+      },
+      "arenas_negras": {
+        "titulos": 1,
+        "concesiones": 0,
+        "departamentos": {
+          "Lavalleja": 1
+        }
+      },
+      "balasto": {
+        "titulos": 163,
+        "concesiones": 159,
+        "departamentos": {
+          "Canelones": 53,
+          "Colonia": 28,
+          "Rocha": 21,
+          "Maldonado": 12,
+          "Montevideo": 10,
+          "Florida": 6,
+          "Cerro Largo": 5,
+          "Soriano": 5,
+          "Durazno": 4,
+          "San José": 4,
+          "Tacuarembó": 3,
+          "Treinta y Tres": 3,
+          "Artigas": 2,
+          "Flores": 2,
+          "Paysandú": 1,
+          "Rivera": 1
+        }
+      },
+      "basalto": {
+        "titulos": 4,
+        "concesiones": 4,
+        "departamentos": {
+          "Artigas": 2,
+          "Rivera": 1,
+          "Salto": 1
+        }
+      },
+      "bentonita": {
+        "titulos": 9,
+        "concesiones": 3,
+        "departamentos": {
+          "Cerro Largo": 9
+        }
+      },
+      "caliza": {
+        "titulos": 82,
+        "concesiones": 39,
+        "departamentos": {
+          "Lavalleja": 23,
+          "Treinta y Tres": 22,
+          "Maldonado": 13,
+          "Paysandú": 13,
+          "Rivera": 5,
+          "Cerro Largo": 4,
+          "Colonia": 3,
+          "San José": 1
+        }
+      },
+      "canto_rodado": {
+        "titulos": 20,
+        "concesiones": 18,
+        "departamentos": {
+          "Maldonado": 7,
+          "Salto": 6,
+          "Paysandú": 4,
+          "Rocha": 2
+        }
+      },
+      "caolin": {
+        "titulos": 4,
+        "concesiones": 4,
+        "departamentos": {
+          "Durazno": 3,
+          "Cerro Largo": 1
+        }
+      },
+      "corindon": {
+        "titulos": 1,
+        "concesiones": 0,
+        "departamentos": {
+          "Lavalleja": 1
+        }
+      },
+      "dolomita": {
+        "titulos": 23,
+        "concesiones": 14,
+        "departamentos": {
+          "Maldonado": 11,
+          "Lavalleja": 10,
+          "Treinta y Tres": 3
+        }
+      },
+      "feldespato_cuarzo": {
+        "titulos": 8,
+        "concesiones": 2,
+        "departamentos": {
+          "Rocha": 2,
+          "Florida": 1,
+          "Lavalleja": 1,
+          "Maldonado": 1,
+          "Rivera": 1,
+          "San José": 1,
+          "Treinta y Tres": 1
+        }
+      },
+      "fluorita_baritina": {
+        "titulos": 1,
+        "concesiones": 0,
+        "departamentos": {
+          "Lavalleja": 1
+        }
+      },
+      "fosfatos": {
+        "titulos": 25,
+        "concesiones": 0,
+        "departamentos": {
+          "Lavalleja": 10,
+          "Rivera": 7,
+          "Colonia": 3,
+          "Treinta y Tres": 3,
+          "Cerro Largo": 1,
+          "Flores": 1,
+          "San José": 1
+        }
+      },
+      "grafito": {
+        "titulos": 1,
+        "concesiones": 0,
+        "departamentos": {
+          "San José": 1
+        }
+      },
+      "granate": {
+        "titulos": 2,
+        "concesiones": 0,
+        "departamentos": {
+          "Rivera": 2
+        }
+      },
+      "granito": {
+        "titulos": 20,
+        "concesiones": 16,
+        "departamentos": {
+          "Canelones": 3,
+          "Flores": 3,
+          "Rivera": 3,
+          "Rocha": 3,
+          "Colonia": 2,
+          "Maldonado": 2,
+          "Cerro Largo": 1,
+          "San José": 1,
+          "Soriano": 1,
+          "Treinta y Tres": 1
+        }
+      },
+      "hierro": {
+        "titulos": 146,
+        "concesiones": 8,
+        "departamentos": {
+          "Rivera": 84,
+          "Durazno": 25,
+          "Lavalleja": 18,
+          "Treinta y Tres": 11,
+          "Florida": 8,
+          "Colonia": 3,
+          "Rocha": 2,
+          "Cerro Largo": 1,
+          "San José": 1
+        }
+      },
+      "manganeso": {
+        "titulos": 44,
+        "concesiones": 0,
+        "departamentos": {
+          "Rivera": 23,
+          "Lavalleja": 11,
+          "Treinta y Tres": 4,
+          "Colonia": 3,
+          "Durazno": 2,
+          "Cerro Largo": 1,
+          "Florida": 1
+        }
+      },
+      "marmol": {
+        "titulos": 5,
+        "concesiones": 5,
+        "departamentos": {
+          "Maldonado": 4,
+          "Lavalleja": 1
+        }
+      },
+      "metales_base": {
+        "titulos": 111,
+        "concesiones": 1,
+        "departamentos": {
+          "Rivera": 35,
+          "Durazno": 24,
+          "Lavalleja": 24,
+          "Treinta y Tres": 11,
+          "Florida": 8,
+          "San José": 8,
+          "Colonia": 3,
+          "Rocha": 3,
+          "Cerro Largo": 2,
+          "Flores": 1
+        }
+      },
+      "metales_estrategicos": {
+        "titulos": 95,
+        "concesiones": 1,
+        "departamentos": {
+          "Rivera": 32,
+          "Durazno": 23,
+          "Lavalleja": 18,
+          "Treinta y Tres": 11,
+          "Florida": 7,
+          "Rocha": 4,
+          "Cerro Largo": 3,
+          "Colonia": 3,
+          "Flores": 1,
+          "San José": 1
+        }
+      },
+      "oro": {
+        "titulos": 165,
+        "concesiones": 2,
+        "departamentos": {
+          "Rivera": 80,
+          "Lavalleja": 27,
+          "Durazno": 26,
+          "Treinta y Tres": 12,
+          "San José": 10,
+          "Florida": 9,
+          "Colonia": 3,
+          "Rocha": 3,
+          "Cerro Largo": 2,
+          "Flores": 1
+        }
+      },
+      "piedra_laja": {
+        "titulos": 13,
+        "concesiones": 10,
+        "departamentos": {
+          "Lavalleja": 7,
+          "Treinta y Tres": 5,
+          "Maldonado": 1
+        }
+      },
+      "roca": {
+        "titulos": 128,
+        "concesiones": 120,
+        "departamentos": {
+          "Maldonado": 29,
+          "Canelones": 14,
+          "Rocha": 12,
+          "Colonia": 11,
+          "Paysandú": 8,
+          "Artigas": 6,
+          "San José": 6,
+          "Tacuarembó": 6,
+          "Durazno": 5,
+          "Flores": 5,
+          "Cerro Largo": 4,
+          "Salto": 4,
+          "Florida": 3,
+          "Montevideo": 3,
+          "Rivera": 3,
+          "Soriano": 3,
+          "Treinta y Tres": 3,
+          "Lavalleja": 2
+        }
+      },
+      "sin_dato": {
+        "titulos": 473,
+        "concesiones": 413,
+        "departamentos": {
+          "Canelones": 51,
+          "Colonia": 46,
+          "Florida": 46,
+          "San José": 35,
+          "Durazno": 32,
+          "Soriano": 29,
+          "Rocha": 27,
+          "Flores": 23,
+          "Artigas": 20,
+          "Cerro Largo": 20,
+          "Rivera": 20,
+          "Treinta y Tres": 19,
+          "Maldonado": 18,
+          "Paysandú": 17,
+          "Salto": 16,
+          "Tacuarembó": 15,
+          "Lavalleja": 13,
+          "Río Negro": 12,
+          "Montevideo": 10
+        }
+      },
+      "talco": {
+        "titulos": 2,
+        "concesiones": 1,
+        "departamentos": {
+          "Lavalleja": 1,
+          "Rivera": 1
+        }
+      },
+      "tosca": {
+        "titulos": 761,
+        "concesiones": 126,
+        "departamentos": {
+          "Durazno": 102,
+          "Río Negro": 92,
+          "Paysandú": 90,
+          "Soriano": 69,
+          "Tacuarembó": 65,
+          "Florida": 60,
+          "Flores": 48,
+          "Canelones": 44,
+          "Colonia": 43,
+          "Cerro Largo": 42,
+          "Maldonado": 27,
+          "Lavalleja": 24,
+          "San José": 13,
+          "Treinta y Tres": 12,
+          "Salto": 7,
+          "Rocha": 6,
+          "Montevideo": 4,
+          "Rivera": 4,
+          "Artigas": 1
+        }
+      },
+      "yeso": {
+        "titulos": 1,
+        "concesiones": 0,
+        "departamentos": {
+          "Durazno": 1
+        }
+      }
+    },
+    "sustancias_sin_clasificar": [],
+    "estado": "MEDIDO (catastro minero, consulta del 17/11/2026)"
+  },
+  "regiones_mineras": [
+    {
+      "nombre": "DISTRITO GEMOLÓGICO LOS CATALANES",
+      "materiales": "AGATAS Y AMATISTAS",
+      "centro": [
+        -56.28008888888889,
+        -30.831411111111112
+      ]
+    }
+  ],
+  "fuentes": {
+    "titulos": "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_ConsMin/Consulta_Minera_2026/MapServer/{2,3,4,5}/query",
+    "geologia": "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query",
+    "regiones": "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/GeologiaGeoS/MapServer/0/query",
+    "catalogo": "assets/datos/recursos_uruguay.json"
+  }
+}

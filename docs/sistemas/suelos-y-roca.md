@@ -16,7 +16,7 @@ arcilla, arena) y la carta geológica de DINAMIGE están en
   aproximación: falta cruzarla con la descripción oficial de cada grupo.
 - **Carta Geológica (DINAMIGE)**: desde noviembre de 2026 se usa el mapa base de unidades
   geológicas 2017 del geoportal del MIEM (`geoportal.miem.gub.uy/arcgis1091`), que sí responde;
-  hoy alimenta los materiales (`minerales.bin`), no todavía los afloramientos de este documento.
+  hoy alimenta los materiales (`materiales.bin`), no todavía los afloramientos de este documento.
 
 ## Qué dicen los datos en Montevideo
 

@@ -1,7 +1,7 @@
 # Recursos del suelo, aptitud de la tierra y externalidades de las zonas
 
 > Documento de sistema. Estado: **en el motor** (`engine/src/city/recursos/`), con datos reales
-> del mapa de Montevideo (`assets/mapas/montevideo/{suelos,productividad,geologia,minerales}*.bin`
+> del mapa de Montevideo (`assets/mapas/montevideo/{suelos,productividad,geologia,materiales}*.bin`
 > y `suelos.json`). Las épocas siguientes y las industrias de exportación lo usan por su API.
 
 ## Qué resuelve
@@ -12,8 +12,11 @@ barrio. El sistema da:
 
 1. **Mapas de calidad de la tierra** (cultivo y pasturas) a partir del índice de productividad
    CONEAT, la aptitud de cada grupo de suelos, la pendiente y los bañados.
-2. **Mapas de materiales**: piedra, arcilla, arena y canto rodado, a partir de la carta geológica
-   de DINAMIGE, los suelos CONEAT, la costa, los arroyos y la minería conocida.
+2. **Mapas de materiales con tipo**: granito, gneis, balasto, canto rodado, arena, arcilla roja y
+   gris, tosca, conchilla, caliza y turba, a partir de la carta geológica de DINAMIGE, los suelos
+   CONEAT, la costa, los arroyos y la minería conocida con su sustancia. El catálogo de todos los
+   recursos del país (y lo que se produce con ellos) está en
+   [recursos-de-uruguay.md](recursos-de-uruguay.md).
 3. **Rinde de cada sitio**: chacras, estancias, hornos y canteras producen según su lugar; una
    cantera sin piedra no se puede poner (y no rendiría nada), un horno sin arcilla tampoco.
 4. **Molestias** (olor, ruido, humo y agua sucia) de cada industria y servicio, con alcance; el
@@ -34,8 +37,8 @@ caché del constructor (`--cache`), así el paso se puede repetir sin red.
 | **Índice de productividad** por grupo (`PROD_SUE`, media nacional 100) | `https://dgrn.mgap.gub.uy/arcgis/rest/services/CONEAT/ConsultaConeat/MapServer/0/query` con `groupByFieldsForStatistics=SC,PROD_SUE` en la ventana del mapa (la capa también trae `IND_CONEAT` por padrón) | `productividad.bin`, `suelos.json` |
 | **Aptitud para cultivos de verano de secano** y sus limitantes, por grupo | `https://dgrn.mgap.gub.uy/arcgis/rest/services/TEMATICOS/IntConeat/MapServer/11/query` (aptitud S1…N2, limitantes) unida por `OBJECTID` con la capa 12 del mismo servicio (grupo `SC`) | `suelos.json` |
 | **Unidades geológicas** (código, unidad, período, descripción) | DINAMIGE (MIEM): `https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query` (`f=geojson`, 334 polígonos, 17 unidades en la ventana). El servidor apareció en el código del visualizador geominero (`visualizadorgeominero.dinamige.gub.uy/Dinamige_MVC2/`) | `geologia.bin`, `suelos.json` |
-| Minería conocida: concesiones para explotar y canteras de obra pública | DINAMIGE `…/Dinamige_GeoS/CatastroMineroGeoS/MapServer/4` y `/5` (solo la geometría: el servicio **no dice qué mineral**) | `minerales.bin` |
-| Canteras y pozos mineros abandonados | IDE Uruguay, WFS `hidrografia:actividad_minera_abandonada_a` y `hidrografia_urbana:actividad_minera_abandonada_a` (34 + 21 polígonos) | `minerales.bin` |
+| Minería conocida **con su sustancia** (tosca, balasto, arena, piedra partida, granito, arcilla…) | DINAMIGE `…/Dinamige_ConsMin/Consulta_Minera_2026/MapServer/{2,3,4,5}` (181 títulos en la ventana; antes `CatastroMineroGeoS/4` y `/5`, que no dicen qué mineral) | `materiales.bin` |
+| Canteras y pozos mineros abandonados | IDE Uruguay, WFS `hidrografia:actividad_minera_abandonada_a` y `hidrografia_urbana:actividad_minera_abandonada_a` (34 + 21 polígonos) | `materiales.bin` |
 | Playas, bancos de arena, bañados, arroyos, alturas, costa rocosa | los del mapa real (ver [mapa-real.md](mapa-real.md), [costa.md](costa.md), [suelos-y-roca.md](suelos-y-roca.md)) | — |
 
 Productividad oficial de los grupos del mapa (CONEAT, media del país = 100):
@@ -88,27 +91,37 @@ Unidades geológicas en la ventana y el material que se les asigna:
 - **Zonas sin CONEAT** (1,2 % de la tierra del mapa: la punta de la Ciudad Vieja, Punta Carretas
   y pocos más): toman el grupo de la vecina más cercana **de la misma clase geológica**; quedan
   marcadas (bit 128 de `suelos.bin`) y la ficha dice «estimado».
-- **Cantidad de cada material por clase geológica** (`GEO_MATERIAL` y `GEO_ARCILLA` en
+- **Ley de cada material por unidad geológica** (`GEO_MAT` en
   `tools/mapa_real/recursos_suelo.py`): pesos de diseño (0 a 1) leídos de la descripción
-  litológica de cada unidad. La carta es 1:500.000: no ve los afloramientos chicos.
-- **Piedra**: basamento + rocosidad CONEAT (afloramientos) + colinas de suelo superficial
-  (zonas CONEAT 1, 2, 4, 5) + costa rocosa (`costa.json`) + minería conocida sobre roca.
-- **Arcilla**: loess y aluviones, más en los bajos a menos de 300 m de un arroyo y en los suelos de
-  planicie (grupos 03); poca en los arenales (07). La minería conocida sobre sedimentos se toma
-  como pozo de tosca o arcilla.
+  litológica de cada unidad y de la memoria de la carta geológica de Montevideo. La carta es
+  1:500.000: no ve los afloramientos chicos. Detalle por material en
+  [recursos-de-uruguay.md](recursos-de-uruguay.md#materiales-del-mapa-de-montevideo).
+- **Piedra** (granito o gneis según la unidad; la costa rocosa, gneis): basamento + rocosidad
+  CONEAT (afloramientos) + colinas de suelo superficial (zonas CONEAT 1, 2, 4, 5) + costa rocosa
+  (`costa.json`) + títulos de piedra partida sobre roca.
+- **Balasto**: la roca alterada bajo el suelo (menos donde aflora sana) y las areniscas
+  conglomerádicas.
+- **Arcilla roja** (limos y lodolitas) en las lomadas; **arcilla gris** en los bajos a menos de
+  300 m de un arroyo, en los suelos de planicie (grupos 03) y en los bañados; poca en los arenales
+  (07). **Tosca** en los limos de las lomadas.
 - **Arena**: playas y bancos (IDE), 400 m de médanos detrás de la playa, grupos 07, la geología
   arenosa y la orilla de los arroyos anchos (más de 8 m).
 - **Canto rodado**: el lecho de los arroyos a menos de 1,5 km del basamento y las unidades con
   cantos.
-- **Conchilla y cal**: **no se incluyen**. La literatura menciona bancos de conchilla en la
-  Formación Villa Soriano, pero la descripción oficial de la unidad en la carta no los nombra y no
-  hay otra capa verificable; la cal colonial venía de fuera del mapa (Colonia, Minas).
+- **Conchilla**: la Formación Villa Soriano (estimado: la carta de materias primas de 1987 la
+  explota en Villa Soriano y Piriápolis; en Montevideo la unidad aflora en el Santa Lucía y el
+  Parque Lecocq). **Caliza: no hay** en el mapa ni en su entorno; la cal se importa (ver
+  [recursos-de-uruguay.md](recursos-de-uruguay.md#en-el-juego)).
+- **Minería conocida**: cada título marca su sustancia a 200 m; los que no la dicen y los pozos
+  abandonados, lo que da la geología (piedra sobre roca; arcilla roja y tosca sobre limos; arena
+  sobre arenas).
 - **Aptitud** (motor, `Recursos::en_punto`): cultivo = ½ IP/210 + ½ clase de cultivos de verano
   (S1 1; S2 0,85; S3 0,62; N1 0,32; N2 0,1), por pendiente (cae entre 6 % y 20 %), bañado o vega
   de arroyo, roca a la vista y arena suelta. Pasturas = 0,15 + 0,45 · IP/170 + 0,4 · aptitud
   general, con castigos más suaves. En el mapa ficticio de las pruebas todo se estima del relieve.
-- **Rinde**: chacra 0,35 + cultivo; estancia 0,4 + 0,9 · pasturas; horno y cantera 0 por debajo de
-  0,15 de material y 0,3 + material (hasta 1,3) por encima.
+- **Rinde**: chacra 0,35 + cultivo; estancia 0,4 + 0,9 · pasturas; horno, cantera y calera 0 por
+  debajo de 0,15 de material y 0,3 + material (hasta 1,3) por encima (la cantera, con la ley de lo
+  que saca; la calera, con la de su caliza o conchilla).
 - **Molestias** y **valor del suelo**: pesos de diseño (abajo).
 
 ## Archivos
@@ -118,8 +131,8 @@ Unidades geológicas en la ventana y el material que se les asigna:
 | `suelos.bin`, `suelos_contexto.bin` | la de `altura.bin` (20 m) / `contexto.bin` (100 m) | uint8: índice del grupo en `suelos.json` (bits 0-6) + 128 si es estimación; 0 = agua |
 | `productividad.bin`, `productividad_contexto.bin` | ídem | uint8: IP del grupo; 0 en el agua |
 | `geologia.bin`, `geologia_contexto.bin` | ídem | uint8: índice de la unidad en `suelos.json` |
-| `minerales.bin` | **40 m** (601 × 601) | 4 bytes por muestra: piedra, arcilla, arena, canto rodado (0..255 = 0..1) |
-| `minerales_contexto.bin` | la de contexto | ídem |
+| `materiales.bin` | **40 m** (601 × 601) | 11 bytes por muestra: granito, gneis, balasto, canto rodado, arena, arcilla roja, arcilla gris, tosca, conchilla, caliza, turba (0..255 = ley 0..1) |
+| `materiales_contexto.bin` | **200 m** desde −25 km (371 × 371) | ídem |
 | `suelos.json` | — | grupos (IP, aptitud, cultivos de verano, limitantes, rocosidad), unidades geológicas, fuentes y resumen |
 
 Se generan con el paso «Recursos del suelo» del constructor, que corre al final de la
@@ -192,14 +205,18 @@ plaza. Alrededor de la Ciudad Vieja da 0,57 y 0,68 (×1,03).
 ## En el juego
 
 - **Capas de datos** (cajón Capas): Valor del suelo (también los solares vacíos), Molestias (en
-  el terreno, en los solares y el arroyo sucio en pardo), Tierra para cultivo, Pasturas, Piedra,
-  Arcilla y Arena (una grilla de 6 × 6 km en celdas de 50 m alrededor del cursor). Al elegir
-  chacra, estancia, horno o cantera se prende sola la capa que le corresponde y la ayuda dice la
-  calidad del sitio y el rinde.
+  el terreno, en los solares y el arroyo sucio en pardo), Tierra para cultivo, Pasturas, Piedra
+  (granito y gneis), Arcilla (roja y gris), Arena y grava (arena, canto rodado, balasto) y Cal,
+  tosca y turba (una grilla de 6 × 6 km en celdas de 50 m alrededor del cursor; en las de
+  materiales, cada celda con el color del material de más ley). Al elegir chacra, estancia, horno,
+  cantera o calera se prende sola la capa que le corresponde y la ayuda dice la calidad del sitio,
+  el rinde y qué saca.
 - **Fichas**: del terreno (grupo CONEAT o «estimado», IP, aptitud y cultivos de verano con sus
-  limitantes, geología, aptitud para chacra y estancia, materiales y molestias); de cada solar
+  limitantes, geología, aptitud para chacra y estancia, cada material con su ley y para qué sirve,
+  y molestias); de cada solar
   (molestias, tierra, materia prima de los talleres, componentes del valor); de chacras,
-  estancias, hornos y canteras (rinde del sitio) y de lo que molesta (qué y hasta dónde).
+  estancias, hornos, canteras y caleras (rinde del sitio, qué material saca y qué vende) y de lo
+  que molesta (qué y hasta dónde).
 
 ## API para otros sistemas
 
@@ -212,6 +229,10 @@ En `engine/src/city/recursos/`:
   de industrias (que hoy devuelve 1).
 - `molestias::Perfil::desde_molestia(m)` (para los perfiles que solo traen `molestia: f32`) y
   `perfil_por_nombre("saladero" | "grasería" | "astillero" | …)`.
+- Materiales con tipo y catálogo: `materiales::{Material, catalogo, de_construccion,
+  se_saca_del_suelo, producto_cantera, producto_horno, fuente_de_cal}`,
+  `Recursos::materiales_cerca(p, radio)` y `Recursos::construccion_cerca(clave, p, radio)` (ver
+  [recursos-de-uruguay.md](recursos-de-uruguay.md#api-para-otros-sistemas)).
 - Ya calculado por solar: `City::recursos_del_lote(id)`, `City::valor_del_suelo(id)`,
   `City::suelo.molestia_de(id)`.
 

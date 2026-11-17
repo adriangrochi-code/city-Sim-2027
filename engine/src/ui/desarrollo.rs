@@ -120,6 +120,12 @@ const COLORES: [Color32; NPROD] = [
     Color32::from_rgb(90, 60, 40),
     Color32::from_rgb(70, 100, 130),
     Color32::from_rgb(90, 90, 90),
+    // Materiales: adoquines, sillería, arena, tejas, cal.
+    Color32::from_rgb(200, 120, 140),
+    Color32::from_rgb(150, 140, 160),
+    Color32::from_rgb(235, 210, 110),
+    Color32::from_rgb(190, 90, 50),
+    Color32::from_rgb(235, 235, 220),
 ];
 
 /// Exportaciones apiladas por producto (24 meses) con su leyenda.
