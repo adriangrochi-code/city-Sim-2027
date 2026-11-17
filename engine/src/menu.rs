@@ -330,7 +330,11 @@ impl Menu {
             real = std::sync::Arc::new(crate::terrain::TerrainGen::montevideo());
             &real
         };
-        let (game, edits) = save::restore(&f, t)?;
+        let (mut game, edits) = save::restore(&f, t)?;
+        // El mensaje inicial de una partida nueva ("Funda la ciudad…") no va en una cargada.
+        if game.city.plaza.is_some() {
+            game.message = format!("Partida cargada: {}, {}", f.nombre, game.city.date());
+        }
         let t_rebuild = t0.elapsed();
         let fp = fingerprint(&game);
         let new = Session::with_game(game, &edits, self.levels, self.threads, f.camara, f.hora);
