@@ -993,6 +993,419 @@ pub fn molino(t: &TerrainGen, e: &mut Edits, f: &Frame) {
     }
 }
 
+// --- Servicios, obras y campo (Fase 2 #5) -------------------------------------------------
+// Medidas reales en vóxeles de diseño de 0,5 m. Las que no salen de una fuente son
+// estimaciones de proporción (ver docs/sistemas/servicios.md).
+
+/// Pozo de balde: brocal de piedra de 1,5 m de diámetro y 1 m de alto, dos horcones con
+/// travesaño y roldana, y el balde. Marco: 10 × 10 vóxeles (5 × 5 m).
+pub fn pozo(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.foundation(t, e, 1, 9, 1, 9, STONE);
+    f.surface(e, 0, 10, 0, 10, DIRT);
+    f.fill(e, 1, 9, 0, 1, 1, 9, STONE);
+    cylinder(f, e, 5.0, 5.0, 1.6, 1, 3, STONE);
+    f.clear(e, 4, 6, 1, 3, 4, 6);
+    f.raw_fill(e, 4, 6, 0, 1, 4, 6, MUD);
+    for u in [2, 7] {
+        f.raw_fill(e, u, u + 1, 1, 6, 4, 5, WOOD_DARK);
+    }
+    f.raw_fill(e, 2, 8, 6, 7, 4, 5, WOOD_DARK);
+    f.raw(e, 5, 5, 4, WOOD);
+    f.raw(e, 5, 4, 4, IRON);
+    // Balde apoyado junto al brocal.
+    f.raw(e, 7, 1, 7, WOOD);
+}
+
+/// Aljibe público: losa de la cisterna de piedra (8 × 8 m) un poco elevada, brocal de cal con
+/// arco de hierro y roldana, pileta de piedra y caño de bajada. Marco: 20 × 20 (10 × 10 m).
+pub fn aljibe_publico(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.foundation(t, e, 2, 18, 2, 18, STONE);
+    f.surface(e, 0, 20, 0, 20, PLAZA);
+    f.fill(e, 2, 18, 0, 1, 2, 18, STONE);
+    ring(f, e, 2, 18, 1, 2, 2, 18, STONE_DARK);
+    // Brocal grande encalado con arco de hierro.
+    ring(f, e, 8, 12, 1, 3, 8, 12, CAL);
+    f.raw_fill(e, 9, 11, 1, 2, 9, 11, MUD);
+    for u in [8, 11] {
+        f.raw_fill(e, u, u + 1, 3, 7, 10, 11, IRON);
+    }
+    f.raw_fill(e, 8, 12, 7, 8, 10, 11, IRON);
+    f.raw(e, 10, 6, 10, WOOD);
+    // Pileta para los aguadores y los caballos.
+    f.fill(e, 13, 17, 1, 2, 4, 6, STONE);
+    f.raw_fill(e, 14, 16, 1, 2, 4, 5, MUD);
+    // Canaleta de bajada desde una casa vecina (caño de lata sobre un pilar).
+    f.fill(e, 3, 4, 1, 6, 15, 16, STONE);
+    f.raw_fill(e, 3, 9, 6, 7, 15, 16, IRON);
+}
+
+/// Carro de aguatero: dos ruedas altas, pipa de madera acostada y varas.
+pub fn carro_aguatero(f: &Frame, e: &mut Edits, u: i32, w: i32) {
+    for du in [0, 5] {
+        f.raw_fill(e, u + du, u + du + 1, 0, 4, w + 1, w + 3, WOOD_DARK);
+        f.raw_fill(e, u + du, u + du + 1, 1, 3, w, w + 4, WOOD_DARK);
+    }
+    // Pipa (tonel) acostada a lo largo del carro.
+    f.raw_fill(e, u + 1, u + 5, 2, 5, w + 1, w + 3, WOOD);
+    f.raw_fill(e, u + 1, u + 5, 3, 4, w, w + 4, WOOD);
+    f.raw_fill(e, u + 1, u + 2, 2, 5, w + 1, w + 3, IRON);
+    f.raw_fill(e, u + 4, u + 5, 2, 5, w + 1, w + 3, IRON);
+    // Varas hacia adelante.
+    f.raw_fill(e, u + 1, u + 2, 2, 3, w - 5, w, WOOD_DARK);
+    f.raw_fill(e, u + 4, u + 5, 2, 3, w - 5, w, WOOD_DARK);
+}
+
+/// Puesto de aguadores: rancho de adobe con techo de teja, corral para las mulas, carros con
+/// su pipa y pipas de repuesto. Marco: 28 × 36 (14 × 18 m).
+pub fn puesto_aguadores(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.surface(e, 0, 28, 0, 36, DIRT_ROAD);
+    let casa = f.sub(2, 20, 16, 12, 1);
+    casa.foundation(t, e, 0, 16, 0, 12, ADOBE);
+    casa.fill(e, 0, 16, 0, 6, 0, 12, ADOBE);
+    gable(&casa, e, 0, 16, 0, 12, 6, 2, 1, TILE, ADOBE, true);
+    opening(&casa, e, 6, 9, 0, 5, 1, WOOD_DARK);
+    carro_aguatero(f, e, 3, 8);
+    carro_aguatero(f, e, 12, 8);
+    for (u, w) in [(21, 4), (24, 4), (21, 7)] {
+        cylinder(f, e, u as f32 + 0.5, w as f32 + 0.5, 1.2, 0, 3, WOOD);
+    }
+    fence(f, e, 20, 28, 18, 34, 24);
+    let mut r = f.rng(3);
+    animal(f, e, 22, 24 + r.range(0, 3), false, WOOD_DARK);
+}
+
+/// Farol de sebo sobre un poste de madera (3 m), con el fanal de vidrio que se ve de noche.
+pub fn farol(e: &mut Edits, p: IVec2, base: i32) {
+    e.dfill(IVec3::new(p.x, base, p.y), IVec3::new(p.x + 1, base + 6, p.y + 1), WOOD_DARK);
+    e.dset(IVec3::new(p.x, base + 6, p.y), WINDOW);
+    e.dset(IVec3::new(p.x, base + 7, p.y), IRON);
+}
+
+/// Puesto de serenos: casita encalada con techo de teja, puerta, farol en la esquina y el
+/// banco de la guardia. Marco: 12 × 16 (6 × 8 m).
+pub fn puesto_serenos(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let fr = f.sub(0, 2, 12, 14, 4);
+    fr.foundation(t, e, 0, 12, 0, 14, STONE);
+    fr.fill(e, 0, 12, 0, 8, 0, 14, CAL);
+    zocalo(&fr, e, 0, 12, 0, 14, 2, ZOCALO);
+    gable(&fr, e, 0, 12, 0, 14, 8, 2, 1, TILE, CAL, false);
+    opening(&fr, e, 4, 7, 0, 6, 1, WOOD_DARK);
+    window_reja(&fr, e, 8, 10, 2, 5);
+    f.surface(e, 0, 12, 0, 2, PLAZA);
+    // Farol de hierro en la esquina, sobre una ménsula.
+    fr.raw_fill(e, 0, 1, 6, 7, -1, 0, IRON);
+    fr.raw(e, 0, 5, -1, WINDOW);
+    // Banco de la guardia junto a la puerta.
+    f.raw_fill(e, 1, 4, 0, 1, 0, 1, WOOD);
+}
+
+/// Lazareto: dos pabellones largos encalados con techo de teja alrededor de un patio, capilla
+/// chica con espadaña, cerco de piedra y pozo. Marco: 60 × 48 (30 × 24 m).
+pub fn lazareto(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.surface(e, 0, 60, 0, 48, DIRT);
+    for (w0, salt) in [(4, 1u64), (34, 2)] {
+        let p = f.sub(4, w0, 36, 10, salt);
+        p.foundation(t, e, 0, 36, 0, 10, STONE);
+        p.fill(e, 0, 36, 0, 7, 0, 10, CAL);
+        zocalo(&p, e, 0, 36, 0, 10, 2, ZOCALO);
+        gable(&p, e, 0, 36, 0, 10, 7, 2, 1, TILE, CAL, true);
+        let mut u = 3;
+        while u < 34 {
+            window_reja(&p, e, u, u + 2, 2, 5);
+            u += 6;
+        }
+        opening(&p, e, 16, 19, 0, 5, 1, WOOD_DARK);
+    }
+    // Capilla del lazareto con espadaña.
+    let c = f.sub(44, 18, 10, 14, 3);
+    c.foundation(t, e, 0, 10, 0, 14, STONE);
+    c.fill(e, 0, 10, 0, 9, 0, 14, CAL);
+    gable(&c, e, 0, 10, 0, 14, 9, 2, 1, TILE, CAL, false);
+    c.fill(e, 3, 7, 9, 15, 0, 1, CAL);
+    arch(&c, e, 4, 6, 11, 14, 0, 1);
+    c.raw(e, 4, 12, 0, IRON);
+    opening(&c, e, 4, 6, 0, 5, 1, WOOD);
+    // Cerco de piedra y pozo en el patio.
+    ring(f, e, 0, 60, 0, 3, 0, 48, STONE);
+    f.clear(e, 26, 32, 0, 3, 0, 1);
+    pozo(t, e, &f.sub(14, 19, 10, 10, 5));
+}
+
+/// Chacra: rancho con enramada, huerta, sembrados en surcos (trigo o maíz), parva de paja,
+/// pozo y cerco de palo a pique. Marco: 120 × 160 (60 × 80 m).
+pub fn chacra(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(11);
+    // Sembrado: surcos alternados de tierra y espigas.
+    let crop = if r.f() < 0.5 { GRASS_DRY } else { GARDEN };
+    for w in 40..156 {
+        f.surface(e, 4, 116, w, w + 1, if (w / 2) % 2 == 0 { DIRT } else { crop });
+    }
+    let ra = f.sub(10, 8, 14, 10, 1);
+    ra.foundation(t, e, 0, 14, 0, 10, ADOBE);
+    ra.fill(e, 0, 14, 0, 5, 0, 10, ADOBE);
+    thatch_roof(&ra, e, 0, 14, 0, 10, 5, ADOBE);
+    opening(&ra, e, 5, 7, 0, 4, 1, WOOD_DARK);
+    // Enramada: horcones y techo de ramas.
+    for (u, w) in [(26, 8), (34, 8), (26, 16), (34, 16)] {
+        f.raw_fill(e, u, u + 1, 0, 5, w, w + 1, WOOD_DARK);
+    }
+    f.raw_fill(e, 25, 36, 5, 6, 7, 18, LEAF_DARK);
+    f.surface(e, 70, 100, 8, 30, GARDEN);
+    // Parva de paja.
+    cone(f, e, 60.0, 20.0, 5.0, 0, THATCH);
+    pozo(t, e, &f.sub(40, 8, 10, 10, 2));
+    fence(f, e, 2, 118, 2, 158, 20);
+}
+
+/// Aduana: casa de dos plantas sobre la calle con portón de carga en arco, balcón corrido,
+/// escudo sobre el portón y patio de revisión con fardos. Marco: 48 × 40 (24 × 20 m).
+pub fn aduana(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, dp, h1, h2) = (48, 24, 10, 18);
+    f.foundation(t, e, 0, wd, 0, dp, STONE);
+    ring(f, e, 0, wd, 0, h2, 0, dp, CAL);
+    ring(f, e, 1, wd - 1, 0, h2, 1, dp - 1, CAL);
+    f.fill(e, 2, wd - 2, h1 - 1, h1, 2, dp - 2, WOOD_DARK);
+    f.fill(e, 0, wd, h2, h2 + 1, 0, dp, AZOTEA);
+    zocalo(f, e, 0, wd, 0, dp, 3, STONE);
+    cornisa(f, e, 0, wd, h1, STONE);
+    cornisa(f, e, 0, wd, h2, STONE);
+    f.fill(e, 0, wd, h2 + 1, h2 + 2, 0, 1, CAL);
+    // Portón de carga en arco y escudo.
+    arch(f, e, wd / 2 - 4, wd / 2 + 4, 0, 9, 0, dp);
+    f.surface(e, wd / 2 - 4, wd / 2 + 4, 0, dp + 12, COBBLE);
+    f.fill(e, wd / 2 - 2, wd / 2 + 2, h1 + 1, h1 + 4, -1, 0, STONE);
+    f.raw_fill(e, wd / 2 - 1, wd / 2 + 1, h1 + 2, h1 + 3, -2, -1, CAL_OCRE);
+    for k in 0..4 {
+        let u = 4 + k * 5 + if k >= 2 { 18 } else { 0 };
+        window_reja(f, e, u, u + 2, 2, 7);
+        opening(f, e, u, u + 2, h1 + 2, h2 - 2, 1, SHUTTER);
+    }
+    balcony(f, e, 3, 19, h1 + 1);
+    balcony(f, e, 29, 45, h1 + 1);
+    // Patio de revisión con fardos de cueros y bolsas.
+    f.surface(e, 0, wd, dp, f.depth, DIRT_ROAD);
+    let mut r = f.rng(4);
+    for k in 0..6 {
+        let (u, w) = (4 + k * 7, dp + 3 + r.range(0, 8));
+        f.raw_fill(e, u, u + 3, 0, 2, w, w + 2, if k % 2 == 0 { HIDE } else { SACK });
+    }
+}
+
+/// Horno de ladrillos: horno de campaña (caja de ladrillo con bocas de fuego), tendal de
+/// adobes secándose bajo un techo de paja, pisadero de barro y pilas de ladrillos cocidos.
+/// Marco: 48 × 48 (24 × 24 m).
+pub fn horno_ladrillos(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.surface(e, 0, 48, 0, 48, DIRT);
+    let h = f.sub(6, 6, 16, 16, 1);
+    h.foundation(t, e, 0, 16, 0, 16, BRICK);
+    h.fill(e, 0, 16, 0, 9, 0, 16, BRICK_DARK);
+    h.fill(e, 1, 15, 9, 10, 1, 15, BRICK);
+    for u in [3, 7, 11] {
+        arch(&h, e, u, u + 2, 0, 3, 0, 2);
+        h.raw_fill(e, u, u + 2, 0, 1, 1, 2, MUD);
+    }
+    chimney(&h, e, 7, 7, 10, 13);
+    // Tendal: horcones y techo de paja sobre hileras de adobes.
+    let tg = f.sub(26, 4, 18, 30, 2);
+    for (u, w) in [(0, 0), (17, 0), (0, 29), (17, 29), (0, 14), (17, 14)] {
+        tg.raw_fill(e, u, u + 1, 0, 6, w, w + 1, WOOD_DARK);
+    }
+    tg.raw_fill(e, -1, 19, 6, 7, -1, 31, THATCH);
+    let mut w = 2;
+    while w < 28 {
+        tg.raw_fill(e, 2, 16, 0, 1, w, w + 1, ADOBE);
+        w += 3;
+    }
+    f.surface(e, 6, 22, 30, 44, MUD);
+    for u in [4, 10, 16] {
+        f.raw_fill(e, u, u + 4, 0, 3, 25, 27, BRICK);
+    }
+}
+
+/// Cantera de piedra: frente de roca cortado en escalones, bloques sueltos, cabria de madera
+/// para levantar los sillares y una carreta cargada. Marco: 56 × 44 (28 × 22 m).
+pub fn cantera(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.surface(e, 0, 56, 0, 44, ROCK);
+    f.foundation(t, e, 4, 52, 26, 42, ROCK);
+    for k in 0..4 {
+        f.fill(e, 4, 52, 0, 2 + k * 2, 26 + k * 4, 30 + k * 4, if k % 2 == 0 { ROCK } else { STONE_DARK });
+    }
+    let mut r = f.rng(6);
+    for _ in 0..9 {
+        let (u, w) = (r.range(4, 48), r.range(6, 22));
+        f.fill(e, u, u + 3, 0, 2, w, w + 2, STONE);
+    }
+    // Cabria: trípode de palos con la roldana.
+    for (u, w) in [(20, 14), (28, 14), (24, 20)] {
+        f.raw_fill(e, u, u + 1, 0, 10, w, w + 1, WOOD_DARK);
+    }
+    f.raw_fill(e, 20, 29, 10, 11, 14, 21, WOOD);
+    f.raw_fill(e, 24, 25, 4, 10, 17, 18, IRON);
+    // Carreta cargada.
+    f.raw_fill(e, 6, 12, 1, 2, 4, 9, WOOD);
+    f.raw_fill(e, 7, 11, 2, 3, 5, 8, STONE);
+    for u in [5, 12] {
+        f.raw_fill(e, u, u + 1, 0, 3, 5, 8, WOOD_DARK);
+    }
+}
+
+/// Muelle de madera sobre pilotes que entra al río, con bolardos, una grúa de pluma en la
+/// punta y una lancha amarrada al costado. El marco va con `w` hacia el agua y la base en el
+/// nivel medio del río; la cubierta queda a 2 m. Ancho 12 (6 m), largo `f.depth`.
+pub fn muelle_puerto(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let deck = 4;
+    let wd = 12;
+    f.raw_fill(e, 0, wd, deck, deck + 1, 0, f.depth, WOOD);
+    let mut w = 1;
+    while w < f.depth {
+        for u in [0, wd - 1] {
+            // Pilotes desde el lecho del río hasta la cubierta.
+            let p = f.at(u, 0, w);
+            let ground = top_at(t, p.x, p.z);
+            for y in (ground + 1)..(f.base + deck) {
+                e.dset(IVec3::new(p.x, y, p.z), WOOD_DARK);
+            }
+            if w % 12 == 1 {
+                f.raw_fill(e, u, u + 1, deck + 1, deck + 3, w, w + 1, WOOD_DARK);
+            }
+        }
+        w += 4;
+    }
+    // Grúa de pluma en la punta.
+    let tip = f.depth - 6;
+    f.raw_fill(e, 2, 3, deck + 1, deck + 16, tip, tip + 1, WOOD_DARK);
+    f.raw_fill(e, 2, 3, deck + 15, deck + 16, tip - 8, tip + 1, WOOD);
+    f.raw_fill(e, 2, 3, deck + 9, deck + 15, tip - 8, tip - 7, IRON);
+    f.raw_fill(e, 4, 7, deck + 1, deck + 3, tip - 2, tip + 1, HIDE);
+    // Lancha amarrada al costado (flota a ras del agua).
+    let lw = f.depth - 24;
+    if lw > 4 {
+        f.raw_fill(e, wd + 2, wd + 7, 1, 3, lw, lw + 12, WOOD);
+        f.clear(e, wd + 3, wd + 6, 2, 3, lw + 1, lw + 11);
+        f.raw_fill(e, wd + 3, wd + 6, 1, 2, lw + 4, lw + 7, SACK);
+        f.raw_fill(e, wd + 4, wd + 5, 3, 10, lw + 5, lw + 6, WOOD_DARK);
+    }
+}
+
+/// Tramo de muralla en obra o terminado. `phase`: 0 cimientos y piedra acopiada, 1 muro a
+/// media altura con andamios, 2 muro completo con adarve y almenas. `gate` = (u0, u1) del vano
+/// del portón (donde cruza una calle). El exterior queda hacia w < 0. Alto 6 m, espesor 4 m.
+pub fn muralla_tramo(t: &TerrainGen, e: &mut Edits, f: &Frame, phase: u32, gate: Option<(i32, i32)>, garita: bool) {
+    let h = 12;
+    let (w0, w1) = (2, 10);
+    f.foundation(t, e, 0, f.width, 0, w1, STONE);
+    let open = |u: i32| gate.is_some_and(|(a, b)| u >= a && u < b);
+    // Camino de ronda de tierra por dentro (y la huella de la obra), en todas las fases.
+    for u in (0..f.width).filter(|&u| !open(u)) {
+        f.surface(e, u, u + 1, w1, w1 + 6, DIRT_ROAD);
+    }
+    let top = match phase {
+        0 => 1,
+        1 => h / 2,
+        _ => h,
+    };
+    for u in 0..f.width {
+        if open(u) {
+            continue;
+        }
+        f.fill(e, u, u + 1, 0, top, w0, w1, STONE);
+        f.fill(e, u, u + 1, 0, top.min(3), 0, w0, STONE);
+        if top >= 6 {
+            f.fill(e, u, u + 1, 3, 6, 1, w0, STONE);
+        }
+    }
+    if phase == 0 {
+        let mut r = f.rng(2);
+        for _ in 0..(f.width / 10).max(1) {
+            let u = r.range(0, (f.width - 3).max(0));
+            f.raw_fill(e, u, u + 3, 0, 2, w1 + 2, w1 + 4, STONE);
+        }
+        return;
+    }
+    if phase == 1 {
+        match gate {
+            Some((a, b)) => {
+                scaffold(f, e, 0, a, top + 2);
+                scaffold(f, e, b, f.width, top + 2);
+            }
+            None => scaffold(f, e, 0, f.width, top + 2),
+        }
+        return;
+    }
+    // Cordón, adarve y parapeto con almenas hacia afuera.
+    for u in (0..f.width).filter(|&u| !open(u)) {
+        f.raw(e, u, 6, 1, STONE_DARK);
+    }
+    for u in 0..f.width {
+        if open(u) {
+            continue;
+        }
+        f.fill(e, u, u + 1, h, h + 2, w0, w0 + 2, STONE);
+        if u.rem_euclid(4) < 2 {
+            f.fill(e, u, u + 1, h + 2, h + 3, w0, w0 + 2, STONE);
+        }
+        f.fill(e, u, u + 1, h, h + 1, w1 - 1, w1, STONE);
+    }
+    if let Some((a, b)) = gate {
+        // Portón: arco de piedra sobre el vano, pilastras y la hornacina con el escudo.
+        let span = b - a;
+        f.fill(e, a - 2, a, 0, h + 3, -1, w1, STONE_DARK);
+        f.fill(e, b, b + 2, 0, h + 3, -1, w1, STONE_DARK);
+        // Dintel de piedra a 5 m: el vano queda libre de lado a lado para las carretas.
+        f.fill(e, a, b, h - 2, h + 3, w0 - 1, w1, STONE);
+        f.raw_fill(e, a, b, h - 3, h - 2, w0 - 1, w0, STONE_DARK);
+        let _ = span;
+        f.fill(e, (a + b) / 2 - 2, (a + b) / 2 + 2, h + 3, h + 6, w0 - 1, w0 + 1, STONE);
+        f.raw_fill(e, (a + b) / 2 - 1, (a + b) / 2 + 1, h + 4, h + 5, w0 - 2, w0 - 1, CAL_OCRE);
+    }
+    if garita {
+        garita_at(f, e, h);
+    }
+}
+
+/// Capilla de adobe y paja (la primera iglesia, antes de la matriz de material): nave de 6 ×
+/// 14 m, espadaña con la campana y una cruz de madera. Va en el marco de la iglesia (30 × 84).
+pub fn capilla(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let c = f.sub(f.width / 2 - 6, 6, 12, 28, 1);
+    c.foundation(t, e, 0, 12, 0, 28, ADOBE);
+    c.fill(e, 0, 12, 0, 8, 0, 28, ADOBE);
+    thatch_roof(&c, e, 0, 12, 0, 28, 8, ADOBE);
+    // Espadaña sobre la fachada con la campana.
+    c.fill(e, 3, 9, 8, 17, 0, 1, ADOBE);
+    arch(&c, e, 5, 7, 12, 16, 0, 1);
+    c.raw(e, 5, 13, 0, IRON);
+    c.raw_fill(e, 5, 7, 17, 18, 0, 1, WOOD_DARK);
+    c.raw(e, 6, 18, 0, WOOD_DARK);
+    opening(&c, e, 4, 8, 0, 6, 1, WOOD_DARK);
+    // Cruz de madera en el atrio.
+    f.raw_fill(e, f.width / 2, f.width / 2 + 1, 0, 6, 1, 2, WOOD_DARK);
+    f.raw_fill(e, f.width / 2 - 1, f.width / 2 + 2, 4, 5, 1, 2, WOOD_DARK);
+    f.surface(e, f.width / 2 - 8, f.width / 2 + 8, 0, 6, DIRT);
+}
+
+/// Restos de una casa quemada: muros bajos ennegrecidos y desparejos, vigas caídas y ceniza.
+/// Va en el marco del solar (24 × 76).
+pub fn ruina(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let mut r = f.rng(13);
+    let (u0, w0) = (r.range(4, 6), r.range(3, 7));
+    let (u1, w1) = (u0 + r.range(12, 15), w0 + r.range(9, 12));
+    f.foundation(t, e, u0, u1, w0, w1, ADOBE_DARK);
+    f.surface(e, u0 - 2, u1 + 2, w0 - 2, w1 + 2, MUD);
+    for u in u0..u1 {
+        for w in w0..w1 {
+            if u != u0 && u != u1 - 1 && w != w0 && w != w1 - 1 {
+                continue;
+            }
+            let h = r.range(1, 4);
+            f.raw_fill(e, u, u + 1, 0, h, w, w + 1, if r.f() < 0.5 { ADOBE_DARK } else { WOOD_DARK });
+        }
+    }
+    for k in 0..3 {
+        let w = w0 + 2 + k * 3;
+        f.raw_fill(e, u0 + 1 + k, u1 - 2, 0, 1, w, w + 1, WOOD_DARK);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

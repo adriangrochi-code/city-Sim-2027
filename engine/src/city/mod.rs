@@ -12,6 +12,7 @@ pub mod game_demo;
 pub mod lots;
 pub mod roads;
 pub mod save;
+pub mod services;
 pub mod voxelize;
 pub mod water;
 
@@ -56,6 +57,8 @@ pub struct City {
     pub climate: climate::Climate,
     /// Nivel del río: mareas, sudestadas, pampero y crecientes.
     pub water: water::WaterLevel,
+    /// Servicios (agua, serenos, campo, puerto, aduana), incendios, epidemias y grandes obras.
+    pub services: services::Services,
     rng: Rng,
     pending_flood: Option<Flood>,
     month_acc: f32,
@@ -64,7 +67,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), services: services::Services::default(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -111,10 +114,6 @@ fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64) -> 
     }
 }
 
-fn iglesia5(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
-    colonial::iglesia(t, e, f, 5)
-}
-
 fn clear_voxels(e: &mut Edits, lot: &Lot) {
     for &v in &lot.voxels {
         e.dset(v, AIR);
@@ -122,17 +121,18 @@ fn clear_voxels(e: &mut Edits, lot: &Lot) {
 }
 
 /// Centro de la iglesia matriz: del lado de atrás de la plaza, cruzando la calle.
-fn church_center(c: Vec2, f: Vec2) -> Vec2 {
+pub(crate) fn church_center(c: Vec2, f: Vec2) -> Vec2 {
     c - f * (BLOCK * 0.5 + RoadKind::Stone.width() * 0.5 + 0.6 + 21.0)
 }
 
-/// Vóxeles de la plaza mayor y de la iglesia matriz.
-fn plaza_church_edits(t: &TerrainGen, c: Vec2, f: Vec2) -> Edits {
+/// Vóxeles de la plaza mayor y de la iglesia matriz en la fase que se ve (0 = capilla de
+/// adobe; ver `services::works`). Devuelve también los vóxeles de la iglesia.
+fn plaza_church_edits(t: &TerrainGen, c: Vec2, f: Vec2, church_phase: u32) -> (Edits, Vec<glam::IVec3>) {
     let mut e = Edits::default();
     plaza_edits(t, c, f, &mut e);
-    let church = build_rotated(t, church_center(c, f), f, 30, 84, 4242, &iglesia5);
+    let church = services::works::church_built(t, church_center(c, f), f, church_phase);
     e.extend(church.edits);
-    e
+    (e, church.voxels)
 }
 
 impl City {
@@ -147,7 +147,11 @@ impl City {
     /// mismo mundo que se guardó. Llena los vóxeles de cada solar para poder reemplazarlo.
     pub fn rebuild_edits(&mut self, t: &TerrainGen) -> Edits {
         let mut e = match self.plaza {
-            Some((c, angle)) => plaza_church_edits(t, c, plaza_frame(angle).0),
+            Some((c, angle)) => {
+                let (e, church) = plaza_church_edits(t, c, plaza_frame(angle).0, self.services.church.view_phase());
+                self.services.church.voxels = church;
+                e
+            }
             None => Edits::default(),
         };
         // Calles y edificios en paralelo (cada tramo y cada edificio depende solo de la red y
@@ -181,6 +185,7 @@ impl City {
             e.extend(b.edits);
             self.lots.lots.get_mut(&id).unwrap().voxels = b.voxels;
         }
+        self.services_rebuild(t, &mut e);
         e
     }
 
@@ -299,7 +304,8 @@ impl City {
         self.lots.plaza_center = Some(c);
         self.lots.obstacles.push(Obstacle { c, f, w: PLAZA_SIZE, d: PLAZA_SIZE });
         self.lots.obstacles.push(Obstacle { c: church_center(c, f), f, w: 18.0, d: 44.0 });
-        let mut e = plaza_church_edits(t, c, f);
+        let (mut e, church) = plaza_church_edits(t, c, f, self.services.church.view_phase());
+        self.services.church.voxels = church;
         let half = BLOCK * 0.5;
         let q = [c + (s + f) * half, c + (-s + f) * half, c + (-s - f) * half, c + (s - f) * half];
         let mut new = Vec::new();
@@ -426,6 +432,7 @@ impl City {
         self.month_acc += dt;
         while self.month_acc >= MONTH_SECONDS {
             self.month_acc -= MONTH_SECONDS;
+            news.extend(self.services_month(t, e));
             news.extend(self.month_tick());
         }
         // El río: horas del reloj del día (24 h cada 8 minutos, como el ciclo de día y noche).
@@ -448,6 +455,7 @@ impl City {
             let (used, changes) = self.lots.grow_step(self.pool, demand, &self.net, &mut self.rng);
             self.pool -= used;
             self.apply_levels(t, &changes, e);
+            news.extend(self.services_step(t, e));
         }
         news
     }
@@ -480,7 +488,7 @@ impl City {
         storage[Res::Pan as usize] = pop as f32 * 12.0;
         let mut construction = [0.0f32; 6];
         construction[Res::Ladrillos as usize] = houses[1] as f32 * 0.4 + houses[2] as f32 * 0.8;
-        economy::MonthInput {
+        let mut inp = economy::MonthInput {
             pop,
             houses,
             shops: built[ZoneKind::Comercial as usize],
@@ -495,7 +503,9 @@ impl City {
             upkeep_roads: (self.net.total_length() * 0.01) as i64,
             world_hides: 1.0,
             ..Default::default()
-        }
+        };
+        self.services_input(&mut inp);
+        inp
     }
 
     /// Fase de la luna (0 nueva, 0,5 llena): un mes del calendario es una lunación.
@@ -559,13 +569,9 @@ impl City {
         let (jc, ji) = self.lots.jobs();
         let (jobs, workers) = ((jc + ji) as f32, self.workers() as f32);
         let work = if workers > 20.0 && jobs < workers * 0.6 { 0.75 } else if jobs > workers { 1.2 } else { 1.0 };
-        let factor = self.economy.arrivals_factor() * work;
-        let mut arrivals = ((4.0 + pop as f32 * 0.03) * factor) as i32;
-        if self.month % 4 == 0 {
-            let ship = ((20 + self.rng.range(0, 25)) as f32 * self.economy.ship_factor()) as i32 + (pop as f32 * 0.02) as i32;
-            arrivals += ship;
-            news.push(format!("Llega un barco con {ship} pobladores"));
-        }
+        // Los barcos (con sus pobladores) los trae el puerto (`services::port`).
+        let factor = self.economy.arrivals_factor() * work * self.services.attraction();
+        let arrivals = ((4.0 + pop as f32 * 0.03) * factor) as i32;
         self.pool = (self.pool + arrivals).min(600);
         // Clima del mes: cosechas, pasturas, sequía y el caudal de los ríos.
         let (weather, cnews) = self.climate.month_tick(self.month % 12);

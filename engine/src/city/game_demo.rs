@@ -184,3 +184,318 @@ pub fn month_realtime(s: &mut Session) -> String {
     }
     format!("{changed} edificios nuevos o mejorados · {voxels} vóxeles · {cols} columnas · paso de 0,5 s: medio {:.1} ms, peor {worst:.1} ms", total / 20.0)
 }
+
+// --- Servicios, puerto, muralla, campo e iglesia (Fase 2 #5) ---------------------------------
+
+use super::services::{self, Kind};
+
+/// Busca un sitio libre para un servicio alrededor de `around` (hasta `max_r` m), arrimado a
+/// una calle.
+fn service_site(g: &super::game::Game, t: &crate::terrain::TerrainGen, k: Kind, around: Vec2, max_r: f32) -> Option<(Vec2, Vec2)> {
+    let mut r = 0.0;
+    while r <= max_r {
+        let n = ((r / 10.0) as i32).clamp(1, 48);
+        for a in 0..n {
+            let p = around + Vec2::from_angle(a as f32 / n as f32 * std::f32::consts::TAU) * r;
+            let (c, f) = g.city.service_site(k, p);
+            if g.city.service_problem(t, k, c, f).is_none() {
+                return Some((c, f));
+            }
+        }
+        r += 12.0;
+    }
+    None
+}
+
+fn place(s: &mut Session, k: Kind, around: Vec2, max_r: f32) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let Some((c, f)) = service_site(g, &t, k, around, max_r) else {
+        return format!("{}: sin sitio", services::info(k).name);
+    };
+    let r = g.city.place_service(&t, k, c, f);
+    format!("{} en ({:.0}, {:.0}): {}", services::info(k).name, c.x, c.y, apply(s, r))
+}
+
+/// Un camino de tierra de `from` hacia `dir`, de a tramos de 60 m mientras se pueda (girando un
+/// poco si un tramo es muy empinado). Devuelve el punto final.
+fn road_towards(s: &mut Session, from: Vec2, dir: Vec2, len: f32) -> Vec2 {
+    let t = s.terrain.clone();
+    let goal = dir.normalize_or(Vec2::X);
+    let mut p = from;
+    let mut d = goal;
+    let mut done = 0.0;
+    let mut e = crate::buildings::Edits::default();
+    while done < len {
+        let g = s.game.as_mut().unwrap();
+        let mut ok = false;
+        // Tramos de 30 m que esquivan lo empinado y vuelven de a poco al rumbo.
+        let back = d.angle_to(goal).clamp(-0.3, 0.3);
+        for turn in [back, 0.0, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.2, -1.2] {
+            let nd = d.rotate(Vec2::from_angle(turn));
+            if nd.dot(goal) < 0.0 {
+                continue;
+            }
+            let q = p + nd * 30.0;
+            if let Ok(ed) = g.city.build_road(&t, &roads::line(g.snap(p), q), RoadKind::Dirt) {
+                e.extend(ed);
+                p = q;
+                d = nd;
+                ok = true;
+                break;
+            }
+        }
+        if !ok {
+            break;
+        }
+        done += 30.0;
+    }
+    s.apply_edits(&e);
+    p
+}
+
+/// Punto de la red de calles más alejado de la plaza hacia `dir`.
+fn road_end(s: &Session, dir: Vec2) -> Vec2 {
+    let g = s.game.as_ref().unwrap();
+    g.city.net.nodes.values().copied().max_by(|a, b| (*a - PLAZA).dot(dir).total_cmp(&(*b - PLAZA).dot(dir))).unwrap_or(PLAZA)
+}
+
+/// Busca una orilla baja con agua profunda cerca de la plaza y, si hace falta, le lleva un
+/// camino corto desde tierra adentro. Devuelve el arranque del muelle.
+fn pier_site(s: &mut Session) -> Option<Vec2> {
+    let t = s.terrain.clone();
+    let mut spurs = 0;
+    for r in 1..90 {
+        for a in 0..48 {
+            let p = PLAZA + Vec2::from_angle(a as f32 / 48.0 * std::f32::consts::TAU) * (r as f32 * 12.0);
+            let h = t.height(p.x, p.y);
+            if !(0.4..3.5).contains(&h) || t.is_water(p.x, p.y) {
+                continue;
+            }
+            let Some((sea, _)) = services::port::find_sea(&t, p) else { continue };
+            if s.game.as_ref().unwrap().city.pier_problem(&t, p).is_none() {
+                return Some(p);
+            }
+            if spurs >= 6 {
+                continue;
+            }
+            spurs += 1;
+            for len in [50.0, 90.0] {
+                for turn in [0.0f32, 0.4, -0.4, 0.8, -0.8] {
+                    let back = -sea.rotate(Vec2::from_angle(turn));
+                    let g = s.game.as_mut().unwrap();
+                    if let Ok(e) = g.city.build_road(&t, &roads::line(p + back * 8.0, p + back * len), RoadKind::Dirt) {
+                        s.apply_edits(&e);
+                        if s.game.as_ref().unwrap().city.pier_problem(&t, p).is_none() {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Fin del camino al campo (para las cámaras).
+pub static CAMINO_END: std::sync::Mutex<Option<Vec2>> = std::sync::Mutex::new(None);
+
+/// Servicios de la demostración, antes de hacer crecer la ciudad: agua (aljibe, pozos y
+/// aguadores), serenos, el camino al campo con chacra, estancia, horno y cantera, el muelle con
+/// la aduana, el lazareto en la costa y un tramo de muralla que cruza el camino.
+pub fn servicios(s: &mut Session) -> String {
+    use super::economy::Res;
+    let mut out = Vec::new();
+    {
+        let g = s.game.as_mut().unwrap();
+        g.city.money += 150_000;
+        g.city.economy.stocks[Res::Ladrillos as usize].amount = 2500.0;
+        g.city.economy.stocks[Res::Piedra as usize].amount = 2500.0;
+    }
+    let (f, side) = plaza_frame(0.0);
+    out.push(place(s, Kind::Aljibe, PLAZA + side * 60.0, 260.0));
+    out.push(place(s, Kind::Pozo, PLAZA - side * (BLOCK * 1.5) + f * BLOCK, 300.0));
+    out.push(place(s, Kind::Pozo, PLAZA + side * (BLOCK * 1.5) + f * BLOCK, 300.0));
+    out.push(place(s, Kind::Serenos, PLAZA - side * 50.0, 250.0));
+    out.push(place(s, Kind::Aguadores, PLAZA - f * BLOCK, 500.0));
+    // Camino al campo: sale del damero hacia el este, tierra adentro.
+    let start = road_end(s, side);
+    let end = road_towards(s, start, side - f * 0.1, 1200.0);
+    *CAMINO_END.lock().unwrap() = Some(end);
+    out.push(format!("camino al campo de {:.0} m", start.distance(end)));
+    let along = |k: f32| start.lerp(end, k);
+    out.push(place(s, Kind::Chacra, along(0.45), 260.0));
+    out.push(place(s, Kind::Estancia, along(0.9), 300.0));
+    out.push(place(s, Kind::Cantera, along(0.65), 300.0));
+    // Muelle y aduana.
+    let t = s.terrain.clone();
+    match pier_site(s) {
+        Some(p) => {
+            let g = s.game.as_mut().unwrap();
+            let r = g.city.build_pier(&t, p);
+            out.push(format!("muelle en ({:.0}, {:.0}): {}", p.x, p.y, apply(s, r)));
+            out.push(place(s, Kind::Aduana, p, 450.0));
+        }
+        None => out.push("muelle: sin orilla".into()),
+    }
+    // Lazareto: lejos de la plaza, junto a la costa y a un camino (primero cerca del muelle).
+    let near_pier = s.game.as_ref().unwrap().city.services.port.pier.as_ref().map_or(PLAZA, |p| p.land);
+    let mut laz = place(s, Kind::Lazareto, near_pier, 500.0);
+    if laz.contains("sin sitio") {
+        laz = place(s, Kind::Lazareto, PLAZA, 1500.0);
+    }
+    if laz.contains("sin sitio") {
+        // Un camino hasta la costa, a más de 500 m de la plaza.
+        for a in 0..16 {
+            let dir = Vec2::from_angle(a as f32 / 16.0 * std::f32::consts::TAU);
+            let p = PLAZA + dir * 650.0;
+            if !services::near_coast(&t, p, 140.0) || t.height(p.x, p.y) < 1.0 {
+                continue;
+            }
+            let from = road_end(s, dir);
+            let reached = road_towards(s, from, p - from, from.distance(p));
+            if reached != from {
+                laz = place(s, Kind::Lazareto, reached, 300.0);
+                if !laz.contains("sin sitio") {
+                    break;
+                }
+            }
+        }
+    }
+    out.push(laz.clone());
+    // El horno necesita barro: cerca del agua (el muelle o el lazareto, si no hay otro lugar).
+    let mut horno = place(s, Kind::Horno, along(0.25), 400.0);
+    let laz_at = s.game.as_ref().unwrap().city.services.of_kind(Kind::Lazareto).next().map_or(PLAZA, |b| b.c);
+    for around in [near_pier, laz_at] {
+        if horno.contains("sin sitio") {
+            horno = place(s, Kind::Horno, around, 500.0);
+        }
+    }
+    out.push(horno);
+    // Tramo de muralla que cruza el camino al campo (con su portón).
+    let cross = start.lerp(end, 0.08);
+    let n = (end - start).normalize_or(Vec2::X).perp();
+    let mut wall = "muralla: sin lugar".to_string();
+    for half in [160.0, 120.0, 90.0, 60.0, 40.0] {
+        let (a, b) = (cross - n * half, cross + n * half);
+        let g = s.game.as_mut().unwrap();
+        if g.city.wall_problem(&t, a, b).is_none() {
+            let gates = g.city.wall_gates(a, b).len();
+            let r = g.city.build_wall(&t, a, b);
+            wall = format!("muralla de {:.0} m con {gates} portones: {}", half * 2.0, apply(s, r));
+            break;
+        }
+    }
+    out.push(wall);
+    let g = s.game.as_ref().unwrap();
+    format!("{} · {} servicios · agua para {} solares", out.join(" · "), g.city.services.buildings.len(), g.city.services.water.len())
+}
+
+/// La iglesia matriz: se financian las fases que la ciudad pueda pagar y se deja la siguiente
+/// en obra (con andamios) para la captura. Si la ciudad todavía no llega a los 1.000
+/// habitantes, la obra se fuerza para poder ver la fase (lo dice el informe).
+pub fn iglesia(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    g.city.money += 60_000;
+    let pop = g.city.population();
+    let mut e = crate::buildings::Edits::default();
+    let mut log = Vec::new();
+    let forced = pop < services::works::CHURCH_MIN_POP;
+    for _ in 0..2 {
+        if forced {
+            let ch = &mut g.city.services.church;
+            if ch.building {
+                ch.building = false;
+                ch.phase += 1;
+            }
+            ch.building = true;
+            ch.months_left = services::works::CHURCH[ch.phase as usize + 1].months;
+            g.city.church_refresh(&t, &mut e);
+        } else {
+            match g.city.start_church_phase(&t) {
+                Ok((ed, m)) => {
+                    e.extend(ed);
+                    log.push(m);
+                    if g.city.services.church.phase == 0 {
+                        let months = g.city.services.church.months_left;
+                        e.extend(g.city.fast_forward(&t, months));
+                    }
+                }
+                Err(m) => log.push(m),
+            }
+        }
+    }
+    let ch = &g.city.services.church;
+    let state = format!("fase {} ({}){}", ch.phase, services::works::CHURCH[ch.phase as usize].name, if ch.building { format!(", en obra: {}", services::works::CHURCH[ch.phase as usize + 1].name) } else { String::new() });
+    let forced_note = if forced { format!(" · obra forzada para la captura: la ciudad tiene {pop} habitantes (hacen falta {})", services::works::CHURCH_MIN_POP) } else { String::new() };
+    let out = apply(s, Ok(e));
+    format!("{state}{forced_note} · {} · {out}", log.join(" · "))
+}
+
+/// Donde empezó el incendio de la demostración.
+pub static FIRE_AT: std::sync::Mutex<Option<Vec2>> = std::sync::Mutex::new(None);
+
+/// Un incendio en un rancho sin agua cerca, con viento fuerte del oeste: el fuego salta a los
+/// vecinos a favor del viento y quedan ruinas.
+pub fn incendio(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    g.city.water.wind_dir = 270.0;
+    g.city.water.wind_speed = 9.0;
+    let c = &g.city;
+    let built: Vec<_> = c.lots.lots.values().filter(|l| l.level == 1).collect();
+    let crowd = |l: &&super::lots::Lot| built.iter().filter(|o| o.c.distance(l.c) < 16.0).count();
+    let pick = built.iter().filter(|l| c.services.fire_source(l.c).is_none()).max_by_key(|l| crowd(l)).or_else(|| built.iter().max_by_key(|l| crowd(l))).map(|l| l.id);
+    let Some(id) = pick else { return "no hay ranchos".into() };
+    *FIRE_AT.lock().unwrap() = Some(g.city.lots.lots[&id].c);
+    g.city.ignite(id);
+    let mut e = crate::buildings::Edits::default();
+    let mut news = Vec::new();
+    for _ in 0..40 {
+        news.extend(g.city.fire_step(&t, &mut e));
+    }
+    if let Some(n) = news.last() {
+        g.say(n.clone());
+    }
+    let f = &g.city.services.fires;
+    let line = format!("{} quemadas, {} apagados, {} ardiendo · {}", f.destroyed_total, f.put_out_total, f.burning.len(), news.join(" · "));
+    let out = apply(s, Ok(e));
+    format!("{line} · {out}")
+}
+
+/// Cámara sobre el primer servicio de un tipo (x, z, distancia, giro, inclinación).
+pub fn view_of(s: &Session, k: Kind, dist: f32) -> Option<[f32; 5]> {
+    let b = s.game.as_ref()?.city.services.of_kind(k).next()?;
+    // Desde el frente (la calle), un poco de costado.
+    Some([b.c.x, b.c.y, dist, b.f.x.atan2(b.f.y).to_degrees() + 30.0, 35.0])
+}
+
+pub fn view_pier(s: &Session) -> Option<[f32; 5]> {
+    let p = s.game.as_ref()?.city.services.port.pier.as_ref()?;
+    // Desde tierra, mirando el muelle hacia el río.
+    let near = p.land + p.dir * 30.0;
+    Some([near.x, near.y, 95.0, (-p.dir.x).atan2(-p.dir.y).to_degrees() + 35.0, 30.0])
+}
+
+pub fn view_wall(s: &Session) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let tr = c.services.walls.tramos.first()?;
+    let g = c.wall_gates(tr.a, tr.b).first().map(|g| tr.a + (tr.b - tr.a).normalize() * g.0).unwrap_or((tr.a + tr.b) * 0.5);
+    Some([g.x, g.y, 80.0, 230.0, 24.0])
+}
+
+pub fn view_church(s: &Session) -> Option<[f32; 5]> {
+    let (c, f) = s.game.as_ref()?.city.church_site()?;
+    Some([c.x, c.y, 100.0, f.x.atan2(f.y).to_degrees() + 30.0, 30.0])
+}
+
+pub fn view_fire(_s: &Session) -> Option<[f32; 5]> {
+    let p = (*FIRE_AT.lock().unwrap())?;
+    Some([p.x, p.y, 110.0, 200.0, 38.0])
+}
+
+pub fn view_lamps(s: &Session) -> Option<[f32; 5]> {
+    let b = s.game.as_ref()?.city.services.of_kind(Kind::Serenos).next()?;
+    Some([b.c.x, b.c.y, 120.0, 200.0, 30.0])
+}

@@ -322,6 +322,13 @@ pub struct Built {
 /// cardinal exacto (sin re-muestreo, sin dientes de sierra). Todo en vóxeles de diseño: el
 /// resultado (y `Built::voxels`) va en `Edits::design`.
 pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, depth: i32, seed: u64, builder: &dyn Fn(&TerrainGen, &mut Edits, &Frame)) -> Built {
+    build_rotated_at(t, center, front, width, depth, seed, None, builder)
+}
+
+/// Como [`build_rotated`], pero con la base fija (`Some(y)` en vóxeles de diseño) en lugar de
+/// apoyarla sobre lo más alto del terreno: para lo que se construye sobre el agua (muelles).
+#[allow(clippy::too_many_arguments)]
+pub fn build_rotated_at(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, depth: i32, seed: u64, fixed_base: Option<i32>, builder: &dyn Fn(&TerrainGen, &mut Edits, &Frame)) -> Built {
     let mut f = front.normalize_or(Vec2::NEG_Y);
     let ang = f.y.atan2(f.x);
     let quarter = std::f32::consts::FRAC_PI_2;
@@ -347,6 +354,9 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
             u += 4;
         }
         w += 4;
+    }
+    if let Some(b) = fixed_base {
+        base = b;
     }
     // 1. Alineada a los ejes: u → +x, w → +z, centrada en `cv`.
     let origin = cv - IVec2::new(width / 2, depth / 2);

@@ -10,6 +10,7 @@
 
 pub mod icons;
 pub mod paint;
+pub mod services;
 pub mod theme;
 
 use crate::city::game::fmt_thousands;
@@ -102,6 +103,7 @@ impl Category {
             Tool::Zone | Tool::Dezone => Category::Zonas,
             Tool::Demolish => Category::Demoler,
             Tool::Inspect => Category::Capas,
+            Tool::Service => Category::Servicios,
         }
     }
 }
@@ -144,6 +146,10 @@ impl Card {
         c.selected = game.tool == Tool::Zone && game.zone_kind == k;
         c
     }
+    /// Tarjeta de una herramienta (para los cajones armados fuera de este módulo).
+    pub fn tool_pub(game: &Game, i: usize, icon: Icon, cost: String, tip: &str) -> Card {
+        Card::tool(game, i, icon, cost, tip)
+    }
     fn soon(icon: Icon, name: &'static str, tip: &str) -> Card {
         Card { icon, name, cost: String::new(), tip: format!("{tip} (todavía no está en el motor)"), action: None, disabled: Some(SOON.to_string()), selected: false }
     }
@@ -152,6 +158,9 @@ impl Card {
 /// Tarjetas del cajón de cada categoría.
 pub fn cards(cat: Category, game: &Game, list_open: bool, budget_open: bool) -> Vec<Card> {
     let per_m = format!("{} pesos/m", game.kind.cost_per_m());
+    if let Some(c) = services::cards(cat, game) {
+        return c;
+    }
     match cat {
         Category::Calles => vec![
             Card::tool(game, 0, Icon::Plaza, "gratis".into(), "Fundar la plaza mayor (R la gira)"),
@@ -453,6 +462,8 @@ pub enum UiAction {
     ToggleBudget,
     /// Cambia un impuesto (índice en `Tax::ALL`) en tantos puntos.
     Tax(usize, i32),
+    /// Servicios: colocar, capas de datos y órdenes (ver `ui::services`).
+    Servicio(services::Act),
 }
 
 /// Estado propio de la interfaz entre cuadros.
@@ -832,6 +843,8 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, acts: &mut Vec<UiAction>) 
                         InspectKind::Lot => Icon::Aduana,
                         InspectKind::Road => Icon::Recta,
                         InspectKind::Terrain => Icon::Lupa,
+                        InspectKind::Service(_) => Icon::Servicios,
+                        InspectKind::Church => Icon::Iglesia,
                     };
                     icons::show(ui, icon, 22.0, theme::INK);
                     ui.label(RichText::new(&info.title).size(theme::BODY * 1.2));
@@ -870,12 +883,18 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, acts: &mut Vec<UiAction>) 
                     InspectKind::Lot => &[("Zonificar", "Pintar la zona elegida alrededor · atajo: 5", 4), ("Quitar zona", "Quitar la zona · atajo: 6", 5)],
                     InspectKind::Road => &[("Demoler tramo", "Elegir la herramienta de demoler · atajo: 7", 6), ("Calle nueva", "Trazar una calle recta desde aquí · atajo: 2", 1)],
                     InspectKind::Terrain => &[("Calle recta", "Trazar una calle · atajo: 2", 1)],
+                    InspectKind::Service(_) | InspectKind::Church => &[],
                 };
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     for (label, tip, tool) in actions {
                         if ui.button(RichText::new(*label).small()).on_hover_text(*tip).clicked() {
                             acts.push(UiAction::Tool(*tool));
+                        }
+                    }
+                    for (label, tip, act) in services::inspect_buttons(info.kind) {
+                        if ui.button(RichText::new(label).small()).on_hover_text(tip).clicked() {
+                            acts.push(act);
                         }
                     }
                 });
@@ -1230,6 +1249,7 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             UiAction::CloseInspect => game.inspected = None,
             UiAction::ToggleList => list.open = !list.open,
             UiAction::ToggleBudget => {}
+            UiAction::Servicio(a) => services::apply(*a, game),
             UiAction::Tax(i, d) => {
                 if let Some(t) = Tax::ALL.get(*i) {
                     let e = &mut game.city.economy;

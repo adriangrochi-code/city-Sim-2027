@@ -41,7 +41,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 3b. [x] Economía en el motor: existencias, mercado, comercio por el puerto, impuestos, presupuesto, opinión y ordenanzas
 3c. [ ] Mapa real de Montevideo en el motor
 4. [ ] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
-5. [ ] Servicios, agua, incendios, puerto, muralla, campo e iglesia
+5. [x] Servicios, agua, incendios, puerto, muralla, campo e iglesia (primera versión; ver [sistemas/servicios.md](sistemas/servicios.md))
 6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real
 

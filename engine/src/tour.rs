@@ -27,6 +27,9 @@ pub enum Act {
     Travel(f32, f32, u32),
     /// Lleva la cámara al puente que construyó la demostración.
     Bridge,
+    /// Cámara calculada a partir de la partida (un servicio, el muelle, la muralla…); si no
+    /// hay nada que mirar, la deja donde está.
+    CamFn(fn(&Session) -> Option<[f32; 5]>),
     /// Una acción del modo juego (fundar, trazar, zonificar, crecer); devuelve lo que pasó.
     Game(&'static str, fn(&mut Session) -> String),
     /// Captura con la interfaz del juego encima, después de prepararla (herramienta, ficha,
@@ -122,6 +125,7 @@ pub fn city_steps() -> Vec<Act> {
         Game("damero", d::grid),
         Game("calle curva", d::curve),
         Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
         Game("puente", d::bridge),
         Bridge,
         WaitIdle("puente"),
@@ -146,7 +150,80 @@ pub fn city_steps() -> Vec<Act> {
         Hour(20.5),
         WaitIdle("noche"),
         Shot("motor-ciudad-noche"),
+        // Servicios (Fase 2 #5): cada edificio de cerca, el puerto, la muralla, la iglesia en
+        // obra, los faroles de noche y un incendio con sus ruinas.
+        CamFn(d::view_lamps),
+        WaitIdle("faroles de noche"),
+        Shot("motor-servicios-faroles-noche"),
         Hour(10.5),
+        Game("iglesia por fases", d::iglesia),
+        CamFn(d::view_church),
+        Hour(11.0),
+        WaitIdle("iglesia en obra"),
+        Shot("motor-servicios-iglesia"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Aljibe, 40.0)),
+        Hour(11.0),
+        WaitIdle("aljibe"),
+        Shot("motor-servicios-aljibe"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Pozo, 28.0)),
+        Hour(11.0),
+        WaitIdle("pozo"),
+        Shot("motor-servicios-pozo"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Aguadores, 50.0)),
+        Hour(11.0),
+        WaitIdle("aguadores"),
+        Shot("motor-servicios-aguadores"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Serenos, 35.0)),
+        Hour(11.0),
+        WaitIdle("serenos"),
+        Shot("motor-servicios-serenos"),
+        CamFn(d::view_pier),
+        Hour(11.0),
+        WaitIdle("muelle"),
+        Shot("motor-servicios-muelle"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Aduana, 75.0)),
+        Hour(11.0),
+        WaitIdle("aduana"),
+        Shot("motor-servicios-aduana"),
+        CamFn(d::view_wall),
+        Hour(11.0),
+        WaitIdle("muralla"),
+        Shot("motor-servicios-muralla"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Lazareto, 95.0)),
+        Hour(11.0),
+        WaitIdle("lazareto"),
+        Shot("motor-servicios-lazareto"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Chacra, 170.0)),
+        Hour(11.0),
+        WaitIdle("chacra"),
+        Shot("motor-servicios-chacra"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Estancia, 120.0)),
+        Hour(11.0),
+        WaitIdle("estancia"),
+        Shot("motor-servicios-estancia"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Horno, 75.0)),
+        Hour(11.0),
+        WaitIdle("horno"),
+        Shot("motor-servicios-horno"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Cantera, 80.0)),
+        Hour(11.0),
+        WaitIdle("cantera"),
+        Shot("motor-servicios-cantera"),
+        Game("incendio con viento del oeste", d::incendio),
+        CamFn(d::view_fire),
+        Hour(11.0),
+        WaitIdle("incendio"),
+        Shot("motor-servicios-incendio"),
+        UiShot("motor-ui-capa-fuego", |s, u| ui_layer(s, u, crate::city::services::Layer::Fuego)),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        Hour(11.0),
+        WaitIdle("capa de agua"),
+        UiShot("motor-ui-capa-agua", |s, u| ui_layer(s, u, crate::city::services::Layer::Agua)),
+        UiShot("motor-ui-cajon-puerto", ui_port),
+        CamFn(d::view_church),
+        Hour(11.0),
+        WaitIdle("ficha de la iglesia"),
+        UiShot("motor-ui-ficha-iglesia", ui_church),
         Cam([c.x + 40.0, c.y + 30.0, 330.0, 205.0, 40.0]),
         WaitIdle("vista para la interfaz"),
         UiShot("motor-ui-barra", ui_toolbar),
@@ -236,9 +313,38 @@ fn ui_toolbar(s: &mut Session, u: &mut GameUi) {
 /// Cajón de servicios: tarjetas de lo que llega más adelante, desactivadas con el motivo.
 fn ui_services(s: &mut Session, u: &mut GameUi) {
     let g = s.game.as_mut().unwrap();
+    g.inspected = None;
     g.set_tool(4);
     g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
     u.open = Some(ui::Category::Servicios);
+}
+
+/// Una capa de datos (agua o fuego) con el cajón de capas abierto.
+fn ui_layer(s: &mut Session, u: &mut GameUi, l: crate::city::services::Layer) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.inspected = None;
+    g.layer = Some(l);
+    u.open = Some(ui::Category::Capas);
+    u.sync_news(g);
+}
+
+/// Cajón del puerto y la muralla, con la herramienta de muralla elegida.
+fn ui_port(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.layer = None;
+    g.set_service(crate::city::services::Placeable::Muralla);
+    g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(300.0, 60.0));
+    u.open = Some(ui::Category::Puerto);
+    u.time += 30.0;
+}
+
+/// Ficha de la iglesia matriz en obra.
+fn ui_church(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.inspected = g.city.church_site().map(|(c, _)| c);
+    u.open = None;
 }
 
 /// Panel de detalle de una ficha de la barra superior.
@@ -458,6 +564,20 @@ impl Tour {
                     s.update(0.0);
                     self.next();
                 }
+                Act::CamFn(f) => {
+                    if let Some(c) = f(s) {
+                        s.cam.target.x = c[0];
+                        s.cam.target.z = c[1];
+                        s.cam.target.y = s.terrain.height(c[0], c[1]).max(0.0);
+                        s.cam.distance = c[2];
+                        s.cam.yaw = c[3];
+                        s.cam.pitch = c[4];
+                        s.update(0.0);
+                    } else {
+                        self.report.push("cámara: no hay nada que mirar".into());
+                    }
+                    self.next();
+                }
                 Act::Bridge => {
                     if let Some(p) = *crate::city::game_demo::BRIDGE_AT.lock().unwrap() {
                         s.cam.target.x = p.x;
@@ -538,7 +658,8 @@ impl Tour {
                     let u = self.tour_ui(r);
                     let summary = |s: &Session| {
                         let c = &s.game.as_ref().unwrap().city;
-                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes)
+                        let sv = &c.services;
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()))
                     };
                     let before = summary(s);
                     let t0 = Instant::now();
