@@ -1,0 +1,4 @@
+{
+ "descripcion": "Tramos de la costa: tipo, fracción de roca de la orilla (0-1) y largo de las restingas que se meten en el agua (m). Coordenadas en metros del mapa (x este, z sur). Ver docs/sistemas/costa.md.",
+ "tramos": []
+}

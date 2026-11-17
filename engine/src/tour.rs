@@ -51,7 +51,7 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 24] = [
+    let views: [(&'static str, [f32; 5]); 26] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
         // Hidrografía oficial (IDE): la playa de Pocitos y los bañados del Carrasco y el Pantanoso.
         ("paisaje-playa-pocitos", [16500.0, 15000.0, 700.0, 200.0, 28.0]),
@@ -83,6 +83,9 @@ pub fn landscape_steps() -> Vec<Act> {
         ("roca-colina-cerca", [13480.0, 8480.0, 45.0, 200.0, 14.0]),
         ("roca-colina-media", [14640.0, 8200.0, 300.0, 200.0, 24.0]),
         ("roca-costa-cerca", [12580.0, 15240.0, 50.0, 200.0, 16.0]),
+        // Puntas de piedra de la costa sur (costa.json): Punta Carretas y Punta Gorda de cerca.
+        ("costa-punta-carretas", [15190.0, 17380.0, 150.0, 200.0, 22.0]),
+        ("costa-punta-gorda", [22420.0, 13470.0, 150.0, 200.0, 22.0]),
     ];
     let mut out = vec![Hour(10.5)];
     // `MOTOR_VISTAS=vegetacion` saca solo las vistas cuyo nombre contiene ese texto.

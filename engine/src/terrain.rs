@@ -95,6 +95,54 @@ fn cauce_por_nombre(n: &str) -> Option<u8> {
     }
 }
 
+/// Umbral del ruido de manchas `0,7·fino + 0,3·grueso` (media 0,5, desvío ≈ 0,11) para que la
+/// fracción `c` del suelo quede por encima: cuantiles medidos de ese ruido.
+fn patch_threshold(c: f32) -> f32 {
+    const Q: [(f32, f32); 8] = [
+        (0.005, 0.74), (0.01, 0.714), (0.05, 0.658), (0.10, 0.626),
+        (0.15, 0.603), (0.20, 0.584), (0.30, 0.552), (0.50, 0.498),
+    ];
+    if c >= 0.5 {
+        // Más de la mitad: simétrico respecto de la media.
+        return 1.0 - patch_threshold(1.0 - c);
+    }
+    let mut thr = Q[0].1;
+    for w in Q.windows(2) {
+        if c >= w[0].0 && c <= w[1].0 {
+            let f = (c - w[0].0) / (w[1].0 - w[0].0);
+            thr = w[0].1 + (w[1].1 - w[0].1) * f;
+        }
+    }
+    thr
+}
+
+/// Tramos de la costa con su tipo (ver docs/sistemas/costa.md): fracción de roca en la playa y
+/// hasta dónde se meten las piedras en el agua.
+const COSTA_JSON: &str = include_str!("../../assets/mapas/montevideo/costa.json");
+
+/// Un tramo de costa: segmento (m del mapa), fracción de roca y largo de la restinga (m).
+struct Tramo {
+    a: Vec2,
+    b: Vec2,
+    rocas: f32,
+    restinga: f32,
+}
+
+fn parse_costa(txt: &str) -> Vec<Tramo> {
+    let v: serde_json::Value = serde_json::from_str(txt).expect("costa.json inválido");
+    let mut out = Vec::new();
+    for t in v["tramos"].as_array().into_iter().flatten() {
+        let p = |k: &str| Vec2::new(t[k][0].as_f64().unwrap_or(0.0) as f32, t[k][1].as_f64().unwrap_or(0.0) as f32);
+        let r = &t["restinga_m"];
+        let restinga = match (r[0].as_f64(), r[1].as_f64()) {
+            (Some(a), Some(b)) => ((a + b) * 0.5) as f32,
+            _ => r.as_f64().unwrap_or(0.0) as f32,
+        };
+        out.push(Tramo { a: p("a"), b: p("b"), rocas: t["rocas"].as_f64().unwrap_or(0.0) as f32, restinga });
+    }
+    out
+}
+
 // --- Mapa real ------------------------------------------------------------------------------
 
 /// Datos embebidos en el ejecutable (3 MB): así el mapa no puede faltar en el paquete.
@@ -195,6 +243,43 @@ impl Grid {
         let b = self.at(i, j + 1) + (self.at(i + 1, j + 1) - self.at(i, j + 1)) * tx;
         a + (b - a) * tz
     }
+    /// Distancia (m) de cada celda de agua a la tierra más cercana.
+    fn land_distance(&self) -> Grid {
+        let seeds: Vec<bool> = self.v.iter().map(|&h| h > 0.0).collect();
+        self.distance_to(&seeds)
+    }
+    /// Rocosidad de la costa y largo de las restingas por celda, para las celdas a menos de
+    /// 800 m de la orilla: el tramo de `costa.json` más cercano (si hay uno a menos de 1,5 km);
+    /// si no, según haya playa oficial cerca (arena) o no (piedra).
+    fn coast_params(&self, sea: &Grid, land: &Grid, beach: &Grid, tramos: &[Tramo]) -> (Grid, Grid) {
+        let n = self.n;
+        let (mut r, mut l) = (vec![0f32; n * n], vec![0f32; n * n]);
+        for j in 0..n {
+            for i in 0..n {
+                let k = i + j * n;
+                let shore = sea.v[k].max(land.v[k]);
+                if shore > 800.0 {
+                    continue;
+                }
+                let p = Vec2::new(self.from + i as f32 * self.step, self.from + j as f32 * self.step);
+                let mut best = (1500.0f32, None);
+                for t in tramos {
+                    let d = p.distance(closest_on_segment(p, t.a, t.b));
+                    if d < best.0 {
+                        best = (d, Some(t));
+                    }
+                }
+                let (rk, lk) = match best.1 {
+                    Some(t) => (t.rocas, t.restinga),
+                    None if beach.v[k] < 150.0 => (0.0, 0.0),
+                    None => (0.7, 50.0),
+                };
+                r[k] = rk;
+                l[k] = lk;
+            }
+        }
+        (Grid { v: r, n, step: self.step, from: self.from }, Grid { v: l, n, step: self.step, from: self.from })
+    }
     /// Distancia (m) de cada celda de tierra al agua más cercana.
     fn sea_distance(&self) -> Grid {
         let seeds: Vec<bool> = self.v.iter().map(|&h| h <= 0.0).collect();
@@ -254,6 +339,14 @@ struct RealMap {
     /// Rocosidad de los suelos (0..1).
     rock_main: Grid,
     rock_ctx: Grid,
+    /// Distancia de cada celda de agua a la tierra (m).
+    land_main: Grid,
+    land_ctx: Grid,
+    /// Costa: fracción de roca de la orilla y largo de las restingas (m).
+    coast_r_main: Grid,
+    coast_r_ctx: Grid,
+    coast_l_main: Grid,
+    coast_l_ctx: Grid,
 }
 
 impl RealMap {
@@ -533,6 +626,10 @@ impl TerrainGen {
         let is_beach = |b: &u8| *b == BIO_PLAYA || *b == BIO_BANCO;
         let beach_main = main.distance_to(&BIOMAS_BIN.iter().map(is_beach).collect::<Vec<_>>());
         let beach_ctx = ctx.distance_to(&BIOMAS_CTX_BIN.iter().map(is_beach).collect::<Vec<_>>());
+        let (land_main, land_ctx) = (main.land_distance(), ctx.land_distance());
+        let tramos = parse_costa(COSTA_JSON);
+        let (coast_r_main, coast_l_main) = main.coast_params(&sea_main, &land_main, &beach_main, &tramos);
+        let (coast_r_ctx, coast_l_ctx) = ctx.coast_params(&sea_ctx, &land_ctx, &beach_ctx, &tramos);
         let forest_main = Grid::from_u8(BOSQUE_BIN, main_n, main_step, 0.0);
         let forest_ctx = Grid::from_u8(BOSQUE_CTX_BIN, ctx_n, ctx_step, ctx_from);
         t.real = Some(Box::new(RealMap {
@@ -548,6 +645,12 @@ impl TerrainGen {
             forest_ctx,
             rock_main: Grid::from_u8(ROCAS_BIN, main_n, main_step, 0.0),
             rock_ctx: Grid::from_u8(ROCAS_CTX_BIN, ctx_n, ctx_step, ctx_from),
+            land_main,
+            land_ctx,
+            coast_r_main,
+            coast_r_ctx,
+            coast_l_main,
+            coast_l_ctx,
         }));
         for txt in [ARROYOS_JSON, ARROYOS_CTX_JSON] {
             let (arroyos, names) = parse_arroyos(txt);
@@ -762,20 +865,7 @@ impl TerrainGen {
         let field = self.n_hills.get_noise_2d(x * 9.0, z * 9.0) * 0.5 + 0.5;
         let stone = self.n_detail.get_noise_2d(x * 14.0 + 31.0, z * 14.0 - 17.0) * 0.5 + 0.5;
         let n = stone * 0.7 + field * 0.3;
-        // Umbral para que la fracción del suelo por encima sea la rocosidad: cuantiles medidos
-        // de `n` (media 0,5, desvío ≈ 0,11) para la fracción que queda arriba.
-        const Q: [(f32, f32); 8] = [
-            (0.005, 0.74), (0.01, 0.714), (0.05, 0.658), (0.10, 0.626),
-            (0.15, 0.603), (0.20, 0.584), (0.30, 0.552), (0.50, 0.498),
-        ];
-        let c = c.min(0.5);
-        let mut thr = Q[0].1;
-        for w in Q.windows(2) {
-            if c >= w[0].0 && c <= w[1].0 {
-                let f = (c - w[0].0) / (w[1].0 - w[0].0);
-                thr = w[0].1 + (w[1].1 - w[0].1) * f;
-            }
-        }
+        let thr = patch_threshold(c);
         Some((n, thr))
     }
 
@@ -919,6 +1009,79 @@ impl TerrainGen {
         d
     }
 
+    /// Muestra un par de grillas (mapa / entorno) con la transición del borde.
+    fn blend(&self, main: &Grid, ctx: &Grid, x: f32, z: f32) -> f32 {
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        if edge <= 0.0 {
+            ctx.linear(x, z)
+        } else if edge < 400.0 {
+            let w = smoothstep(0.0, 400.0, edge);
+            ctx.linear(x, z) * (1.0 - w) + main.linear(x, z) * w
+        } else {
+            main.linear(x, z)
+        }
+    }
+
+    /// Distancia de un punto del agua a la tierra (m); 0 en tierra.
+    fn land_distance(&self, x: f32, z: f32) -> f32 {
+        self.real.as_ref().map_or(0.0, |r| self.blend(&r.land_main, &r.land_ctx, x, z))
+    }
+
+    /// Costa en este punto: fracción de roca de la orilla y largo de las restingas (m).
+    pub fn coast_rock(&self, x: f32, z: f32) -> (f32, f32) {
+        match &self.real {
+            Some(r) => (self.blend(&r.coast_r_main, &r.coast_r_ctx, x, z), self.blend(&r.coast_l_main, &r.coast_l_ctx, x, z)),
+            None => (0.0, 0.0),
+        }
+    }
+
+    /// Ruido de manchas de piedra de la costa (lajas y bochas de 5 a 15 m).
+    fn coast_patch(&self, x: f32, z: f32) -> f32 {
+        let field = self.n_hills.get_noise_2d(x * 11.0 + 517.0, z * 11.0 - 233.0) * 0.5 + 0.5;
+        let stone = self.n_detail.get_noise_2d(x * 18.0 - 71.0, z * 18.0 + 45.0) * 0.5 + 0.5;
+        stone * 0.7 + field * 0.3
+    }
+
+    /// Piedra de la orilla (0..1, 1 = laja maciza) en la franja de playa: la fracción de roca
+    /// del tramo, en manchas.
+    pub fn shore_rock(&self, x: f32, z: f32) -> f32 {
+        self.shore_rock_ramp(x, z, 0.03, 0.03)
+    }
+
+    /// Igual, con una rampa más ancha para el relieve (montículo, no escalón).
+    fn shore_rock_ramp(&self, x: f32, z: f32, lo: f32, hi: f32) -> f32 {
+        let (r, _) = self.coast_rock(x, z);
+        if r < 0.02 {
+            return 0.0;
+        }
+        let thr = patch_threshold(r.min(0.97));
+        smoothstep(thr - lo, thr + hi, self.coast_patch(x, z))
+    }
+
+    /// Restinga en el agua (0..1): piedras que se meten en el río desde la orilla, cada vez más
+    /// salteadas, hasta el largo del tramo.
+    pub fn reef(&self, x: f32, z: f32) -> f32 {
+        self.reef_ramp(x, z, 0.03, 0.03)
+    }
+
+    /// Igual, con la rampa del borde de cada laja elegible (más ancha para el relieve).
+    fn reef_ramp(&self, x: f32, z: f32, lo: f32, hi: f32) -> f32 {
+        let (r, len) = self.coast_rock(x, z);
+        if len < 1.0 || r < 0.02 {
+            return 0.0;
+        }
+        let ld = self.land_distance(x, z);
+        if ld <= 0.0 || ld > len {
+            return 0.0;
+        }
+        let f = r * (1.0 - ld / len).powf(0.7);
+        if f < 0.01 {
+            return 0.0;
+        }
+        let thr = patch_threshold(f.min(0.97));
+        smoothstep(thr - lo, thr + hi, self.coast_patch(x, z))
+    }
+
     /// Ancho de la franja de arena de la costa (m): angosta en la bahía y la Ciudad Vieja,
     /// ancha hacia Carrasco y la costa de Canelones, donde los médanos tapaban los caminos.
     /// En el mapa real solo hay médanos detrás de las playas oficiales ([`Self::beach_factor`]).
@@ -952,6 +1115,28 @@ impl TerrainGen {
 
     fn real_height(&self, r: &RealMap, x: f32, z: f32) -> f32 {
         let mut h = self.real_raw(r, x, z);
+        // Restingas: en el agua junto a las costas de piedra el fondo sube en lajas que quedan
+        // entre medio metro bajo el agua y un metro sobre ella (algunas asoman en bajante).
+        if h <= 0.5 {
+            let rf = self.reef_ramp(x, z, 0.12, 0.08);
+            if rf > 0.0 {
+                let bump = self.n_detail.get_noise_2d(x * 12.0 + 9.0, z * 12.0 - 4.0) * 0.5 + 0.5;
+                let top = -0.6 + 1.5 * bump;
+                if top > h {
+                    h += (top - h) * rf;
+                }
+            }
+        }
+        // Piedras de la orilla: lajas y bochas que levantan entre 0,3 y 1,5 m sobre la arena.
+        let sd0 = self.sea_distance(x, z);
+        if h > -0.5 && h < 8.0 && sd0 < 70.0 {
+            // La franja de piedra se apaga tierra adentro en 30–70 m (sin borde recto).
+            let sr = self.shore_rock_ramp(x, z, 0.09, 0.07) * (1.0 - smoothstep(30.0, 70.0, sd0));
+            if sr > 0.0 {
+                let bump = self.n_detail.get_noise_2d(x * 12.0 - 13.0, z * 12.0 + 7.0) * 0.5 + 0.5;
+                h += sr * (0.3 + 1.0 * bump);
+            }
+        }
         if h > 0.0 && h < 25.0 {
             let sd = self.sea_distance(x, z);
             let belt = self.dune_belt(x, z);
@@ -1137,6 +1322,14 @@ impl TerrainGen {
         let fine = self.n_detail.get_noise_2d(x * 2.5, z * 2.5);
         let sd = self.sea_distance(x, z);
         let (da, hw, class) = self.arroyo_info(x, z);
+        // Costa de piedra (costa.json): lajas de la orilla y restingas que se meten en el agua.
+        if sd < 70.0 && h > -1.5 && da > hw + 3.0 {
+            let d = self.dither(x, z);
+            let fade = 1.0 - smoothstep(30.0, 70.0, sd + d * 20.0);
+            if self.reef(x, z) > 0.5 + d * 0.3 || (h > -0.3 && self.shore_rock(x, z) * fade > 0.5 + d * 0.3) {
+                return COAST_ROCK;
+            }
+        }
         if h < -0.3 {
             // El cauce de un arroyo ancho que baja del nivel del río sigue siendo arroyo
             // (agua); en el río y la bahía, el fondo: arena cerca de la orilla, limo más adentro.
