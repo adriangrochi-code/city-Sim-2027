@@ -593,7 +593,7 @@ impl TerrainGen {
     /// Variación de un vóxel a otro (−0,5..0,5): mezcla los bordes entre biomas en una banda
     /// en lugar de una línea.
     fn dither(&self, x: f32, z: f32) -> f32 {
-        hashf((x * 2.0).floor() as i32, (z * 2.0).floor() as i32, 97) - 0.5
+        hashf((x / crate::lod::BASE_VOXEL).floor() as i32, (z / crate::lod::BASE_VOXEL).floor() as i32, 97) - 0.5
     }
 
     pub fn forest_cover(&self, x: f32, z: f32) -> f32 {

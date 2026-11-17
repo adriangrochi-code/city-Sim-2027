@@ -1,5 +1,5 @@
 //! Catálogo de estructuras de la época colonial, armadas con el kit de `structures`.
-//! Proporciones (vóxel = 0,5 m): planta baja 4,5–5 m, planta alta 4 m, puerta 1,5 × 3 m,
+//! Proporciones (en vóxeles de diseño de 0,5 m): planta baja 4,5–5 m, planta alta 4 m, puerta 1,5 × 3 m,
 //! ventana 1 × 2 m con antepecho de 1 m, zócalo 1 m, pretil 0,5–1 m, solar de 12 × 38 m
 //! (frente de 14 varas y fondo hasta el medio de la manzana de 100 varas).
 
@@ -450,7 +450,7 @@ pub fn muelle(t: &TerrainGen, e: &mut Edits, f: &Frame) {
             let p = f.at(u, 0, w);
             let ground = top_at(t, p.x, p.z);
             for y in (ground + 1)..(f.base + deck) {
-                e.set(IVec3::new(p.x, y, p.z), WOOD_DARK);
+                e.dset(IVec3::new(p.x, y, p.z), WOOD_DARK);
             }
         }
         if w % 12 == 2 {
@@ -996,7 +996,6 @@ pub fn molino(t: &TerrainGen, e: &mut Edits, f: &Frame) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buildings::top_at;
 
     fn frame(t: &TerrainGen, seed: u64, width: i32, depth: i32) -> Frame {
         // Un solar en tierra firme de la península (13500, 16300 m).
@@ -1006,7 +1005,7 @@ mod tests {
     }
 
     fn sorted(e: &Edits) -> Vec<(i32, i32, i32, Mat)> {
-        let mut v: Vec<_> = e.voxels.iter().map(|(p, m)| (p.x, p.y, p.z, *m)).collect();
+        let mut v: Vec<_> = e.design.iter().map(|(p, m)| (p.x, p.y, p.z, *m)).collect();
         v.sort();
         v
     }
@@ -1060,12 +1059,12 @@ mod tests {
             for (name, b) in TRADES {
                 let mut e = Edits::default();
                 b(&t, &mut e, &frame(&t, seed, LOT_W, LOT_D));
-                assert!(e.voxels.len() > 500, "{name}: muy pocos vóxeles");
+                assert!(e.design.len() > 500, "{name}: muy pocos vóxeles");
                 builds.push((name, e));
             }
             for (name, e) in builds {
                 let f = frame(&t, seed, LOT_W, LOT_D);
-                for p in e.voxels.keys() {
+                for p in e.design.keys() {
                     let (u, _, w) = f.local(*p);
                     // Se permiten balcones, rejas voladas y el palenque sobre la vereda (w ≥ −4).
                     assert!((-1..=LOT_W).contains(&u) && (-4..LOT_D).contains(&w), "{name} (semilla {seed}): vóxel fuera del solar en u={u}, w={w}");
@@ -1082,12 +1081,12 @@ mod tests {
             let mut e = Edits::default();
             let f = frame(&t, 9, 30, 84);
             iglesia(&t, &mut e, &f, phase);
-            let above: Vec<_> = e.voxels.iter().filter(|(p, _)| p.y >= f.base).collect();
+            let above: Vec<_> = e.design.iter().filter(|(p, _)| p.y >= f.base).collect();
             let count = above.len();
             let top = above.iter().map(|(p, _)| p.y).max().unwrap();
             assert!(count > prev.0, "fase {phase}: debería haber más obra que en la anterior");
             assert!(top >= prev.1, "fase {phase}: la obra no puede bajar de altura");
-            let scaffolds = e.voxels.values().filter(|&&m| m == SCAFFOLD).count();
+            let scaffolds = e.design.values().filter(|&&m| m == SCAFFOLD).count();
             if phase == 5 {
                 assert_eq!(scaffolds, 0, "la iglesia terminada no tiene andamios");
             } else if phase >= 2 {

@@ -1,11 +1,25 @@
 //! Niveles de detalle tipo *clipmap*: anillos concéntricos alrededor de la cámara.
-//! El nivel 0 usa vóxeles de 0,5 m; cada nivel siguiente duplica el tamaño del vóxel
-//! (1, 2, 4, 8 m…) y cubre el doble de distancia. Con 8 niveles se cubren los 24 km del mapa.
+//! El nivel 0 usa vóxeles de 0,25 m; cada nivel siguiente duplica el tamaño del vóxel
+//! (0,5, 1, 2, 4 m…) y cubre el doble de distancia. Con 9 niveles ([`LEVELS`]) se cubren
+//! los 24 km del mapa (el último nivel, de 64 m por vóxel, tiene un anillo de 49 km).
+//!
+//! Los edificios se diseñan en una grilla más gruesa, de [`DESIGN_VOXEL`] (0,5 m: puerta de
+//! 3 × 6 vóxeles, solar de 24 × 48): cada vóxel de diseño ocupa un bloque de
+//! [`DESIGN_SCALE`]³ vóxeles base (ver `buildings::Edits::design`).
 
 use glam::{IVec2, Vec2};
 
 pub const CHUNK: i32 = 32;
-pub const BASE_VOXEL: f32 = 0.5;
+pub const BASE_VOXEL: f32 = 0.25;
+/// Niveles de detalle por omisión (distancia de dibujo "larga": todo el mapa).
+pub const LEVELS: u32 = 9;
+/// Vóxeles base por lado de un vóxel de diseño, en potencia de dos (1 → 2 × 2 × 2).
+pub const DESIGN_SHIFT: u32 = 1;
+pub const DESIGN_SCALE: i32 = 1 << DESIGN_SHIFT;
+/// Lado del vóxel de diseño de los edificios (m).
+pub const DESIGN_VOXEL: f32 = BASE_VOXEL * DESIGN_SCALE as f32;
+// El almacén de ediciones expande el diseño solo en el nivel 0 (ver `store`).
+const _: () = assert!(DESIGN_SHIFT <= 1);
 /// Lado de cada anillo, en chunks (par y con mitad par para alinear con el nivel siguiente).
 pub const RING_CHUNKS: i32 = 24;
 
@@ -98,21 +112,22 @@ mod tests {
 
     #[test]
     fn el_nivel_mas_fino_depende_de_la_altura_con_histeresis() {
-        // De cerca se usa el nivel 0; a 4 km de altura, un vóxel de 0,5 m es una fracción de píxel.
-        assert_eq!(choose_first_level(0, 80.0, 50.0, 720.0, 8), 0);
-        let far = choose_first_level(0, 4500.0, 50.0, 720.0, 8);
-        assert!(far >= 3, "desde 4,5 km el nivel más fino debería ser al menos 3 (es {far})");
+        // De cerca se usa el nivel 0; a 4 km de altura, un vóxel de 0,25 m es una fracción de píxel.
+        assert_eq!(choose_first_level(0, 80.0, 50.0, 720.0, LEVELS), 0);
+        let far = choose_first_level(0, 4500.0, 50.0, 720.0, LEVELS);
+        assert!(voxel_pixels(far - 1, 4500.0, 50.0, 720.0) < 0.45, "desde 4,5 km el nivel {far} es demasiado fino");
+        assert!(far >= 4, "desde 4,5 km el nivel más fino debería ser al menos 4 (vóxel de 4 m; es {far})");
         assert!(voxel_pixels(far, 4500.0, 50.0, 720.0) >= 0.45);
         // Histéresis: justo en el borde no cambia de nivel en ninguno de los dos sentidos.
-        let edge = 0.5 * 720.0 / (2.0 * 0.5 * (25f32).to_radians().tan()); // altura donde el nivel 0 mide 0,5 px
-        assert_eq!(choose_first_level(0, edge * 1.05, 50.0, 720.0, 8), 0);
-        assert_eq!(choose_first_level(1, edge * 0.95, 50.0, 720.0, 8), 1);
-        assert_eq!(choose_first_level(1, edge * 0.8, 50.0, 720.0, 8), 0);
+        let edge = BASE_VOXEL * 720.0 / (2.0 * 0.5 * (25f32).to_radians().tan()); // altura donde el nivel 0 mide 0,5 px
+        assert_eq!(choose_first_level(0, edge * 1.05, 50.0, 720.0, LEVELS), 0);
+        assert_eq!(choose_first_level(1, edge * 0.95, 50.0, 720.0, LEVELS), 1);
+        assert_eq!(choose_first_level(1, edge * 0.8, 50.0, 720.0, LEVELS), 0);
     }
 
     #[test]
     fn empezando_en_otro_nivel_se_cubre_todo_igual() {
-        let levels: Vec<LevelSpec> = (0..8).map(|lod| LevelSpec { lod }).collect();
+        let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod }).collect();
         let center = Vec2::new(13500.0, 16300.0);
         let cols = level_columns_from(&levels, center, 3);
         assert!(cols[0].is_empty() && cols[1].is_empty() && cols[2].is_empty());
@@ -131,7 +146,7 @@ mod tests {
 
     #[test]
     fn los_anillos_no_se_superponen_y_cubren_el_mapa() {
-        let levels: Vec<LevelSpec> = (0..8).map(|lod| LevelSpec { lod }).collect();
+        let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod }).collect();
         let center = Vec2::new(13500.0, 16300.0);
         let cols = level_columns(&levels, center);
         // Cada punto de una grilla de prueba debe pertenecer a exactamente un nivel.

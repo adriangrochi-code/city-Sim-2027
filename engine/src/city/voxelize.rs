@@ -1,9 +1,12 @@
 //! Del plano de la ciudad a vóxeles: calzadas que aplanan suavemente el terreno, la plaza
 //! mayor y edificios del catálogo girados a cualquier ángulo para mirar a su calle.
+//!
+//! Calles, plaza y puentes van en la grilla base (0,25 m); los edificios, en la de diseño
+//! (0,5 m, ver `structures`).
 
 use super::roads::{closest_on_segment, Edge, RoadKind, RoadNetwork};
-use crate::buildings::{top_at, Edits};
-use crate::lod::BASE_VOXEL;
+use crate::buildings::{design_top_at, top_at, Edits};
+use crate::lod::{BASE_VOXEL, DESIGN_VOXEL};
 use crate::palette::*;
 use crate::structures::Frame;
 use crate::terrain::TerrainGen;
@@ -24,6 +27,11 @@ fn vox_center(x: i32, z: i32) -> Vec2 {
 
 fn top_index(h: f32) -> i32 {
     (h / BASE_VOXEL - 0.5).floor() as i32
+}
+
+/// Metros a vóxeles base (al menos uno), para espesores y alturas de obra.
+fn n_vox(m: f32) -> i32 {
+    ((m / BASE_VOXEL).round() as i32).max(1)
 }
 
 /// Altura de la calzada en un punto: el terreno promediado en un disco de 6 m. Depende solo
@@ -169,9 +177,21 @@ fn deck_top(t: &TerrainGen, edge: &Edge, span: (f32, f32)) -> i32 {
     top_index(banks.max(water + 2.5) + 0.3)
 }
 
+/// Plaza mayor fundada: centro y dirección del frente (para no pisarla con banquinas).
+pub type PlazaSquare = Option<(Vec2, Vec2)>;
+
+/// ¿El punto cae en el empedrado de la plaza? Ahí las banquinas de las calles que la rodean
+/// no tocan el suelo (si no, asoma pasto a otra altura en el borde de la plaza).
+fn on_plaza(q: Vec2, plaza: PlazaSquare) -> bool {
+    plaza.is_some_and(|(c, f)| {
+        let d = q - c;
+        d.dot(super::lots::side_of(f)).abs().max(d.dot(f).abs()) <= PLAZA_SIZE * 0.5
+    })
+}
+
 /// Vóxeles de un tramo de calle: calzada (empedrado con veredas de piedra, o tierra) y
 /// puentes donde cruza agua (el cauce no se toca: el agua sigue corriendo).
-pub fn road_edits(t: &TerrainGen, net: &RoadNetwork, eid: u32, e: &mut Edits) {
+pub fn road_edits(t: &TerrainGen, net: &RoadNetwork, eid: u32, plaza: PlazaSquare, e: &mut Edits) {
     let edge = &net.edges[&eid];
     let hw = edge.kind.width() * 0.5;
     let spans = water_spans(t, &edge.pts);
@@ -194,14 +214,14 @@ pub fn road_edits(t: &TerrainGen, net: &RoadNetwork, eid: u32, e: &mut Edits) {
                 RoadKind::Stone => COBBLE,
             };
             set_column(e, c.x, c.y, g, top, mat);
-        } else if inside_any > 0.0 {
+        } else if inside_any > 0.0 && !on_plaza(q, plaza) {
             set_column(e, c.x, c.y, g, top, GRASS);
         }
     }
 }
 
-/// Una columna de puente: tablero, pretiles y, cada 8 m, un pilar hasta el fondo. Con
-/// `remove`, borra lo mismo (al demoler).
+/// Una columna de puente: tablero de 1 m, pretiles (0,5 m de madera, 1 m de piedra) y, cada
+/// 8 m, un pilar hasta el fondo. Con `remove`, borra lo mismo (al demoler).
 #[allow(clippy::too_many_arguments)]
 fn bridge_column(e: &mut Edits, kind: RoadKind, c: IVec2, d: f32, hw: f32, along: f32, span: f32, deck: i32, ground: i32, remove: bool) {
     if d > hw {
@@ -212,25 +232,27 @@ fn bridge_column(e: &mut Edits, kind: RoadKind, c: IVec2, d: f32, hw: f32, along
         RoadKind::Dirt => (WOOD, WOOD_DARK, WOOD_DARK),
     };
     let mut put = |y: i32, m: Mat| e.set(IVec3::new(c.x, y, c.y), if remove { AIR } else { m });
-    put(deck, deck_m);
-    put(deck - 1, deck_m);
+    let thick = n_vox(1.0);
+    for k in 0..thick {
+        put(deck - k, deck_m);
+    }
     if d > hw - 0.6 {
-        put(deck + 1, rail_m);
-        if kind == RoadKind::Stone {
-            put(deck + 2, rail_m);
+        let rail = n_vox(if kind == RoadKind::Stone { 1.0 } else { 0.5 });
+        for k in 1..=rail {
+            put(deck + k, rail_m);
         }
     }
     // Pilares cada 8 m (no en los estribos), del fondo al tablero.
     let pier = along > 4.0 && along < span - 4.0 && (along % 8.0) < 1.0 && d < hw - 0.5;
     if pier {
-        for y in (ground + 1).min(deck - 2)..deck - 1 {
+        for y in (ground + 1).min(deck - thick)..deck - thick + 1 {
             put(y, pier_m);
         }
     }
 }
 
 /// Deshace los vóxeles de un tramo demolido (el terreno vuelve a su forma natural).
-pub fn road_restore(t: &TerrainGen, edge: &Edge, e: &mut Edits) {
+pub fn road_restore(t: &TerrainGen, edge: &Edge, plaza: PlazaSquare, e: &mut Edits) {
     let hw = edge.kind.width() * 0.5;
     let spans = water_spans(t, &edge.pts);
     let decks: Vec<i32> = spans.iter().map(|&sp| deck_top(t, edge, sp)).collect();
@@ -240,6 +262,9 @@ pub fn road_restore(t: &TerrainGen, edge: &Edge, e: &mut Edits) {
             continue;
         }
         let g = top_at(t, c.x, c.y);
+        if on_plaza(vox_center(c.x, c.y), plaza) {
+            continue;
+        }
         if let Some(top) = road_top(t, edge.kind, d, p, g) {
             restore_column(e, c.x, c.y, g, top);
         }
@@ -273,11 +298,13 @@ pub fn plaza_edits(t: &TerrainGen, c: Vec2, f: Vec2, e: &mut Edits) {
             }
         }
     }
-    // Rollo (columna de la justicia) en el centro.
+    // Rollo (columna de la justicia) en el centro: grada de piedra de 2 × 2 × 0,5 m y fuste
+    // de 1 × 1 × 4,5 m.
     let cx = (c.x / vs).floor() as i32;
     let cz = (c.y / vs).floor() as i32;
-    e.fill(IVec3::new(cx - 2, yp + 1, cz - 2), IVec3::new(cx + 2, yp + 2, cz + 2), STONE);
-    e.fill(IVec3::new(cx - 1, yp + 2, cz - 1), IVec3::new(cx + 1, yp + 11, cz + 1), CAL);
+    let (g, f, h) = (n_vox(1.0), n_vox(0.5), n_vox(0.5));
+    e.fill(IVec3::new(cx - g, yp + 1, cz - g), IVec3::new(cx + g, yp + 1 + h, cz + g), STONE);
+    e.fill(IVec3::new(cx - f, yp + 1 + h, cz - f), IVec3::new(cx + f, yp + 1 + h + n_vox(4.5), cz + f), CAL);
 }
 
 /// Resultado de construir una estructura girada.
@@ -292,7 +319,8 @@ pub struct Built {
 /// Se arma primero alineada a los ejes y después se gira re-muestreando su grilla de vóxeles
 /// (vecino más cercano) alrededor del centro del solar. Los cimientos se rehacen columna por
 /// columna con el terreno real. Si el ángulo está a menos de 1,5° de uno cardinal, se usa el
-/// cardinal exacto (sin re-muestreo, sin dientes de sierra).
+/// cardinal exacto (sin re-muestreo, sin dientes de sierra). Todo en vóxeles de diseño: el
+/// resultado (y `Built::voxels`) va en `Edits::design`.
 pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, depth: i32, seed: u64, builder: &dyn Fn(&TerrainGen, &mut Edits, &Frame)) -> Built {
     let mut f = front.normalize_or(Vec2::NEG_Y);
     let ang = f.y.atan2(f.x);
@@ -304,7 +332,7 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
     // Ejes del mundo para los ejes locales: u (a lo largo del frente) → s; w (hacia el fondo) → −f.
     let s = Vec2::new(-f.y, f.x);
     let bw = -f;
-    let vs = BASE_VOXEL;
+    let vs = DESIGN_VOXEL;
     let cv = IVec2::new((center.x / vs).round() as i32, (center.y / vs).round() as i32);
     let cp = cv.as_vec2();
     let to_world = |lu: f32, lw: f32| cp + s * lu + bw * lw;
@@ -315,7 +343,7 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
         let mut u = -width / 2;
         while u <= width / 2 {
             let p = to_world(u as f32, w as f32);
-            base = base.max(top_at(t, p.x.floor() as i32, p.y.floor() as i32) + 1);
+            base = base.max(design_top_at(t, p.x.floor() as i32, p.y.floor() as i32) + 1);
             u += 4;
         }
         w += 4;
@@ -327,7 +355,7 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
     builder(t, &mut tmp, &frame);
     let mut cols: HashMap<IVec2, Vec<(i32, Mat)>> = HashMap::new();
     let (mut lo, mut hi) = (IVec2::splat(i32::MAX), IVec2::splat(i32::MIN));
-    for (&v, &m) in &tmp.voxels {
+    for (&v, &m) in &tmp.design {
         if v.y < base {
             continue; // los cimientos se rehacen abajo con el terreno real
         }
@@ -336,7 +364,7 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
         lo = lo.min(k);
         hi = hi.max(k);
     }
-    for &k in tmp.surface.keys() {
+    for &k in tmp.design_surface.keys() {
         lo = lo.min(k);
         hi = hi.max(k);
     }
@@ -357,21 +385,21 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
         for x in wlo.x.floor() as i32 - 1..=whi.x.ceil() as i32 + 1 {
             let q = Vec2::new(x as f32 + 0.5, z as f32 + 0.5) - cp;
             let src = IVec2::new((cp.x + q.dot(s)).floor() as i32, (cp.y + q.dot(bw)).floor() as i32);
-            if let Some(m) = tmp.surface.get(&src) {
-                out.edits.surface.insert(IVec2::new(x, z), *m);
+            if let Some(m) = tmp.design_surface.get(&src) {
+                out.edits.dsurface(IVec2::new(x, z), *m);
             }
             let Some(list) = cols.get(&src) else { continue };
             for &(y, m) in list {
                 let v = IVec3::new(x, y, z);
-                out.edits.set(v, m);
+                out.edits.dset(v, m);
                 out.voxels.push(v);
                 if y == base {
-                    // Cimientos hasta el terreno (unos vóxeles más abajo cubren los cortes de
-                    // las banquinas de la calle).
-                    let g = top_at(t, x, z);
+                    // Cimientos hasta el terreno (2 m más abajo cubren los cortes de las
+                    // banquinas de la calle).
+                    let g = design_top_at(t, x, z);
                     for yy in (g - 4).min(base - 1)..base {
                         let fv = IVec3::new(x, yy, z);
-                        out.edits.set(fv, m);
+                        out.edits.dset(fv, m);
                         out.voxels.push(fv);
                     }
                 }
@@ -399,12 +427,12 @@ mod tests {
             // para rejas voladas y el redondeo del re-muestreo).
             let s = Vec2::new(-f.y, f.x);
             for v in &b.voxels {
-                let q = Vec2::new((v.x as f32 + 0.5) * BASE_VOXEL, (v.z as f32 + 0.5) * BASE_VOXEL) - c;
+                let q = Vec2::new((v.x as f32 + 0.5) * DESIGN_VOXEL, (v.z as f32 + 0.5) * DESIGN_VOXEL) - c;
                 assert!(q.dot(s).abs() <= 6.0 + 1.0, "{deg}°: fuera a lo ancho {}", q.dot(s));
                 assert!(q.dot(f).abs() <= super::super::lots::D * 0.5 + 1.0, "{deg}°: fuera a lo hondo {}", q.dot(f));
             }
             // La fachada (los vóxeles más cercanos a la calle) está del lado del frente.
-            let front = b.voxels.iter().map(|v| (Vec2::new(v.x as f32 + 0.5, v.z as f32 + 0.5) * BASE_VOXEL - c).dot(f)).fold(f32::NEG_INFINITY, f32::max);
+            let front = b.voxels.iter().map(|v| (Vec2::new(v.x as f32 + 0.5, v.z as f32 + 0.5) * DESIGN_VOXEL - c).dot(f)).fold(f32::NEG_INFINITY, f32::max);
             assert!(front > super::super::lots::D * 0.5 - 2.0, "{deg}°: la fachada no mira a la calle ({front})");
         }
     }
@@ -431,13 +459,14 @@ mod tests {
         let p = Vec2::new(13500.0, 16100.0);
         let ids = net.add_road(&super::super::roads::line(p, p + Vec2::new(60.0, 0.0)), RoadKind::Stone);
         let mut e = Edits::default();
-        road_edits(&t, &net, ids[0], &mut e);
+        road_edits(&t, &net, ids[0], None, &mut e);
         let vs = BASE_VOXEL;
         let mid = IVec2::new(((p.x + 30.0) / vs) as i32, (p.y / vs) as i32);
         let top = (0..400).rev().find(|&y| e.voxels.get(&IVec3::new(mid.x, y, mid.y)).is_some_and(|&m| m != AIR)).unwrap();
         assert_eq!(e.voxels[&IVec3::new(mid.x, top, mid.y)], COBBLE);
-        // Vereda en el borde y calzada a la misma altura que en el eje (la calle es plana de lado a lado).
-        let edge = IVec2::new(mid.x, mid.y + 7);
+        // Vereda en el borde (a casi 4 m del eje) y calzada a la misma altura que en el eje (la
+        // calle es plana de lado a lado).
+        let edge = IVec2::new(mid.x, mid.y + (3.8 / vs) as i32);
         assert_eq!(e.voxels.get(&IVec3::new(edge.x, top, edge.y)).copied(), Some(PLAZA));
     }
 }

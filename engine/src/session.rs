@@ -4,7 +4,7 @@
 use crate::buildings::Edits;
 use crate::city::game::Game;
 use crate::camera::OrbitCamera;
-use crate::lod::BASE_VOXEL;
+use crate::lod::{BASE_VOXEL, DESIGN_SCALE, DESIGN_VOXEL};
 use crate::raycast::{raycast, Hit};
 use crate::render::{overlay_box, OverlayVertex, Renderer};
 use crate::sandbox::{self, CATALOG};
@@ -102,7 +102,7 @@ impl Session {
 
     /// Aplica ediciones al mundo (re-malla solo las columnas tocadas).
     pub fn apply_edits(&mut self, e: &Edits) -> usize {
-        if e.voxels.is_empty() && e.surface.is_empty() {
+        if e.is_empty() {
             return 0;
         }
         self.streamer.edit(e).len()
@@ -116,7 +116,7 @@ impl Session {
         if let Some(e) = g.press(&t, h) {
             let t0 = Instant::now();
             let n = self.apply_edits(&e);
-            println!("{} vóxeles editados, {n} columnas a re-mallar ({:.1?})", e.voxels.len(), t0.elapsed());
+            println!("{} vóxeles editados, {n} columnas a re-mallar ({:.1?})", e.voxel_count(), t0.elapsed());
         }
     }
 
@@ -153,13 +153,11 @@ impl Session {
             let mut batch = Edits::default();
             if let Some(h) = hover {
                 if let Some(e) = g.paint_at(h) {
-                    batch.voxels.extend(e.voxels);
+                    batch.extend(e);
                 }
             }
             if let Some(e) = g.update(&t, dt) {
-                batch.voxels.extend(e.voxels);
-                batch.surface.extend(e.surface);
-                batch.ground.extend(e.ground);
+                batch.extend(e);
             }
             self.apply_edits(&batch);
         }
@@ -236,7 +234,9 @@ impl Session {
         Some(self.streamer.edit(&edits).len())
     }
 
+    /// Excava una esfera de radio `r` vóxeles de diseño (0,5 m) donde apunta el ratón.
     pub fn dig(&mut self, r: i32) -> Option<usize> {
+        let r = r * DESIGN_SCALE;
         let hit = self.hit?;
         let edits = {
             let store = self.streamer.store.read().unwrap();
@@ -245,7 +245,9 @@ impl Session {
         Some(self.streamer.edit(&edits).len())
     }
 
+    /// Rellena una esfera de radio `r` vóxeles de diseño (0,5 m) donde apunta el ratón.
     pub fn fill(&mut self, r: i32) -> Option<usize> {
+        let r = r * DESIGN_SCALE;
         let hit = self.hit?;
         let edits = {
             let store = self.streamer.store.read().unwrap();
@@ -266,7 +268,7 @@ impl Session {
             overlay_box(&mut out, a, a + Vec3::splat(vs + 0.06), [1.0, 0.95, 0.4, 0.45]);
             let f = self.frame(&h);
             let (lo, hi) = sandbox::footprint(&f);
-            overlay_box(&mut out, lo.as_vec3() * vs, hi.as_vec3() * vs, [0.35, 0.95, 0.45, 0.22]);
+            overlay_box(&mut out, lo.as_vec3() * DESIGN_VOXEL, hi.as_vec3() * DESIGN_VOXEL, [0.35, 0.95, 0.45, 0.22]);
         }
         out
     }

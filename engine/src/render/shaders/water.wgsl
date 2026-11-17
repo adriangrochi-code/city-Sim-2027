@@ -58,7 +58,7 @@ fn hash2(p: vec2<f32>) -> f32 {
 }
 
 // Agua en vóxeles: la superficie se divide en celdas cuadradas del tamaño del vóxel del
-// terreno a esa distancia (0,5 m de cerca, más grandes a lo lejos, como los niveles de
+// terreno a esa distancia (0,25 m de cerca, más grandes a lo lejos, como los niveles de
 // detalle). Cada celda tiene su tinte y su propia ondulación (se inclina y sube un poco), con
 // el borde marcado de cerca: el río se lee hecho de bloques, como las casas. La luz del sol se
 // refleja por celda, así que a lo lejos no forma el tramado brillante de las olas finas.
@@ -94,10 +94,10 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Metros por píxel: elige el tamaño de celda (≥ ~6 píxeles), mezclando dos tamaños para que
     // no se vean saltos.
     let mpp = max(length(fwidth(p)), 1e-4);
-    let lv = max(log2(mpp * 6.0 / 0.5), 0.0);
+    let lv = max(log2(mpp * 6.0 / 0.25), 0.0);
     let k = floor(lv);
-    let a = cell_shade(p, 0.5 * exp2(k), t);
-    let b = cell_shade(p, 0.5 * exp2(k + 1.0), t);
+    let a = cell_shade(p, 0.25 * exp2(k), t);
+    let b = cell_shade(p, 0.25 * exp2(k + 1.0), t);
     let w = smoothstep(0.6, 1.0, lv - k);
     let cs = mix(a, b, w);
     let n = normalize(vec3(cs.x, 1.0, cs.y));

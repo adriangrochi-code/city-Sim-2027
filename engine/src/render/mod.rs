@@ -29,8 +29,14 @@ const INITIAL_ORDER: u32 = 14;
 const FRAMES_IN_FLIGHT: u64 = 2;
 /// Paleta de colores de material en la GPU (vec4 por material).
 const PALETTE_SLOTS: usize = 64;
-/// Los pases de sombra solo dibujan los niveles finos.
-const SHADOW_MAX_LOD: u32 = 3;
+/// Los pases de sombra solo dibujan los niveles finos: los de vóxel de hasta 4 m.
+const SHADOW_MAX_LOD: u32 = {
+    let mut l = 0;
+    while crate::lod::BASE_VOXEL * ((1u32 << l) as f32) < 4.0 {
+        l += 1;
+    }
+    l
+};
 
 /// Modo de dibujo elegido por línea de comandos (0 = automático, 1 = directo,
 /// 2 = indirecto con descarte en CPU, 3 = indirecto con descarte en GPU).

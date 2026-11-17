@@ -13,10 +13,11 @@ pub struct SceneOut {
 }
 
 fn land(t: &TerrainGen, vx: i32, vz: i32) -> bool {
-    t.height((vx as f32 + 0.5) * BASE_VOXEL, (vz as f32 + 0.5) * BASE_VOXEL) > 1.0
+    t.height((vx as f32 + 0.5) * DESIGN_VOXEL, (vz as f32 + 0.5) * DESIGN_VOXEL) > 1.0
 }
 
-use crate::lod::BASE_VOXEL;
+use crate::lod::DESIGN_VOXEL;
+// Todo en este archivo va en vóxeles de diseño (0,5 m), como el catálogo.
 
 /// Crea un marco apoyado en el terreno: la base queda sobre el punto más alto del contorno.
 pub fn place(t: &TerrainGen, origin: IVec2, du: IVec2, dw: IVec2, width: i32, depth: i32, seed: u64) -> Frame {
@@ -41,7 +42,7 @@ fn cobble_line(t: &TerrainGen, e: &mut Edits, a: IVec2, b: IVec2, half: i32, m: 
     for z in z0..z1 {
         for x in x0..x1 {
             if land(t, x, z) {
-                e.surface.insert(IVec2::new(x, z), m);
+                e.dsurface(IVec2::new(x, z), m);
             }
         }
     }
@@ -65,8 +66,8 @@ pub fn ciudad(t: &TerrainGen, plaza: Vec2, blocks: i32, seed: u64) -> SceneOut {
         for a in vox(-half - road * 0.5)..vox(half + road * 0.5) {
             for b in vox(line - road * 0.5)..vox(line + road * 0.5) {
                 for (px, pz) in [(vox(plaza.x) + a, vox(plaza.y) + b), (vox(plaza.x) + b, vox(plaza.y) + a)] {
-                    if t.height((px as f32 + 0.5) * BASE_VOXEL, (pz as f32 + 0.5) * BASE_VOXEL) > 0.6 {
-                        e.surface.insert(IVec2::new(px, pz), COBBLE);
+                    if t.height((px as f32 + 0.5) * DESIGN_VOXEL, (pz as f32 + 0.5) * DESIGN_VOXEL) > 0.6 {
+                        e.dsurface(IVec2::new(px, pz), COBBLE);
                     }
                 }
             }
@@ -79,7 +80,7 @@ pub fn ciudad(t: &TerrainGen, plaza: Vec2, blocks: i32, seed: u64) -> SceneOut {
         for bx in 0..(n_lines - 1) {
             let mx = vox(x0 + block * bx as f32 + road * 0.5);
             let mz = vox(z0 + block * bz as f32 + road * 0.5);
-            let center = Vec2::new((mx + side / 2) as f32 * BASE_VOXEL, (mz + side / 2) as f32 * BASE_VOXEL);
+            let center = Vec2::new((mx + side / 2) as f32 * DESIGN_VOXEL, (mz + side / 2) as f32 * DESIGN_VOXEL);
             if bx == mid && bz == mid {
                 plaza_block(t, &mut e, mx, mz, side);
                 continue;
@@ -229,7 +230,7 @@ pub fn catalogo(t: &TerrainGen) -> SceneOut {
     muelle(t, &mut e, &pier);
     barraca(t, &mut e, &place(t, IVec2::new(px - 10, pz - 22), IVec2::X, IVec2::NEG_Y, 32, 20, 42));
     cobble_line(t, &mut e, IVec2::new(px - 12, pz - 16), IVec2::new(px + 24, pz - 12), 3, DIRT_ROAD);
-    let center = Vec2::new((x0 + 370) as f32 * BASE_VOXEL, street_z as f32 * BASE_VOXEL);
+    let center = Vec2::new((x0 + 370) as f32 * DESIGN_VOXEL, street_z as f32 * DESIGN_VOXEL);
     vegetation(t, &mut e, center, 900.0, 260.0, 12);
     SceneOut { edits: e, cam: [center.x, center.y - 40.0, 330.0, 15.0, 36.0], center }
 }

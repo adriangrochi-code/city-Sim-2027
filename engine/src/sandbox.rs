@@ -2,6 +2,7 @@
 //! rellenar terreno. Todo se traduce a ediciones de vóxeles.
 
 use crate::buildings::Edits;
+use crate::lod::DESIGN_SCALE;
 use crate::palette::*;
 use crate::raycast::solid;
 use crate::store::LevelStore;
@@ -68,9 +69,11 @@ pub fn orient(rot: u32) -> (IVec2, IVec2) {
     }
 }
 
-/// Marco de la estructura centrado en un vóxel del suelo.
+/// Marco de la estructura centrado en una columna del suelo (`center` en vóxeles base; el
+/// marco queda en vóxeles de diseño).
 pub fn frame_at(t: &TerrainGen, kind: &Kind, center: IVec2, rot: u32, seed: u64) -> Frame {
     let (du, dw) = orient(rot);
+    let center = IVec2::new(center.x.div_euclid(DESIGN_SCALE), center.y.div_euclid(DESIGN_SCALE));
     let origin = center - du * (kind.width / 2) - dw * (kind.depth / 2);
     place(t, origin, du, dw, kind.width, kind.depth, seed)
 }
@@ -81,14 +84,14 @@ pub fn build(t: &TerrainGen, kind: &Kind, f: &Frame) -> Edits {
     e
 }
 
-/// Esquinas del solar en vóxeles (mínimo y máximo, para dibujar el contorno).
+/// Esquinas del solar en vóxeles de diseño (mínimo y máximo, para dibujar el contorno).
 pub fn footprint(f: &Frame) -> (IVec3, IVec3) {
     let a = f.origin;
     let b = f.origin + f.du * (f.width - 1) + f.dw * (f.depth - 1);
     (IVec3::new(a.x.min(b.x), f.base, a.y.min(b.y)), IVec3::new(a.x.max(b.x) + 1, f.base + 2, a.y.max(b.y) + 1))
 }
 
-/// Excava una esfera de radio `r` vóxeles: lo macizo pasa a ser aire.
+/// Excava una esfera de radio `r` vóxeles base: lo macizo pasa a ser aire.
 pub fn dig(t: &TerrainGen, l0: &LevelStore, c: IVec3, r: i32) -> Edits {
     let mut e = Edits::default();
     let mut cache = HashMap::new();
@@ -108,7 +111,7 @@ pub fn dig(t: &TerrainGen, l0: &LevelStore, c: IVec3, r: i32) -> Edits {
     e
 }
 
-/// Rellena una esfera de radio `r` vóxeles con tierra y pasto arriba.
+/// Rellena una esfera de radio `r` vóxeles base con tierra y pasto arriba.
 pub fn fill(t: &TerrainGen, l0: &LevelStore, c: IVec3, r: i32) -> Edits {
     let mut e = Edits::default();
     let mut cache = HashMap::new();

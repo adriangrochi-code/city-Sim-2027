@@ -91,6 +91,9 @@ fn level_edits(edits: &Edits, lod: u32) -> LevelEdits {
 impl World {
     /// Genera todos los niveles alrededor de `center` (en metros, plano x/z).
     pub fn generate(terrain: TerrainGen, edits: &Edits, levels: &[LevelSpec], center: Vec2) -> World {
+        // Captura de una vez (sin streaming): el diseño se expande a la grilla base.
+        let base = edits.to_base();
+        let edits = &base;
         let cols = level_columns(levels, center);
         let mut out = Vec::new();
         for (i, spec) in levels.iter().enumerate() {
@@ -246,7 +249,7 @@ mod tests {
         e.fill(base, base + IVec3::new(8, 10, 8), CAL);
         e.fill(base + IVec3::new(0, 10, 0), base + IVec3::new(8, 11, 8), AZOTEA);
         let le = level_edits(&e, 2);
-        // Capa más alta a resolución de 2 m (nivel 2): debe ser azotea, no cal.
+        // Capa más alta a resolución de 1 m (nivel 2): debe ser azotea, no cal.
         let top_y = (base.y + 10) >> 2;
         let mut tops = Vec::new();
         for (ck, list) in &le.voxels {

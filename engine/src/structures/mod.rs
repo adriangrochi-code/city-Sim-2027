@@ -6,13 +6,17 @@
 //! balcones) y elementos (techos de teja y de paja, cúpulas, chimeneas, aljibes, andamios,
 //! cercos de palo a pique). Todo es determinista: la misma semilla da el mismo edificio.
 //!
-//! Escala: vóxel de 0,5 m. El detalle más fino (barrotes de las rejas, canales de las tejas,
-//! hebras de la paja, juntas de la sillería) lo dibuja el shader por material.
+//! Escala: vóxel de diseño de 0,5 m ([`crate::lod::DESIGN_VOXEL`]; el vóxel del mundo es de
+//! 0,25 m y cada vóxel de diseño ocupa un bloque de 2 × 2 × 2). Todo el catálogo cuenta en
+//! vóxeles de diseño (puerta de 3 × 6, solar de 24 × 48) y escribe en `Edits::design`. El
+//! detalle más fino (barrotes de las rejas, canales de las tejas, hebras de la paja, juntas de
+//! la sillería) lo dibuja el shader por material.
 
 pub mod colonial;
 pub mod scenes;
 
-use crate::buildings::{top_at, Edits, Rng};
+pub(crate) use crate::buildings::design_top_at as top_at;
+use crate::buildings::{Edits, Rng};
 use crate::palette::*;
 use crate::terrain::TerrainGen;
 use glam::{IVec2, IVec3};
@@ -56,6 +60,7 @@ pub fn weather(m: Mat, p: IVec3, y: i32, seed: u64) -> Mat {
 /// Marco de un solar o edificio: `u` a lo largo del frente, `w` hacia el fondo
 /// (0 = línea de la calle; negativo = sobre la vereda), `y` hacia arriba desde `base`.
 /// Los ejes son siempre cardinales: en vóxeles los edificios no se giran en ángulos libres.
+/// Todo (origen, base, medidas) va en vóxeles de diseño (0,5 m).
 #[derive(Clone, Copy, Debug)]
 pub struct Frame {
     pub origin: IVec2,
@@ -84,11 +89,11 @@ impl Frame {
     /// Un vóxel con desgaste.
     pub fn set(&self, e: &mut Edits, u: i32, y: i32, w: i32, m: Mat) {
         let p = self.at(u, y, w);
-        e.set(p, weather(m, p, y, self.seed));
+        e.dset(p, weather(m, p, y, self.seed));
     }
     /// Un vóxel tal cual (sin desgaste).
     pub fn raw(&self, e: &mut Edits, u: i32, y: i32, w: i32, m: Mat) {
-        e.set(self.at(u, y, w), m);
+        e.dset(self.at(u, y, w), m);
     }
     #[allow(clippy::too_many_arguments)]
     pub fn fill(&self, e: &mut Edits, u0: i32, u1: i32, y0: i32, y1: i32, w0: i32, w1: i32, m: Mat) {
@@ -106,7 +111,7 @@ impl Frame {
         for y in y0..y1 {
             for w in w0..w1 {
                 for u in u0..u1 {
-                    e.voxels.remove(&self.at(u, y, w));
+                    e.design.remove(&self.at(u, y, w));
                 }
             }
         }
@@ -116,7 +121,7 @@ impl Frame {
         for w in w0..w1 {
             for u in u0..u1 {
                 let p = self.at(u, 0, w);
-                e.surface.insert(IVec2::new(p.x, p.z), m);
+                e.dsurface(IVec2::new(p.x, p.z), m);
             }
         }
     }
@@ -128,7 +133,7 @@ impl Frame {
                 let p = self.at(u, 0, w);
                 let ground = top_at(t, p.x, p.z);
                 for y in (ground + 1)..self.base {
-                    e.set(IVec3::new(p.x, y, p.z), weather(m, IVec3::new(p.x, y, p.z), 0, self.seed));
+                    e.dset(IVec3::new(p.x, y, p.z), weather(m, IVec3::new(p.x, y, p.z), 0, self.seed));
                 }
             }
         }
@@ -362,12 +367,12 @@ pub fn ombu(t: &TerrainGen, e: &mut Edits, p: IVec2, seed: u64) {
     let mut r = Rng::new(seed);
     // Raíces y tronco.
     for (dx, dz, h) in [(-3, 0, 2), (3, 0, 2), (0, -3, 1), (0, 3, 2), (-2, -2, 1), (2, 2, 1)] {
-        e.fill(IVec3::new(p.x + dx, base, p.y + dz), IVec3::new(p.x + dx + 2, base + h, p.y + dz + 2), TRUNK);
+        e.dfill(IVec3::new(p.x + dx, base, p.y + dz), IVec3::new(p.x + dx + 2, base + h, p.y + dz + 2), TRUNK);
     }
-    e.fill(IVec3::new(p.x - 1, base, p.y - 1), IVec3::new(p.x + 3, base + 6, p.y + 3), TRUNK);
+    e.dfill(IVec3::new(p.x - 1, base, p.y - 1), IVec3::new(p.x + 3, base + 6, p.y + 3), TRUNK);
     // Ramas gruesas.
     for (dx, dz) in [(-4, 0), (4, 0), (0, -4), (0, 4)] {
-        e.fill(IVec3::new(p.x + dx / 2, base + 5, p.y + dz / 2), IVec3::new(p.x + dx / 2 + 2, base + 8, p.y + dz / 2 + 2), TRUNK);
+        e.dfill(IVec3::new(p.x + dx / 2, base + 5, p.y + dz / 2), IVec3::new(p.x + dx / 2 + 2, base + 8, p.y + dz / 2 + 2), TRUNK);
     }
     let (rad, ry) = (r.range(11, 14), 5);
     let cy = base + 10;
@@ -378,7 +383,7 @@ pub fn ombu(t: &TerrainGen, e: &mut Edits, p: IVec2, seed: u64) {
                 if d <= 1.0 {
                     let q = IVec3::new(p.x + 1 + x, cy + y, p.y + 1 + z);
                     let leaf = if hash(q, seed) < 0.3 { LEAF } else { LEAF_OMBU };
-                    e.set(q, leaf);
+                    e.dset(q, leaf);
                 }
             }
         }

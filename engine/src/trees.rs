@@ -357,9 +357,13 @@ pub fn extent(s: &Shape) -> (f32, f32) {
 
 // --- Flora baja ---------------------------------------------------------------------------
 
-/// Niveles de detalle con flora baja: solo el más fino (0,5 m por vóxel); más lejos no se
-/// distingue y costaría muchos triángulos.
+/// Niveles de detalle con flora baja: los de vóxel de hasta 0,5 m (0,25 y 0,5 m); más lejos
+/// no se distingue y costaría muchos triángulos.
 pub const PLANT_MAX_VOXEL: f32 = 0.5;
+/// Altura máxima de una planta (m): los juncos y totoras más altos.
+pub const PLANT_MAX_HEIGHT: f32 = 2.4;
+/// Vóxeles de alto que puede tener una planta en el nivel más fino.
+pub const PLANT_SLOTS: usize = (PLANT_MAX_HEIGHT / crate::lod::BASE_VOXEL + 0.25) as usize;
 
 fn hash_u(x: i32, z: i32, salt: u32) -> f32 {
     let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (z as u32).wrapping_mul(0xd816_3841) ^ salt.wrapping_mul(0x9e37_79b9);
@@ -394,11 +398,11 @@ struct Plant {
 /// las piedras. Escribe los materiales en `out` (de abajo hacia arriba) y devuelve cuántos son
 /// (0: nada). `gx`, `gz`: columna de vóxeles del nivel; `vs`: lado del vóxel (m). Barato: un
 /// par de hashes por columna, sin consultar el terreno.
-pub fn ground_plant(surf: Mat, gx: i32, gz: i32, vs: f32, out: &mut [Mat; 4]) -> usize {
+pub fn ground_plant(surf: Mat, gx: i32, gz: i32, vs: f32, out: &mut [Mat; PLANT_SLOTS]) -> usize {
     if vs > PLANT_MAX_VOXEL {
         return 0;
     }
-    // Las plantas crecen en macollos: celdas de 1,5 m (3 × 3 vóxeles de cerca) que tienen o no
+    // Las plantas crecen en macollos: celdas de 1,5 m (6 × 6 vóxeles de cerca) que tienen o no
     // una mata, y dentro de la celda algunos vóxeles. Las manchas (juncales, parches de flores)
     // se miden en metros, así caen igual en todos los niveles.
     let (fx, fz) = (gx as f32 * vs, gz as f32 * vs);
@@ -491,7 +495,7 @@ pub fn ground_plant(surf: Mat, gx: i32, gz: i32, vs: f32, out: &mut [Mat; 4]) ->
         _ => None,
     };
     let Some(p) = p else { return 0 };
-    let n = ((p.height / vs + 0.25) as usize).min(out.len());
+    let n = ((p.height.min(PLANT_MAX_HEIGHT) / vs + 0.25) as usize).min(out.len());
     if n == 0 {
         return 0;
     }
@@ -532,7 +536,7 @@ mod tests {
     fn flora_baja_por_zona() {
         // Cuántas columnas de cada zona tienen plantas, y que no haya plantas de lejos.
         let cuenta = |surf: Mat, vs: f32| {
-            let mut out = [AIR; 4];
+            let mut out = [AIR; PLANT_SLOTS];
             (0..200 * 200).filter(|k| ground_plant(surf, k % 200, k / 200, vs, &mut out) > 0).count()
         };
         let pradera = cuenta(GRASS, 0.5);
@@ -543,10 +547,14 @@ mod tests {
         assert_eq!(cuenta(GRASS, 1.0), 0);
         assert_eq!(cuenta(STREAM, 0.5), 0);
         assert_eq!(cuenta(DIRT_ROAD, 0.5), 0);
-        // Los juncos son más altos que las flores.
-        let mut out = [AIR; 4];
+        // Los juncos son más altos que las flores (de 1,5 m a 2,4 m en el nivel más fino).
+        let mut out = [AIR; PLANT_SLOTS];
         let alto = (0..20000).map(|k| ground_plant(MARSH, k % 100, k / 100, 0.5, &mut out)).max().unwrap();
         assert!(alto >= 3, "juncos de {alto} vóxeles");
+        let vs = crate::lod::BASE_VOXEL;
+        let alto = (0..20000).map(|k| ground_plant(MARSH, k % 100, k / 100, vs, &mut out)).max().unwrap();
+        assert!(alto as f32 * vs >= 1.5 && alto as f32 * vs <= PLANT_MAX_HEIGHT + vs, "juncos de {alto} vóxeles de {vs} m");
+        assert!(cuenta(MARSH, vs) > 0);
         // Hay flores de colores en la pradera.
         let flores = (0..40000).filter(|k| ground_plant(GRASS_LUSH, k % 200, k / 200, 0.5, &mut out) > 0 && matches!(out[0], FLOR_AMARILLA | FLOR_VIOLETA | FLOR_BLANCA)).count();
         assert!(flores > 20, "{flores} flores");

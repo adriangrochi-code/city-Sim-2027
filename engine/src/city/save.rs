@@ -275,7 +275,7 @@ mod tests {
         }
         // Los vóxeles regenerados son los mismos edificios que había.
         let e = loaded.rebuild_edits(&t);
-        assert!(e.voxels.len() > 10_000);
+        assert!(e.voxel_count() > 10_000);
         for (a, b) in loaded.lots.lots.values().zip(city.lots.lots.values()) {
             assert_eq!(a.voxels.len(), b.voxels.len(), "solar {}", a.id);
         }

@@ -155,7 +155,7 @@ Perfil medido (cobertura rural de hoy / reconstruida para 1726) por distancia al
   misma celda da el mismo árbol en todos los niveles de detalle); la prueba
   `trees::tests::cada_especie_tiene_variantes_distintas` verifica que las variantes de cada especie
   son distintas entre sí. En el monte cerrado las copas son algo más grandes para que se toquen.
-- **Flora baja** (`trees::ground_plant`, solo en el nivel de 0,5 m): por cada columna de suelo
+- **Flora baja** (`trees::ground_plant`, solo en los niveles de 0,25 y 0,5 m, hasta 2,4 m de alto): por cada columna de suelo
   natural (sin calles ni obras), según el material del suelo, en macollos de 1,5 m y manchas de 7 y
   15 m:
 
