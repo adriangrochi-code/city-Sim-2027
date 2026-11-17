@@ -39,6 +39,7 @@ pub fn motivo_texto(codigo: u8) -> &'static str {
         21 => "enviudó",
         22 => "está solo, sin familia",
         24 => "vive sin libertad",
+        25 => "vive bajo patronato: libre por ley, pero obligado a servir",
         28 => "ve que sus vecinos viven mejor",
         32 => "extraña la misa y las fiestas",
         36 => "le molestan las ordenanzas del cabildo",
@@ -81,8 +82,11 @@ impl Poblacion {
             e.1 += 1.0;
         }
         let vivos = self.idx.vivos.clone();
+        // Ascendencia africana (cofradías y salas de nación), solo si ya existen.
+        let asc = if self.hay_cofradias() { self.ascendencias() } else { Vec::new() };
         for id in vivos {
-            let d = self.desglose_con(id, ent, &info, &ing, &barrio, &origen);
+            let afro = asc.get(id as usize).is_some_and(|a| a & historia::ASC_AFRICANA != 0);
+            let d = self.desglose_con(id, ent, &info, &ing, &barrio, &origen, afro);
             let p = &mut self.personas[id as usize];
             // La felicidad cambia de a poco (memoria de los meses anteriores).
             p.felicidad += (d.total - p.felicidad) * 0.35;
@@ -119,10 +123,13 @@ impl Poblacion {
             e.0 += v;
             e.1 += 1.0;
         }
-        self.desglose_con(id, ent, &info, &ing, &barrio, &origen)
+        let afro = self.hay_cofradias() && self.afrodescendiente(id);
+        self.desglose_con(id, ent, &info, &ing, &barrio, &origen, afro)
     }
 
-    fn desglose_con(&self, id: PersonaId, ent: &Entorno, info: &Lotes, ing: &[f32], barrio: &[(f32, f32); 5], origen: &[(f32, f32); 8]) -> Desglose {
+    /// `afro`: tiene ascendencia africana y ya existen cofradías (ver `historia.rs`).
+    #[allow(clippy::too_many_arguments)]
+    fn desglose_con(&self, id: PersonaId, ent: &Entorno, info: &Lotes, ing: &[f32], barrio: &[(f32, f32); 5], origen: &[(f32, f32); 8], afro: bool) -> Desglose {
         let mes = ent.mes;
         let p = &self.personas[id as usize];
         let edad = p.edad(mes);
@@ -232,7 +239,15 @@ impl Poblacion {
         // 6 Libertad: la esclavitud pesa como ninguna otra cosa.
         v[6] = match p.condicion {
             Condicion::Esclavizada => 0.03,
+            Condicion::Liberta if p.patronato.is_some() => {
+                var[6] = 1;
+                0.3
+            }
             Condicion::Liberta => 0.9,
+            Condicion::Libre if p.patronato.is_some() => {
+                var[6] = 1;
+                0.25
+            }
             Condicion::Libre => 0.8,
         };
         // 7 Comparación con el barrio y con los de su mismo origen.
@@ -246,6 +261,12 @@ impl Poblacion {
         }
         // 8 Fe y fiestas.
         v[8] = r.devocion() * if ent.iglesia { 0.85 } else { 0.35 } + (1.0 - r.devocion()) * 0.65;
+        if afro {
+            // Las cofradías y las salas de nación: ayuda mutua, sus fiestas, sus reyes y el
+            // candombe (Frega et al., 2020, cap. 7).
+            let salas = if self.hito(historia::HITO_SALAS) { 0.08 } else { 0.0 };
+            v[8] = v[8].max(0.62 + salas + 0.2 * r.sociabilidad());
+        }
         // 9 Ordenanzas que lo tocan.
         let clase = h.map_or(Clase::Pobre, |h| h.clase);
         let mut o = 0.65f32;

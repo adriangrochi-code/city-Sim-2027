@@ -54,6 +54,12 @@ pub struct Estadisticas {
     pub fel_origen: Vec<(Origen, f32, u32)>,
     /// Motivos de queja más comunes (código, personas).
     pub motivos: Vec<(u8, u32)>,
+    /// Personas con ascendencia africana (libres, libertas o esclavizadas: la raíz se sigue
+    /// por padre y madre) y con ascendencia indígena.
+    pub afrodescendientes: u32,
+    pub indigenas: u32,
+    /// Personas libres por ley pero bajo patronato (obligadas a servir en una casa).
+    pub bajo_patronato: u32,
 }
 
 /// Una foto para los gráficos (mes o año).
@@ -71,6 +77,10 @@ pub struct Foto {
     pub pobreza: f32,
     pub felicidad: f32,
     pub esclavizadas: u32,
+    #[serde(default)]
+    pub afrodescendientes: u32,
+    #[serde(default)]
+    pub bajo_patronato: u32,
 }
 
 impl Foto {
@@ -90,6 +100,8 @@ impl Foto {
             pobreza: s.pobreza,
             felicidad: s.felicidad,
             esclavizadas: s.por_condicion[1],
+            afrodescendientes: s.afrodescendientes,
+            bajo_patronato: s.bajo_patronato,
         }
     }
 }
@@ -215,6 +227,13 @@ impl Poblacion {
                 Some(Alojamiento::Campo) => s.campo += 1,
                 _ => {}
             }
+        }
+        let asc = self.ascendencias();
+        for p in self.vivos() {
+            let a = asc.get(p.id as usize).copied().unwrap_or(0);
+            s.afrodescendientes += (a & super::historia::ASC_AFRICANA != 0) as u32;
+            s.indigenas += (a & super::historia::ASC_INDIGENA != 0) as u32;
+            s.bajo_patronato += p.patronato.is_some() as u32;
         }
         s.edad_media = if n > 0 { edades as f32 / n as f32 } else { 0.0 };
         s.hombres_por_100_mujeres = if m > 0 { h as f32 / m as f32 * 100.0 } else { 0.0 };

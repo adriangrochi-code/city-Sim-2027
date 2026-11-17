@@ -3,7 +3,7 @@
 //!
 //! - **Educación**: cada escuela (o el convento) tiene lugar para tantos alumnos de 6 a 12
 //!   años; se reparte, como el agua, a las casas más cercanas dentro de su alcance hasta llenarse.
-//!   Solo cuentan los niños libres (restricción de la época: los niños esclavizados casi no
+//!   Solo cuentan los niños libres (restricción de la época: los niños esclavizados o bajo patronato casi no
 //!   iban a la escuela; ver `docs/sistemas/poblacion.md`). La población decide quién va según
 //!   la clase del hogar y si el cabildo paga al maestro (ordenanza de escuelas).
 //! - **Salud**: botica, médico y cirujano y hospital de caridad atienden a tantas personas a su
@@ -263,7 +263,7 @@ impl City {
                 let Some(lote) = per.hogar.and_then(|h| p.hogar(h)).filter(|h| h.vive_en_solar()).and_then(|h| h.lote) else { continue };
                 let edad = per.edad(p.mes);
                 let d = out.entry(lote).or_default();
-                if EDAD_ESCOLAR.contains(&edad) && per.libre() {
+                if EDAD_ESCOLAR.contains(&edad) && !per.sujeta() {
                     d.niños += 1;
                 }
                 if (16..=60).contains(&edad) && per.sexo == Sexo::Hombre && per.libre() {

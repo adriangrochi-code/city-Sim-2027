@@ -24,8 +24,9 @@ pub enum Sexo {
     Mujer,
 }
 
-/// Condición legal. Extensible: el resto de la vida jurídica (patronato de los libertos,
-/// capacidad de las mujeres casadas…) se agrega como variantes o banderas.
+/// Condición legal. Extensible: el resto de la vida jurídica se agrega como variantes o
+/// banderas (el patronato de libertos, colonos y pupilos es la bandera `Persona::patronato`;
+/// la capacidad de las mujeres casadas queda pendiente).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Condicion {
     Libre,
@@ -33,7 +34,8 @@ pub enum Condicion {
     /// cuenta; su trabajo beneficia al hogar donde vive. Puede casarse, tener familia, ahorrar
     /// un peculio y obtener la libertad.
     Esclavizada,
-    /// Liberada (por carta de libertad, testamento, el fondo del cabildo o la ley).
+    /// Liberada (por carta de libertad, testamento, el fondo del cabildo, las armas o la ley).
+    /// Puede seguir un tiempo bajo patronato (`Persona::patronato`).
     Liberta,
 }
 
@@ -71,6 +73,22 @@ pub enum ViaLibertad {
     Abolicion,
     /// Nació libre por la ley de libertad de vientres.
     Vientres,
+    /// Por servir en las armas: las compañías de pardos y morenos (desde 1760) y las levas de
+    /// las guerras (1762, 1807, 1811–1816, 1825–1828, 1842) daban la libertad a quien se
+    /// alistaba (Frega et al., 2020, cap. 4 y 5).
+    Armas,
+    /// Carta de libertad que otorgó en vida quien la sometía ("concesión graciosa", muchas
+    /// veces con condiciones).
+    Otorgada,
+    /// Su familia libre juntó lo que faltaba para la carta (las familias liberaban primero a
+    /// la esposa y madre, porque la condición se heredaba por vía materna).
+    Familia,
+    /// Completó la suma con la colecta de su cofradía o de su sala de nación.
+    Colecta,
+    /// Quien la sometía murió sin herederos. En la época, una herencia vacante pasaba a la Real
+    /// Hacienda (y las personas con ella); el juego no modela ese traspaso, que sería tratar a
+    /// alguien como un bien, y la deja libre.
+    SinHerederos,
 }
 
 /// Raíz familiar, solo para las estadísticas y la endogamia (con mezcla). No se usa para
@@ -180,6 +198,15 @@ impl Origen {
             Origen::Armenia => "Armenia",
             Origen::Paraguay => "el Paraguay",
             Origen::Latinoamerica => "otros países de América Latina",
+        }
+    }
+
+    /// "de Galicia", "del Brasil", "del Congo y Angola…" (contrae "de el").
+    pub fn de(self) -> String {
+        let n = self.nombre();
+        match n.strip_prefix("el ") {
+            Some(r) => format!("del {r}"),
+            None => format!("de {n}"),
         }
     }
 
@@ -452,6 +479,10 @@ pub enum TipoEvento {
     Llego(Origen),
     /// Llegó en contra de su voluntad, por la trata (lo cuenta la crónica con respeto).
     LlegoForzada(Origen),
+    /// Llegó como "colono" africano (1832–1835): la trata disfrazada de contrato de trabajo.
+    LlegoColono(Origen),
+    /// Llegó prisionera tras la matanza de Salsipuedes (1831) y fue repartida a una familia.
+    LlegoPrisionera,
     Caso,
     /// Unión consensual (sin casamiento en la iglesia; frecuente en los sectores populares).
     Union,
@@ -473,6 +504,13 @@ pub enum TipoEvento {
     Empobrecio,
     Emigro,
     Murio(Causa),
+    /// Queda bajo patronato: libre por ley, pero obligada a servir en una casa a cambio de
+    /// techo, comida y ropa hasta la fecha de `Persona::patronato` (reglamento de 1837,
+    /// colonos africanos de 1832–1835, menores y no aptos para las armas tras la abolición de
+    /// 1842, prisioneros charrúas repartidos en 1831).
+    Patronato,
+    /// Termina su patronato.
+    FinPatronato,
 }
 
 /// Una persona. Unos 120 bytes más su historial; las listas cortas viven en vectores propios.
@@ -520,6 +558,10 @@ pub struct Persona {
     /// Meses de duelo que le quedan.
     pub duelo: u8,
     pub historial: Vec<Evento>,
+    /// Mes hasta el que sigue bajo patronato (libre por ley pero obligada a servir en el
+    /// hogar donde vive; no elige patrón ni se muda). `None` si no.
+    #[serde(default)]
+    pub patronato: Option<i32>,
 }
 
 impl Persona {
@@ -533,6 +575,11 @@ impl Persona {
     }
     pub fn libre(&self) -> bool {
         self.condicion != Condicion::Esclavizada
+    }
+    /// ¿Vive sujeta a otro hogar? Esclavizada, o liberta bajo patronato: no elige patrón, no
+    /// se muda por su cuenta y su trabajo beneficia al hogar donde vive.
+    pub fn sujeta(&self) -> bool {
+        self.condicion == Condicion::Esclavizada || self.patronato.is_some()
     }
     pub fn evento(&mut self, mes: i32, tipo: TipoEvento, con: u32) {
         self.historial.push(Evento { mes, tipo, con });
