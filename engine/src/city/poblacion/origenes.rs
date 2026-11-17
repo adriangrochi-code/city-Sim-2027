@@ -200,15 +200,46 @@ pub fn tabla(e: Epoca) -> &'static [Llegada] {
     }
 }
 
-/// Peso de la trata según el año (estimación: el tráfico creció mucho desde fines de la
-/// década de 1770; al menos 70.000 personas esclavizadas entraron al Río de la Plata entre
-/// 1777 y 1812 según Borucki, citado por Pollero y González Demuro).
+/// Peso de la trata según el año (estimación guiada por la historiografía; ver
+/// `docs/sistemas/esclavitud-y-pueblos-originarios.md`):
+/// - hasta 1776, poca: Montevideo es chico y la trata entra sobre todo por Buenos Aires y por
+///   la Colonia portuguesa;
+/// - 1777–1790: el comercio libre (1778) y los viajes de la Real Compañía de Filipinas (desde
+///   1787; primeros arribos a Montevideo en 1788) la hacen crecer;
+/// - 1791–1810: la libre introducción de esclavizados para el Río de la Plata (1791) hace de
+///   Montevideo el puerto de entrada: al menos 70.000 personas llegaron al Río de la Plata
+///   entre 1777 y 1812, el 60 % desde Brasil (Borucki, en Frega et al., 2020, cap. 3);
+/// - 1811–1816: revolución, sitios de la ciudad y prohibición del tráfico por el gobierno de
+///   Buenos Aires (abril de 1812): casi se corta;
+/// - 1817–1829: con la dominación luso-brasileña "aumentó la introducción de esclavizados"
+///   (Frega et al., 2020, cap. 5);
+/// - desde la libertad de vientres (en Montevideo, enero de 1830) queda prohibida; lo que siguió
+///   entrando (los "colonos" africanos de 1832–1835, el contrabando) lo cuentan los hechos
+///   históricos de `historia.rs`.
 pub fn factor_trata(año: i32) -> f32 {
     match año {
         ..=1749 => 0.5,
         1750..=1776 => 1.0,
-        1777..=1812 => 3.0,
-        _ => 1.2,
+        1777..=1790 => 3.5,
+        1791..=1810 => 6.0,
+        1811..=1816 => 0.15,
+        1817..=1829 => 1.3,
+        _ => 0.3,
+    }
+}
+
+/// Peso de los orígenes indígenas según el año (estimación). Las cuadrillas guaraníes de las
+/// misiones fueron muchas en los años de la obra del fuerte; después, la población indígena de
+/// Montevideo fue pequeña ("menos del 2 %" a fines de la década de 1770, en su mayoría guaraníes
+/// de las misiones; Pollero y González Demuro, 2024). Tras la conquista portuguesa de los
+/// pueblos orientales de las misiones (1801) y la guerra, llegan algo más.
+pub fn factor_origen(o: Origen, año: i32) -> f32 {
+    match (o, año) {
+        (Origen::Misiones | Origen::PueblosRegion, ..=1740) => 1.0,
+        (Origen::Misiones, 1801..=1830) => 0.6,
+        (Origen::Misiones, _) => 0.4,
+        (Origen::PueblosRegion, _) => 0.3,
+        _ => 1.0,
     }
 }
 

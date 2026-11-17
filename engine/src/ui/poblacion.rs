@@ -202,6 +202,15 @@ fn resumen(ui: &mut egui::Ui, game: &Game) {
     for c in Condicion::ALL {
         hbar(ui, c.plural(), s.por_condicion[c as usize] as f32 / tot, fmt_thousands(s.por_condicion[c as usize] as i64), if c == Condicion::Esclavizada { theme::BAD } else { theme::GOOD });
     }
+    if s.bajo_patronato > 0 {
+        hbar(ui, "Bajo patronato", s.bajo_patronato as f32 / tot, fmt_thousands(s.bajo_patronato as i64), theme::BAD);
+    }
+    if s.afrodescendientes > 0 {
+        hbar(ui, "Afrodescendientes (toda condición)", s.afrodescendientes as f32 / tot, fmt_thousands(s.afrodescendientes as i64), theme::PRESSED);
+    }
+    if s.indigenas > 0 {
+        hbar(ui, "Con raíz indígena", s.indigenas as f32 / tot, fmt_thousands(s.indigenas as i64), theme::PRESSED);
+    }
     if let Some(m) = p.leyes.vientres {
         ui.label(RichText::new(format!("Libertad de vientres desde {}.", fecha(m))).small().color(theme::INK_SOFT));
     }
@@ -348,13 +357,17 @@ fn persona(ui: &mut egui::Ui, game: &Game, id: PersonaId, nav: &mut Option<Optio
         let estado = if q.muerte.is_some() { format!("murió en {}", fecha(q.muerte.unwrap())) } else if q.fuera.is_some() { "se fue de la ciudad".into() } else { format!("{} años", q.edad(mes)) };
         kv(ui, "Edad", format!("{} · nació en {}", estado, año_de(q.nacimiento)), theme::INK);
         kv(ui, "Lugar de nacimiento", capitalize(q.origen.nombre()), theme::INK);
-        kv(ui, "Condición", capitalize(q.condicion.nombre(q.sexo)), if q.condicion == Condicion::Esclavizada { theme::BAD } else { theme::INK });
+        let cond = match q.patronato {
+            Some(m) => format!("{} bajo patronato (hasta {})", capitalize(q.condicion.nombre(q.sexo)), fecha(m)),
+            None => capitalize(q.condicion.nombre(q.sexo)),
+        };
+        kv(ui, "Condición", cond, if q.sujeta() { theme::BAD } else { theme::INK });
         let est = if q.estamento == Estamento::Vecino { "vecino con casa poblada" } else { q.estamento.nombre() };
         kv(ui, "Oficio", format!("{} · {}", capitalize(q.oficio.nombre(q.sexo)), est), theme::INK);
         kv(ui, "Educación", capitalize(educacion(q.educacion)), theme::INK);
         kv(ui, "Salud", pct(q.salud), color_fel(q.salud));
         if q.riqueza >= 1.0 {
-            let k = if q.condicion == Condicion::Esclavizada { "Peculio ahorrado" } else { "Bienes propios" };
+            let k = if q.sujeta() { "Peculio ahorrado" } else { "Bienes propios" };
             kv(ui, k, format!("{} pesos", fmt_thousands(q.riqueza.round() as i64)), theme::INK);
         }
         if let Some(l) = p.lugar_de_trabajo(id) {
@@ -365,7 +378,9 @@ fn persona(ui: &mut egui::Ui, game: &Game, id: PersonaId, nav: &mut Option<Optio
         }
     });
     if q.condicion == Condicion::Esclavizada {
-        ui.label(RichText::new("La ley de la época le niega la libertad: no puede tener casa ni elegir dónde trabajar, y su trabajo beneficia al hogar donde vive. Puede ahorrar para su carta de libertad, formar familia y ser libre por testamento, por el fondo del cabildo o por la ley.").small().color(theme::INK_SOFT));
+        ui.label(RichText::new("La ley de la época le niega la libertad: no puede tener casa ni elegir dónde trabajar, y su trabajo beneficia al hogar donde vive. Puede ahorrar un peculio para su carta de libertad (con la ayuda de su familia o de su cofradía), formar familia y ser libre por testamento, por las armas, por el fondo del cabildo o por la ley.").small().color(theme::INK_SOFT));
+    } else if q.patronato.is_some() {
+        ui.label(RichText::new("Es libre por ley, pero está bajo patronato: debe servir en la casa donde vive a cambio de techo, comida y ropa, sin elegir dónde trabajar ni mudarse, hasta que el patronato termine.").small().color(theme::INK_SOFT));
     }
     if let Some(h) = q.hogar.and_then(|h| p.hogar(h)).and_then(|h| h.lote.filter(|_| h.vive_en_solar())) {
         if ui.small_button("Ver su casa").clicked() {

@@ -112,11 +112,12 @@ Cómo está implementado:
 | Ninguna persona tiene precio | `Persona` no tiene campos de precio, valor ni dueño (la prueba `no_hay_forma_de_comerciar_personas` lo verifica en el código fuente). El patrimonio de los hogares no incluye personas |
 | No hay comercio de personas | No existe ninguna función para comprar, vender, subastar ni transferir personas, ni ninguna ordenanza o tarjeta de la interfaz que lo haga. Las llegadas por la trata son un **flujo del mundo** que el juego narra: no lo decide el jugador, nadie paga ni cobra en el modelo (la prueba verifica que la riqueza no cambia) |
 | La esclavitud es una restricción | Condición legal `Esclavizada`: no puede tener solares, no elige patrón (trabaja donde lo manda el hogar), no se muda por su cuenta; su trabajo suma al ingreso del hogar donde vive; casi sin acceso a la escuela; más mortalidad. Pesa como ninguna otra causa en su felicidad ("vive sin libertad") |
-| Son personas | Nombre cristiano como en los registros de la época y su lugar de origen (Congo y Angola, Costa da Mina, Mozambique); llegan sin apellido y lo toman al ser libres (sus hijos también). Forman pareja, tienen hijos, ahorran un **peculio**, tienen oficio, personalidad e historia |
-| Caminos a la libertad | **Ahorro** (carta de libertad: la suma exigida por la ley sale del peculio y no la cobra ningún hogar del modelo), **testamento** (al morir quien la sometía, según su devoción; y sin herederos), **fondo de manumisión** del cabildo (política), **libertad de vientres** (desde la ley, nadie nace esclavizado) y **abolición**. Al ser libre: toma apellido, arma su hogar o se reúne con su familia y busca casa y trabajo; puede ascender como cualquiera |
-| Las leyes históricas | En el modo fiel a la historia: libertad de vientres y prohibición del tráfico en **1825** (ratificadas en la Constitución de **1830**) y abolición en **1842** (gobierno de la Defensa; la ley del Cerrito es de **1846**). El jugador puede adelantarlas por ordenanza; **no se pueden derogar**. En la historia alternativa llegan con la época de la Ciudad Nueva |
-| La crónica narra con respeto | Sin insultos ni caricaturas: "Llegan en un barco 12 personas del Congo y Angola traídas por la trata, arrancadas de sus pueblos y sometidas a la esclavitud"; "Rosa, lavandera, obtiene su carta de libertad con lo que ahorró durante 23 años"; "Tras la muerte de X, Y sigue sin libertad y pasa a vivir con la familia Z" |
-| Indígenas | Las cuadrillas guaraníes de las misiones (libres, con salario) trabajan en la obra del fuerte en la fundación; la mayoría vuelve a sus pueblos y algunos se quedan como vecinos. Minuanes y charrúas aparecen como personas que se integran (peones). Apellidos de raíz guaraní alternados con castellanos, como en los registros |
+| El patronato también | `Persona::patronato` (mes en que vence): libre por ley pero obligada a servir en la casa donde vive (colonos de 1832–1835, ley de 1837, abolición de 1842, prisioneros de 1831). Las mismas restricciones de trabajo, casa y escuela (`Persona::sujeta()`); vence sola o con la ley de 1853 ("vive bajo patronato") |
+| Son personas | Nombre cristiano impuesto, como en los registros, y su "nación" ("Rosa, de nación Benguela": Congo, Angola, Benguela, Mina, Calabarí, Mozambique); llegan sin apellido y lo toman al ser libres, muchas veces el de la casa donde vivieron (sus hijos también). Forman pareja, tienen hijos, ahorran un **peculio** (también con su trabajo de los domingos y días de fiesta), tienen oficio, personalidad e historia |
+| Caminos a la libertad | **Ahorro** (carta de libertad: la suma exigida sale del peculio y no la cobra ningún hogar del modelo), **familia** (el hogar libre del cónyuge pone lo que falta: primero la esposa y madre), **colecta** de la cofradía o la sala de nación, **carta otorgada** en vida por quien la sometía, **testamento**, muerte **sin herederos**, **las armas** (leva de 1816 y de 1842; milicias de pardos y morenos), **fondo de manumisión** del cabildo (política sin antecedente histórico), **libertad de vientres** y **abolición**. Al ser libre: toma apellido, arma su hogar o se reúne con su familia y busca casa y trabajo; puede ascender (en la colonia, la "limpieza de sangre" le cierra el clero y las escribanías) |
+| Las leyes históricas | En el modo fiel a la historia: la ley de la Florida (7 de setiembre de **1825**) se cuenta pero **no rige en Montevideo**, ocupada por el Brasil; la libertad de vientres y la prohibición del tráfico rigen desde el **20 de enero de 1830** (Constitución de julio de 1830, art. 131); abolición del Gobierno de la Defensa el **12 de diciembre de 1842**, con leva de los varones aptos y patronato para los demás; la del Cerrito (28 de octubre de **1846**) rige fuera de la ciudad; fin del patronato en **1853**. El jugador puede adelantar las leyes por ordenanza (abolición plena, sin leva ni patronato); **no se pueden derogar**. En la historia alternativa llegan con la época de la Ciudad Nueva. Detalle y fuentes en [esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md) |
+| La crónica narra con respeto | Sin insultos ni caricaturas: "Llegan en un barco 12 personas del Congo y Angola traídas por la trata, arrancadas de sus pueblos y sometidas a la esclavitud"; "Rosa, de nación Benguela, lavandera, obtiene su carta de libertad con lo que ahorró durante 23 años"; "Tras la muerte de X, Y sigue sin libertad y pasa a vivir con la familia Z"; las cofradías, las salas de nación y el Día de Reyes; el Caserío de los Negros (1788); Salsipuedes (1831) |
+| Indígenas | Las cuadrillas guaraníes de las misiones (libres) trabajan en la obra del fuerte en la fundación; la mayoría vuelve a sus pueblos y algunos se quedan como vecinos (las condiciones de su trabajo no están verificadas). Después, pocas llegadas guaraníes, minuanes y charrúas (< 2 % de la población, como a fines de los 1770). En mayo de 1831 llegan los prisioneros de Salsipuedes, mujeres, niñas y niños charrúas repartidos entre familias como sirvientes. Apellidos de raíz guaraní alternados con castellanos, como en los registros |
 
 ## 6. Felicidad
 
@@ -124,9 +125,9 @@ Cada persona tiene una felicidad (0 a 1) que sale de once causas, cada una entre
 **comida** (lo que gana el hogar frente al costo de comer, el precio del pan, el hambre),
 **vivienda** (sin casa, cuartel, rancho/azotea/altos, hacinamiento), **agua**, **salud**,
 **trabajo** (desocupado, por cuenta propia), **familia** (pareja, hijos, viudez, duelo por
-muertes recientes, soledad), **libertad** (la esclavitud la hunde; la libertad la sube),
+muertes recientes, soledad), **libertad** (la esclavitud la hunde, el patronato la baja; la libertad la sube),
 **comparación** con su barrio y con los de su mismo origen (desigualdad percibida), **fe y
-fiestas** (para los devotos; la iglesia matriz) y **ordenanzas** que la tocan (pan barato,
+fiestas** (para los devotos; la iglesia matriz; para las personas afrodescendientes, las cofradías y las salas de nación) y **ordenanzas** que la tocan (pan barato,
 hospital, escuelas, reparto, contribución progresiva, préstamos, fondo de manumisión, faroles a
 cargo de los vecinos, prohibición de la paja) y **seguridad** (el barrio: el centro es más seguro
 que las afueras; no tener techo; haber perdido la casa en un incendio o una inundación).
@@ -165,9 +166,9 @@ el costo real sale en el presupuesto según la población):
 | Hospital de caridad y asistencia a pobres | Menos muertes y mejor salud de pobres y modestos (en la ciudad del motor: pobres y modestos aprovechan del todo la botica, el médico y el hospital cercanos, ver [educacion-salud-seguridad.md](educacion-salud-seguridad.md)) | 20 + 30 por 1.000 hab. | +6 / 0 / 0 |
 | Escuelas de primeras letras | +20 puntos de chance de aprender a leer por año de niñez: más oficios letrados (en la ciudad del motor: el cabildo paga al maestro y los pobres van gratis a la escuela de su barrio; hacen falta escuelas) | 15 + 0,25 por niño | +5 / +2 / 0 |
 | Préstamos del cabildo | Préstamo barato a pobres y modestos: menos hambre en los meses malos | Intereses y morosidad | +6 / −4 / 0 |
-| Fondo de manumisión | Completa la suma de la carta de libertad a quien juntó más de un tercio | 40 pesos/mes | +3 / −2 / −8 |
+| Fondo de manumisión | Completa la suma de la carta de libertad a quien juntó más de un tercio (política posible: no existió en el Montevideo colonial) | 40 pesos/mes | +3 / −2 / −8 |
 | Libertad de vientres | Nadie nace esclavizado y se prohíbe el tráfico. No se deroga | — | +4 / −4 / −8 |
-| Abolición de la esclavitud | Todas las personas esclavizadas son libres. No se deroga | — | +5 / −5 / −12 |
+| Abolición de la esclavitud | Todas las personas esclavizadas son libres, sin leva ni patronato (la de 1842 los tuvo). No se deroga | — | +5 / −5 / −12 |
 
 **Épocas siguientes** (como datos en `politicas.rs`, para cuando existan esas épocas): escuela
 pública gratuita, reglamento de conventillos, jornada de ocho horas, salario mínimo,
@@ -198,10 +199,11 @@ de Montevideo*, colección Nuestra Montevideo, fascículo 4 (Intendencia de Mont
 | Masculinidad | > 150 hombres por 100 mujeres hacia 1760; 124 en 1860 | Pollero y G. D. (verificado) | 340 al fundar (soldados y cuadrillas) → ~140 a fines del XVIII |
 | Población joven | > 40 % menor de 20 años | Pollero y G. D. (verificado) | Edad media 25–28 años |
 | Uniones libres | Nacimientos de uniones libres: > 40 % (1780s), ~20 % (fines del XVIII), ~40 % (primeras décadas republicanas), 15 % (1860) | Pollero y G. D. (verificado) | Unión consensual: 40 % en hogares pobres, 20 % en modestos, 3 % en acomodados (estimación) |
-| Población afrodescendiente | > 25 % a fines de la década de 1770; ~30 % esclavizada hacia 1810 (Buenos Aires y Montevideo) | Pollero y G. D. (verificado) | ~18 % esclavizada en 1786, ~21 % en 1806 (sintética; algo por debajo) |
-| Trata | ≥ 70.000 personas esclavizadas entraron al Río de la Plata entre 1777 y 1812 | Borucki, citado por Pollero y G. D. (verificado) | La trata pesa ×3 entre 1777 y 1812 (estimación) |
-| Leyes de libertad | Libertad de vientres y prohibición del tráfico 1825, ratificadas en 1830; abolición 1842 (Defensa) y 1846 (Cerrito) | Pollero y G. D. (verificado) | Eventos del modo fiel y ordenanzas |
-| Indígenas | < 2 % a fines de los 1770s; la mayoría guaraníes de las misiones | Pollero y G. D. (verificado) | Cuadrillas de la fundación y 6 % de las llegadas coloniales |
+| Población afrodescendiente | > 25 % a fines de la década de 1770; ~1/3 esclavizada en 1805; del 30 % a < 25 % entre 1810 y 1819; 25 % en 1830 (cuatro cuarteles) | Pollero y G. D.; Borucki 2005 (verificado) | Esclavizadas: 9,7 % (1776), 26 % (1806), 19 % (1816), ~15 % (1830); afrodescendientes por ascendencia: 17 % (1776), 43 % (1806) |
+| Trata | ≥ 70.000 personas entraron al Río de la Plata entre 1777 y 1812; libre introducción en 1791; casi cortada en 1811–1816; aumenta con los luso-brasileños (1817–1829); colonos en 1832–1835 | Borucki y Frega et al. 2020 (verificado) | `factor_trata` por período y colonos en el modo fiel (estimación de pesos) |
+| Leyes de libertad | Ley de la Florida (7-IX-1825), sin efecto en Montevideo hasta el 20-I-1830; Constitución art. 131; reglamento de 1837 (patronato); abolición 12-XII-1842 (Defensa) y 28-X-1846 (Cerrito); fin del patronato 1853 | Frega et al. 2020, pp. 136-137 (verificado) | Hechos del modo fiel y ordenanzas (ver [esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md)) |
+| Libertades | 67 % de las compras de libertad de 1790–1820 fueron de mujeres; ~60 % de las personas liberadas, mujeres | Frega et al. 2020, p. 104 (verificado) | ~60 % de las compras (ahorro, familia, colecta) son de mujeres |
+| Indígenas | < 2 % a fines de los 1770s; la mayoría guaraníes de las misiones | Pollero y G. D. (verificado) | Cuadrillas de la fundación; después `factor_origen` (0,3–0,6): 1–2 % desde 1776 |
 | Crisis de mortalidad | 18 entre mediados del XVIII y 1880 (viruela, sarampión, fiebre amarilla 1857, cólera 1868) | Pollero y G. D. (verificado) | Hook `choque_epidemia`; la ciudad sintética tiene una cada 7 años |
 | Orígenes en 1836 | 50 % orientales, 37 % extranjeros: de ellos la mitad europeos (63 % canarios, 13 % portugueses), ~30 % africanos, 15 % de la región | Pollero y G. D. (verificado) | Pesos de la tabla colonial (estimación guiada por estos datos) |
 | Orígenes en 1860 | 48 % extranjeros; europeos: 1/3 españoles, 1/3 italianos, 27 % franceses | Pollero y G. D. (verificado) | Tabla de la Ciudad Nueva |
@@ -215,12 +217,15 @@ Resultado de la ciudad sintética (`cargo test --release calibracion -- --ignore
 inmigración del 2 % anual, una epidemia cada 7 años), década por década:
 
 ```
-1736 hab    529 TBN 15 TBM 27 TMI 250 edad 26.5 hogar 2.4 h/m 197 esclavizadas  3.6 % Gini 0.63 pobreza 0.08 felicidad 0.59
-1756 hab  1 097 TBN 28 TBM 32 TMI 290 edad 29.0 hogar 2.6 h/m 172 esclavizadas  9.3 % Gini 0.65 pobreza 0.07 felicidad 0.61
-1776 hab  2 079 TBN 31 TBM 27 TMI 231 edad 27.6 hogar 3.1 h/m 151 esclavizadas 11.6 % Gini 0.72 pobreza 0.07 felicidad 0.60
-1796 hab  3 603 TBN 32 TBM 32 TMI 250 edad 26.8 hogar 3.5 h/m 147 esclavizadas 20.8 % Gini 0.74 pobreza 0.09 felicidad 0.57
-1816 hab  6 046 TBN 34 TBM 31 TMI 205 edad 26.7 hogar 3.5 h/m 142 esclavizadas 20.3 % Gini 0.74 pobreza 0.11 felicidad 0.56
+1736 hab    547 TBN 24 TBM 26 TMI 231 edad 26.3 hogar 2.6 h/m 193 esclavizadas  3.7 % afro  3.7 % indíg. 3.5 % Gini 0.61 pobreza 0.10 felicidad 0.57
+1756 hab  1 246 TBN 39 TBM 18 TMI 184 edad 28.5 hogar 2.8 h/m 171 esclavizadas  7.5 % afro 11.8 % indíg. 3.5 % Gini 0.63 pobreza 0.06 felicidad 0.60
+1776 hab  2 270 TBN 36 TBM 25 TMI 160 edad 26.8 hogar 3.1 h/m 142 esclavizadas  9.7 % afro 17.2 % indíg. 2.0 % Gini 0.69 pobreza 0.07 felicidad 0.59
+1796 hab  4 000 TBN 32 TBM 32 TMI 262 edad 26.3 hogar 3.7 h/m 134 esclavizadas 22.6 % afro 36.1 % indíg. 1.2 % Gini 0.71 pobreza 0.08 felicidad 0.56
+1816 hab  6 995 TBN 34 TBM 28 TMI 206 edad 26.3 hogar 3.5 h/m 134 esclavizadas 18.9 % afro 41.2 % indíg. 1.4 % Gini 0.71 pobreza 0.09 felicidad 0.56
 ```
+("afro" e "indíg." cuentan la ascendencia por padre y madre, ver
+[esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md) §4; la baja de 1816 es
+la leva de ese año y el corte de la trata durante la revolución.)
 (Los números exactos cambian con los ajustes; la prueba `crece_desde_la_fundacion_a_ritmo_plausible`
 fija los rangos: natalidad 28–50 ‰, mortalidad 18–40 ‰, mortalidad infantil 120–300 ‰,
 edad media 20–33, hogares de 2 a 7 personas, ciudad masculinizada.)
@@ -239,7 +244,8 @@ la riqueza al llegar (mediana y dispersión), la alfabetización y los oficios:
 | Modernismo | Sobre todo del interior; Buenos Aires, Brasil, Paraguay |
 | Contemporánea | Interior, América Latina no fronteriza (Perú, Venezuela, Cuba, República Dominicana), Buenos Aires, Brasil, Paraguay, retornados |
 
-La trata solo existe en las dos primeras épocas y se corta con la libertad de vientres.
+La trata solo existe en las dos primeras épocas y se corta con la libertad de vientres; en el modo
+fiel, después llegan los «colonos» africanos (1832–1835), la trata con otro nombre.
 
 ## 10. Para los demás sistemas (API)
 
@@ -287,5 +293,6 @@ Banco de pruebas: `cargo test --release banco_poblacion -- --ignored --nocapture
   La escuela, la salud, la insalubridad y el delito ya son por solar (ver
   [educacion-salud-seguridad.md](educacion-salud-seguridad.md)).
 - Épocas 2–6: activar sus políticas (`FUTURAS`), salarios y precios por época, conventillos.
-- Patronato de los libertos (1825–1840) y otros matices jurídicos (capacidad de las mujeres
-  casadas, hijos naturales sin acceso a la educación) como restricciones adicionales.
+- El patronato ya está (ver §5). Faltan otros matices jurídicos (capacidad de las mujeres
+  casadas, hijos naturales sin acceso a la educación, la ciudadanía suspendida de 1830) y las
+  preguntas abiertas de [esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md) §6.
