@@ -1,7 +1,7 @@
 {
   "nombre": "Montevideo (geografía real)",
   "fuente": "MDT Uruguay 30 m (IDE Uruguay), servicio WCS raster__mdt_pais_30m_4326",
-  "atribucion": "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Ver docs/sistemas/mapa-real.md.",
+  "atribucion": "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Hidrografía (cursos de agua, playas, bañados, áreas húmedas, bancos de arena, lagunas e islas), cerros y cuchillas: IDE Uruguay, servicio WFS (hidrografía nacional 1:50.000 y urbana). Licencia de Datos Abiertos del Uruguay. Ver docs/sistemas/mapa-real.md.",
   "origen_noroeste": {
     "lat": -34.778,
     "lon": -56.325
@@ -28,5 +28,119 @@
     "x": 5923.7,
     "z": 12269.8,
     "altura_m": 129.1
-  }
+  },
+  "hidrografia": "ide",
+  "fuentes": [
+    {
+      "capa": "raster__mdt_pais_30m_4326",
+      "servicio": "WCS https://mapas.ide.uy/geoserver-raster/wcs",
+      "uso": "relieve (altura.bin, contexto.bin)"
+    },
+    {
+      "capa": "hidrografia:eje_curso_de_agua_l",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "cursos"
+    },
+    {
+      "capa": "hidrografia_urbana:eje_curso_de_agua_l",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "cursos"
+    },
+    {
+      "capa": "hidrografia:curso_de_agua_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "cauces_anchos"
+    },
+    {
+      "capa": "hidrografia_urbana:curso_de_agua_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "cauces_anchos"
+    },
+    {
+      "capa": "hidrografia:playa_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "playas"
+    },
+    {
+      "capa": "hidrografia_urbana:playa_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "playas"
+    },
+    {
+      "capa": "hidrografia:banado_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "banados"
+    },
+    {
+      "capa": "hidrografia_urbana:banado_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "banados"
+    },
+    {
+      "capa": "hidrografia:area_humeda_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "banados"
+    },
+    {
+      "capa": "hidrografia_urbana:area_humeda_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "banados"
+    },
+    {
+      "capa": "hidrografia:banco_de_arena_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "bancos"
+    },
+    {
+      "capa": "hidrografia_urbana:banco_de_arena_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "bancos"
+    },
+    {
+      "capa": "hidrografia:lago_laguna_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "lagunas"
+    },
+    {
+      "capa": "hidrografia:isla_a",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "islas"
+    },
+    {
+      "capa": "ideuy:cerros_ide",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "cerros"
+    },
+    {
+      "capa": "ideuy:cuchillas_y_sierras",
+      "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+      "uso": "cuchillas"
+    }
+  ],
+  "biomas": {
+    "archivo": "biomas.bin",
+    "archivo_entorno": "biomas_contexto.bin",
+    "codificacion": "uint8, misma grilla y orden que altura.bin / contexto.bin",
+    "codigos": {
+      "0": "sin dato",
+      "1": "playa",
+      "2": "bañado / área húmeda",
+      "3": "banco de arena",
+      "4": "laguna / lago (agua)",
+      "5": "isla (tierra)"
+    }
+  },
+  "licencia_ide": "Licencia de Datos Abiertos del Uruguay (AGESIC), según AccessConstraints del GetCapabilities del WFS de la IDE: https://www.gub.uy/agencia-gobierno-electronico-sociedad-informacion-conocimiento/sites/agencia-gobierno-electronico-sociedad-informacion-conocimiento/files/documentos/publicaciones/licencia_de_datos_abiertos_0.pdf",
+  "conteo_objetos_ide": {
+    "cursos": 176693,
+    "cauces_anchos": 2824,
+    "playas": 90,
+    "banados": 423,
+    "bancos": 5,
+    "lagunas": 50,
+    "islas": 147,
+    "cerros": 1,
+    "cuchillas": 3
+  },
+  "islas_a_mano": []
 }

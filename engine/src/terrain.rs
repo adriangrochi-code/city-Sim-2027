@@ -1,8 +1,10 @@
 //! Geografía del mapa. Dos mapas:
 //! - **Montevideo real** ([`TerrainGen::montevideo`], el del juego): el relieve de
-//!   `assets/mapas/montevideo/` (24 × 24 km cada 20 m, más 6 km de entorno cada 100 m), los
-//!   arroyos reales y biomas de la época de la fundación (pradera, monte ribereño, bañados,
-//!   playas, médanos y puntas de piedra). Ver `docs/sistemas/mapa-real.md`.
+//!   `assets/mapas/montevideo/` (24 × 24 km cada 20 m, más 25 km de entorno cada 100 m), los
+//!   arroyos oficiales de la IDE Uruguay y biomas de la época de la fundación (pradera, monte
+//!   ribereño, bañados, playas, médanos y puntas de piedra). Playas, bañados, bancos de arena,
+//!   lagunas e islas vienen de la hidrografía oficial (`biomas.bin`); el resto es heurístico.
+//!   Ver `docs/sistemas/mapa-real.md`.
 //! - **Ficticio** ([`TerrainGen::new`]): puerto directo de `scripts/world/terrain_gen.gd`, usado
 //!   por el sandbox, el banco de pruebas y las pruebas.
 
@@ -35,6 +37,8 @@ pub struct TerrainGen {
     grid_min: (i32, i32),
     grid_size: (i32, i32),
     pub arroyos: Vec<Vec<Vec2>>,
+    /// Nombre oficial de cada arroyo (paralelo a `arroyos`; `None` si no tiene).
+    pub arroyo_nombres: Vec<Option<String>>,
     /// Mapa real (alturas, distancia al mar). `None` = mapa ficticio.
     real: Option<Box<RealMap>>,
 }
@@ -45,9 +49,22 @@ pub struct TerrainGen {
 const ALTURA_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/altura.bin");
 const CONTEXTO_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/contexto.bin");
 const ARROYOS_JSON: &str = include_str!("../../assets/mapas/montevideo/arroyos.json");
+/// Cauces del entorno (fuera del mapa jugable): solo los que tienen nombre o son anchos.
+const ARROYOS_CTX_JSON: &str = include_str!("../../assets/mapas/montevideo/arroyos_contexto.json");
+/// Biomas oficiales (IDE Uruguay), un byte por muestra en las mismas grillas que las alturas.
+const BIOMAS_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/biomas.bin");
+const BIOMAS_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/biomas_contexto.bin");
 const META_JSON: &str = include_str!("../../assets/mapas/montevideo/meta.json");
-const MAIN_N: usize = 1201;
-const MAIN_STEP: f32 = 20.0;
+
+/// Códigos de `biomas.bin`.
+pub const BIO_NADA: u8 = 0;
+pub const BIO_PLAYA: u8 = 1;
+pub const BIO_BANADO: u8 = 2;
+pub const BIO_BANCO: u8 = 3;
+pub const BIO_LAGUNA: u8 = 4;
+/// Isla oficial: tierra con los biomas de siempre.
+#[allow(dead_code)]
+pub const BIO_ISLA: u8 = 5;
 
 /// Número que sigue a `"clave":` a partir de `desde` en el texto de `meta.json`.
 fn meta_num(txt: &str, desde: &str, clave: &str) -> f32 {
@@ -114,12 +131,17 @@ impl Grid {
         let b = self.at(i, j + 1) + (self.at(i + 1, j + 1) - self.at(i, j + 1)) * tx;
         a + (b - a) * tz
     }
-    /// Distancia (m) de cada celda de tierra al agua más cercana: transformada de distancia
-    /// de chaflán en dos pasadas (rápida y suficiente para elegir playas y médanos).
+    /// Distancia (m) de cada celda de tierra al agua más cercana.
     fn sea_distance(&self) -> Grid {
+        let seeds: Vec<bool> = self.v.iter().map(|&h| h <= 0.0).collect();
+        self.distance_to(&seeds)
+    }
+    /// Distancia (m) de cada celda a la semilla más cercana: transformada de distancia de
+    /// chaflán en dos pasadas (rápida y suficiente para elegir playas y médanos).
+    fn distance_to(&self, seeds: &[bool]) -> Grid {
         let n = self.n;
         let big = 1e7f32;
-        let mut d: Vec<f32> = self.v.iter().map(|&h| if h <= 0.0 { 0.0 } else { big }).collect();
+        let mut d: Vec<f32> = seeds.iter().map(|&s| if s { 0.0 } else { big }).collect();
         let (a, b) = (self.step, self.step * std::f32::consts::SQRT_2);
         for j in 0..n {
             for i in 0..n {
@@ -156,17 +178,58 @@ struct RealMap {
     ctx: Grid,
     sea_main: Grid,
     sea_ctx: Grid,
+    /// Biomas oficiales (códigos `BIO_*`), fila por fila como las alturas.
+    bio_main: &'static [u8],
+    bio_ctx: &'static [u8],
+    /// Distancia a la playa oficial más cercana (m).
+    beach_main: Grid,
+    beach_ctx: Grid,
 }
 
-/// Lee `{"arroyos": [[[x, z], ...], ...]}` sin dependencias: cada `[x, z]` es un punto y cada
-/// lista de puntos, un arroyo.
-fn parse_arroyos(txt: &str) -> Vec<Vec<(Vec2, f32)>> {
+impl RealMap {
+    /// Código de bioma oficial en un punto. Entre las cuatro muestras vecinas gana el código
+    /// con más peso bilineal: así el borde de una playa sigue una línea suave y no los
+    /// escalones de la grilla.
+    fn bio(&self, x: f32, z: f32) -> u8 {
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        let (g, b) = if edge >= 0.0 { (&self.main, self.bio_main) } else { (&self.ctx, self.bio_ctx) };
+        let fx = (x - g.from) / g.step;
+        let fz = (z - g.from) / g.step;
+        let m = g.n as f32 - 1.0;
+        if fx < 0.0 || fz < 0.0 || fx > m || fz > m {
+            return BIO_NADA;
+        }
+        let (i, j) = ((fx as usize).min(g.n - 2), (fz as usize).min(g.n - 2));
+        let (tx, tz) = (fx - i as f32, fz - j as f32);
+        let corners = [
+            (b[i + j * g.n], (1.0 - tx) * (1.0 - tz)),
+            (b[i + 1 + j * g.n], tx * (1.0 - tz)),
+            (b[i + (j + 1) * g.n], (1.0 - tx) * tz),
+            (b[i + 1 + (j + 1) * g.n], tx * tz),
+        ];
+        let (mut best, mut best_w) = (BIO_NADA, -1.0f32);
+        for &(c, _) in &corners {
+            let w: f32 = corners.iter().filter(|(k, _)| *k == c).map(|(_, w)| w).sum();
+            if w > best_w {
+                best = c;
+                best_w = w;
+            }
+        }
+        best
+    }
+}
+
+/// Lee `{"arroyos": [[[x, z, ancho], ...], ...], "nombres": [...]}` sin dependencias: cada
+/// `[x, z, ancho]` es un punto y cada lista de puntos, un arroyo. Devuelve los arroyos y el
+/// nombre de cada uno (de la lista paralela `nombres`, si el archivo la trae).
+fn parse_arroyos(txt: &str) -> (Vec<Vec<(Vec2, f32)>>, Vec<Option<String>>) {
     // Profundidad de corchetes: 1 = lista de arroyos, 2 = un arroyo, 3 = un punto [x, z, ancho].
     let mut out: Vec<Vec<(Vec2, f32)>> = Vec::new();
     let mut depth = 0;
     let mut num = String::new();
     let mut pair: Vec<f32> = Vec::new();
-    for ch in txt.chars() {
+    let start = txt.find("\"arroyos\"").map(|k| k + 9).unwrap_or(0);
+    for ch in txt[start..].chars() {
         match ch {
             '[' => {
                 depth += 1;
@@ -188,13 +251,60 @@ fn parse_arroyos(txt: &str) -> Vec<Vec<(Vec2, f32)>> {
                         pair.clear();
                     }
                     depth -= 1;
+                    if depth == 0 {
+                        break; // fin de la lista de arroyos
+                    }
                 }
             }
             c if depth == 3 && (c.is_ascii_digit() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') => num.push(c),
             _ => {}
         }
     }
-    out.retain(|a| a.len() >= 2);
+    let mut names = parse_nombres(txt);
+    names.resize(out.len(), None);
+    let (out, names): (Vec<_>, Vec<_>) = out.into_iter().zip(names).filter(|(a, _)| a.len() >= 2).unzip();
+    (out, names)
+}
+
+/// Lista `"nombres": ["...", null, ...]` de `arroyos.json` (vacía si no está).
+fn parse_nombres(txt: &str) -> Vec<Option<String>> {
+    let Some(k) = txt.find("\"nombres\"") else { return Vec::new() };
+    let rest = &txt[k + 9..];
+    let Some(open) = rest.find('[') else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut chars = rest[open + 1..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            ']' => break,
+            'n' => {
+                // null
+                for _ in 0..3 {
+                    chars.next();
+                }
+                out.push(None);
+            }
+            '"' => {
+                let mut s = String::new();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => {
+                            if let Some(e) = chars.next() {
+                                s.push(match e {
+                                    'n' => '\n',
+                                    't' => '\t',
+                                    other => other,
+                                });
+                            }
+                        }
+                        other => s.push(other),
+                    }
+                }
+                out.push(Some(s));
+            }
+            _ => {}
+        }
+    }
     out
 }
 
@@ -271,6 +381,7 @@ impl TerrainGen {
             grid_min: (0, 0),
             grid_size: (0, 0),
             arroyos: Vec::new(),
+            arroyo_nombres: Vec::new(),
             real: None,
         };
         t.add_arroyo(&[
@@ -293,19 +404,58 @@ impl TerrainGen {
         t.seg_hw.clear();
         t.seg_hash.clear();
         t.arroyos.clear();
-        let main = Grid::from_u16(ALTURA_BIN, MAIN_N, MAIN_STEP, 0.0);
+        t.arroyo_nombres.clear();
+        // Tamaños según meta.json (la primera "muestras" y "paso_m" son las del mapa jugable).
+        let main_n = meta_num(META_JSON, "", "muestras") as usize;
+        let main_step = meta_num(META_JSON, "", "paso_m");
+        let main = Grid::from_u16(ALTURA_BIN, main_n, main_step, 0.0);
         let ctx_n = meta_num(META_JSON, "\"contexto\"", "muestras") as usize;
         let ctx_step = meta_num(META_JSON, "\"contexto\"", "paso_m");
         let ctx_from = meta_num(META_JSON, "\"contexto\"", "desde_m");
         let ctx = Grid::from_u16(CONTEXTO_BIN, ctx_n, ctx_step, ctx_from);
+        assert_eq!(BIOMAS_BIN.len(), main_n * main_n, "biomas.bin no coincide con altura.bin");
+        assert_eq!(BIOMAS_CTX_BIN.len(), ctx_n * ctx_n, "biomas_contexto.bin no coincide con contexto.bin");
         let (sea_main, sea_ctx) = (main.sea_distance(), ctx.sea_distance());
-        t.real = Some(Box::new(RealMap { main, ctx, sea_main, sea_ctx }));
-        for a in parse_arroyos(ARROYOS_JSON) {
-            let (pts, widths): (Vec<Vec2>, Vec<f32>) = a.into_iter().unzip();
-            t.add_arroyo_raw(pts, widths);
+        let is_beach = |b: &u8| *b == BIO_PLAYA || *b == BIO_BANCO;
+        let beach_main = main.distance_to(&BIOMAS_BIN.iter().map(is_beach).collect::<Vec<_>>());
+        let beach_ctx = ctx.distance_to(&BIOMAS_CTX_BIN.iter().map(is_beach).collect::<Vec<_>>());
+        t.real = Some(Box::new(RealMap { main, ctx, sea_main, sea_ctx, bio_main: BIOMAS_BIN, bio_ctx: BIOMAS_CTX_BIN, beach_main, beach_ctx }));
+        for txt in [ARROYOS_JSON, ARROYOS_CTX_JSON] {
+            let (arroyos, names) = parse_arroyos(txt);
+            for (a, name) in arroyos.into_iter().zip(names) {
+                let (pts, widths): (Vec<Vec2>, Vec<f32>) = a.into_iter().unzip();
+                t.add_arroyo_raw(pts, widths);
+                t.arroyo_nombres.push(name);
+            }
         }
         t.build_grid();
         t
+    }
+
+    /// Bioma oficial (`BIO_*`) en un punto; `BIO_NADA` en el mapa ficticio. El punto se corre
+    /// unos metros con ruido para que los bordes de la grilla de 20 m no se vean como escalones.
+    pub fn official_biome(&self, x: f32, z: f32) -> u8 {
+        let Some(r) = &self.real else { return BIO_NADA };
+        let jx = self.n_detail.get_noise_2d(x * 0.9, z * 0.9 + 311.0) * 9.0;
+        let jz = self.n_detail.get_noise_2d(x * 0.9 + 177.0, z * 0.9) * 9.0;
+        r.bio(x + jx, z + jz)
+    }
+
+    /// Cuánto de playa tiene la costa más cercana: 1 si la orilla más cercana es una playa
+    /// oficial, 0 si es una costa sin playa (piedra, barranca o barro). Para un punto tierra
+    /// adentro se compara la distancia a la playa con la distancia al agua.
+    pub fn beach_factor(&self, x: f32, z: f32) -> f32 {
+        let Some(r) = &self.real else { return 1.0 };
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        let bd = if edge <= 0.0 {
+            r.beach_ctx.linear(x, z)
+        } else if edge < 400.0 {
+            let w = smoothstep(0.0, 400.0, edge);
+            r.beach_ctx.linear(x, z) * (1.0 - w) + r.beach_main.linear(x, z) * w
+        } else {
+            r.beach_main.linear(x, z)
+        };
+        1.0 - smoothstep(80.0, 350.0, bd - self.sea_distance(x, z))
     }
 
     pub fn is_real(&self) -> bool {
@@ -349,7 +499,16 @@ impl TerrainGen {
 
     /// Ancho de la franja de arena de la costa (m): angosta en la bahía y la Ciudad Vieja,
     /// ancha hacia Carrasco y la costa de Canelones, donde los médanos tapaban los caminos.
+    /// En el mapa real solo hay médanos detrás de las playas oficiales ([`Self::beach_factor`]).
     pub fn dune_belt(&self, x: f32, z: f32) -> f32 {
+        let bf = self.beach_factor(x, z);
+        if bf <= 0.0 {
+            return 0.0;
+        }
+        bf * self.dune_belt_raw(x, z)
+    }
+
+    fn dune_belt_raw(&self, x: f32, z: f32) -> f32 {
         let east = smoothstep(13000.0, 25000.0, x);
         // Dentro de la bahía (al norte de la península) casi no hay médanos.
         let bay = 1.0 - smoothstep(13000.0, 15500.0, z) * (1.0 - smoothstep(9000.0, 13000.0, x));
@@ -525,12 +684,16 @@ impl TerrainGen {
         // Ruido de manchas (cientos de metros) y de grano fino (metros).
         let blot = self.n_hills.get_noise_2d(x * 3.0, z * 3.0);
         let fine = self.n_detail.get_noise_2d(x * 2.5, z * 2.5);
-        if h < -0.3 {
-            // Fondo: arena cerca de la orilla, limo más adentro.
-            return if h > -2.5 { SAND_WET } else { MUD };
-        }
         let sd = self.sea_distance(x, z);
         let (da, hw) = self.arroyo_query(x, z);
+        if h < -0.3 {
+            // El cauce de un arroyo ancho que baja del nivel del río sigue siendo arroyo
+            // (agua); en el río y la bahía, el fondo: arena cerca de la orilla, limo más adentro.
+            if da < hw && sd > 0.0 {
+                return STREAM;
+            }
+            return if h > -2.5 { SAND_WET } else { MUD };
+        }
         // Arroyos y cañadas: agua en el centro del cauce y barro en las orillas.
         if da < hw {
             return STREAM;
@@ -538,17 +701,44 @@ impl TerrainGen {
         if da < hw + 1.0 + hw * 0.3 + fine * 1.2 {
             return MUD;
         }
+        // Biomas oficiales (IDE Uruguay): mandan sobre las reglas heurísticas.
+        match self.official_biome(x, z) {
+            BIO_LAGUNA => return STREAM,
+            BIO_BANCO => return if h < 1.0 { SAND_WET } else { SAND },
+            BIO_PLAYA => {
+                return if h < 0.7 || sd < 10.0 + fine * 6.0 {
+                    SAND_WET
+                } else if slope > 0.9 {
+                    COAST_ROCK
+                } else {
+                    SAND
+                }
+            }
+            BIO_BANADO if slope < 0.3 => {
+                // Pajonal y juncos con algún claro de pasto verde.
+                return if fine > 0.55 + blot * 0.2 { GRASS_LUSH } else { MARSH };
+            }
+            _ => {}
+        }
         // Costa: puntas de piedra donde es empinada; si no, playa (húmeda junto al agua),
         // médanos de arena suelta con matas de pasto en las crestas, y un borde irregular
-        // hacia la pradera.
-        if sd < 60.0 && slope > 0.32 + fine * 0.08 && x < 21000.0 {
+        // hacia la pradera. Donde la IDE no marca playa, la orilla es de piedra o de barro.
+        let bf = self.beach_factor(x, z);
+        if sd < 60.0 && slope > 0.32 + fine * 0.08 && bf < 0.9 {
             return COAST_ROCK;
         }
         if h < 0.7 && sd < 80.0 {
-            return SAND_WET;
+            return if bf > 0.3 {
+                SAND_WET
+            } else if slope > 0.1 + fine * 0.05 || (self.official_biome(x, z) == BIO_ISLA && fine > -0.4) {
+                // Las islas de la bahía y frente a Carrasco son de piedra.
+                COAST_ROCK
+            } else {
+                MUD
+            };
         }
         let belt = self.dune_belt(x, z);
-        if sd < belt * 0.3 + 25.0 && h < 12.0 {
+        if sd < belt * 0.3 + 25.0 * bf && h < 12.0 {
             return SAND;
         }
         if sd < belt && h < 25.0 {
@@ -606,6 +796,10 @@ impl TerrainGen {
                 }
                 let h = self.height(x, z);
                 if h < 1.2 {
+                    continue;
+                }
+                // Sin árboles en playas, bañados, bancos de arena ni lagunas oficiales.
+                if matches!(self.official_biome(x, z), BIO_PLAYA | BIO_BANADO | BIO_BANCO | BIO_LAGUNA) {
                     continue;
                 }
                 let (p, kind) = if da < hw + 2.0 {
@@ -765,6 +959,54 @@ mod tests {
         let mut prairie = Vec::new();
         t.trees_in(9000.0, 9000.0, 9600.0, 9600.0, &mut prairie);
         assert!(trees.len() > prairie.len() * 3, "monte {} / pradera {}", trees.len(), prairie.len());
+    }
+
+    #[test]
+    fn biomas_y_arroyos_oficiales() {
+        let t = TerrainGen::montevideo();
+        let r = t.real.as_ref().unwrap();
+        let cuenta = |c: u8| r.bio_main.iter().filter(|&&b| b == c).count();
+        // Playas (Pocitos, Carrasco, el oeste) y bañados (Pantanoso, Santa Lucía) de la IDE.
+        assert!(cuenta(BIO_PLAYA) > 1000, "playas: {}", cuenta(BIO_PLAYA));
+        assert!(cuenta(BIO_BANADO) > 5000, "bañados: {}", cuenta(BIO_BANADO));
+        // Playa de Pocitos: arena en la orilla.
+        let mut pocitos = 0;
+        for k in 0..400 {
+            let (x, z) = (15400.0 + (k % 20) as f32 * 60.0, 15200.0 + (k / 20) as f32 * 60.0);
+            if t.official_biome(x, z) == BIO_PLAYA {
+                pocitos += 1;
+                let h = t.height(x, z);
+                if h > -0.3 {
+                    let m = t.surface_material(x, z, h, 0.05);
+                    assert!(m == SAND || m == SAND_WET || m == STREAM || m == MUD, "material {m} en la playa ({x}, {z})");
+                }
+            }
+        }
+        assert!(pocitos > 0, "sin playa en Pocitos");
+        // Sin árboles en los bañados.
+        let mut trees = Vec::new();
+        t.trees_in(0.0, 0.0, 3000.0, 3000.0, &mut trees);
+        assert!(trees.iter().all(|a| t.official_biome(a.x, a.z) != BIO_BANADO));
+        // Los arroyos traen su nombre oficial.
+        let tiene = |n: &str| t.arroyo_nombres.iter().any(|a| a.as_deref() == Some(n));
+        assert!(tiene("Arroyo Miguelete"), "falta el Miguelete");
+        assert!(tiene("Arroyo Pantanoso"), "falta el Pantanoso");
+        assert_eq!(t.arroyo_nombres.len(), t.arroyos.len());
+        // Isla de las Ratas (isla oficial) y de Flores (en el entorno): tierra firme.
+        let cumbre = |cx: f32, cz: f32| {
+            (0..900).map(|k| t.height(cx - 300.0 + (k % 30) as f32 * 20.0, cz - 300.0 + (k / 30) as f32 * 20.0)).fold(f32::MIN, f32::max)
+        };
+        assert!(cumbre(8306.0, 12309.0) > 2.0, "Isla de las Ratas");
+        assert!(cumbre(36217.0, 18388.0) > 2.0, "Isla de Flores");
+        // Sin médanos en la costa rocosa de la Ciudad Vieja (sin playa oficial).
+        assert!(t.dune_belt(11000.0, 15050.0) < 30.0, "médanos inventados en la Ciudad Vieja");
+    }
+
+    #[test]
+    fn lee_los_nombres_de_los_arroyos() {
+        let (a, n) = parse_arroyos(r#"{"arroyos":[[[0,0,2],[10,0,2]],[[5,5]],[[1,1,3],[2,2,3]]],"nombres":["Arroyo \"A\"",null,"Cañada B"]}"#);
+        assert_eq!(a.len(), 2);
+        assert_eq!(n, vec![Some("Arroyo \"A\"".to_string()), Some("Cañada B".to_string())]);
     }
 
     #[test]

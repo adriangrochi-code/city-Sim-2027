@@ -1,0 +1,1491 @@
+{
+  "nombres": [
+    {
+      "nombre": "Río Santa Lucía",
+      "oficial": "RIO SANTA LUCÍA",
+      "tipo": "río",
+      "x": -14454.2,
+      "z": -16014.9,
+      "largo_m": 56297,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Pando",
+      "oficial": "ARROYO PANDO",
+      "tipo": "arroyo",
+      "x": 34539.2,
+      "z": -4504.7,
+      "largo_m": 47425,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Sauce",
+      "oficial": "ARROYO DEL SAUCE",
+      "tipo": "arroyo",
+      "x": 24500.6,
+      "z": -14273.3,
+      "largo_m": 35483,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Colorado",
+      "oficial": "ARROYO COLORADO",
+      "tipo": "arroyo",
+      "x": 9906.5,
+      "z": -9532.9,
+      "largo_m": 34249,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Canelón Chico",
+      "oficial": "ARROYO CANELÓN CHICO",
+      "tipo": "arroyo",
+      "x": 15800.8,
+      "z": -7454.2,
+      "largo_m": 31896,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Pantanoso",
+      "oficial": "ARROYO PANTANOSO",
+      "tipo": "arroyo",
+      "x": 7817.0,
+      "z": 2196.9,
+      "largo_m": 28308,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de Toledo",
+      "oficial": "ARROYO DE TOLEDO",
+      "tipo": "arroyo",
+      "x": 17049.0,
+      "z": -7045.2,
+      "largo_m": 26902,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de las Piedras",
+      "oficial": "ARROYO DE LAS PIEDRAS",
+      "tipo": "arroyo",
+      "x": 5409.0,
+      "z": -2826.8,
+      "largo_m": 25322,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Tropa Vieja",
+      "oficial": "ARROYO TROPA VIEJA",
+      "tipo": "arroyo",
+      "x": -16175.1,
+      "z": -11703.5,
+      "largo_m": 24123,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Río San José",
+      "oficial": "RIO SAN JOSÉ",
+      "tipo": "río",
+      "x": -15566.9,
+      "z": -19674.0,
+      "largo_m": 22765,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Miguelete",
+      "oficial": "ARROYO MIGUELETE",
+      "tipo": "arroyo",
+      "x": 12051.5,
+      "z": 7636.3,
+      "largo_m": 21717,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Gigante",
+      "oficial": "ARROYO DEL GIGANTE",
+      "tipo": "arroyo",
+      "x": 10791.2,
+      "z": -21447.5,
+      "largo_m": 20782,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de las Brujas Grande",
+      "oficial": "ARROYO DE LAS BRUJAS GRANDE",
+      "tipo": "arroyo",
+      "x": 4300.3,
+      "z": -18006.0,
+      "largo_m": 20763,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Sarandí",
+      "oficial": "ARROYO SARANDÍ",
+      "tipo": "arroyo",
+      "x": -15922.3,
+      "z": -18795.3,
+      "largo_m": 17438,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Grande",
+      "oficial": "CAÑADA GRANDE",
+      "tipo": "cañada",
+      "x": 44751.8,
+      "z": -17433.2,
+      "largo_m": 17206,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Pajas Blancas",
+      "oficial": "CAÑADA PAJAS BLANCAS",
+      "tipo": "cañada",
+      "x": 10948.3,
+      "z": 1010.6,
+      "largo_m": 16532,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Durán",
+      "oficial": "ARROYO DURÁN",
+      "tipo": "arroyo",
+      "x": -9168.8,
+      "z": -13590.6,
+      "largo_m": 16408,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo la Pedrera",
+      "oficial": "ARROYO LA PEDRERA",
+      "tipo": "arroyo",
+      "x": 38961.2,
+      "z": -20835.7,
+      "largo_m": 15909,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Juncal",
+      "oficial": "CAÑADA DEL JUNCAL",
+      "tipo": "cañada",
+      "x": 1264.5,
+      "z": -4251.9,
+      "largo_m": 14756,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Divisoria Pando San Jacinto",
+      "oficial": "CAÑADA DIVISORIA PANDO SAN JACINTO",
+      "tipo": "cañada",
+      "x": 45828.3,
+      "z": -17954.9,
+      "largo_m": 14605,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Juncal",
+      "oficial": "ARROYO DEL JUNCAL",
+      "tipo": "arroyo",
+      "x": -7998.2,
+      "z": -23896.2,
+      "largo_m": 14512,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de Carrasco",
+      "oficial": "ARROYO DE CARRASCO",
+      "tipo": "arroyo",
+      "x": 24847.7,
+      "z": 10149.1,
+      "largo_m": 13859,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de la Lana",
+      "oficial": "CAÑADA DE LA LANA",
+      "tipo": "cañada",
+      "x": 8761.1,
+      "z": -22086.1,
+      "largo_m": 13470,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Dragón",
+      "oficial": "CAÑADA DEL DRAGÓN",
+      "tipo": "cañada",
+      "x": 3004.1,
+      "z": -4860.9,
+      "largo_m": 13377,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Tigre",
+      "oficial": "ARROYO DEL TIGRE",
+      "tipo": "arroyo",
+      "x": -18578.4,
+      "z": -3414.7,
+      "largo_m": 12543,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Pantanosa",
+      "oficial": "CAÑADA PANTANOSA",
+      "tipo": "cañada",
+      "x": 40811.2,
+      "z": -8183.5,
+      "largo_m": 12202,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Piedritas",
+      "oficial": "ARROYO PIEDRITAS",
+      "tipo": "arroyo",
+      "x": 32622.3,
+      "z": -5730.1,
+      "largo_m": 11295,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de Escobar",
+      "oficial": "ARROYO DE ESCOBAR",
+      "tipo": "arroyo",
+      "x": 36066.0,
+      "z": -313.9,
+      "largo_m": 11026,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de Mendoza",
+      "oficial": "ARROYO DE MENDOZA",
+      "tipo": "arroyo",
+      "x": 16387.1,
+      "z": -2726.0,
+      "largo_m": 10999,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de la Lista",
+      "oficial": "ARROYO DE LA LISTA",
+      "tipo": "arroyo",
+      "x": -14217.0,
+      "z": -20243.4,
+      "largo_m": 10682,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de los Padres",
+      "oficial": "ARROYO DE LOS PADRES",
+      "tipo": "arroyo",
+      "x": 47462.7,
+      "z": -11691.6,
+      "largo_m": 10678,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Flores",
+      "oficial": "ARROYO FLORES",
+      "tipo": "arroyo",
+      "x": -20238.5,
+      "z": -22689.2,
+      "largo_m": 10567,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Totoral",
+      "oficial": "ARROYO TOTORAL",
+      "tipo": "arroyo",
+      "x": 27819.0,
+      "z": -12520.6,
+      "largo_m": 10496,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Vizcaíno",
+      "oficial": "ARROYO DEL VIZCAÍNO",
+      "tipo": "arroyo",
+      "x": 19844.7,
+      "z": -18235.3,
+      "largo_m": 10249,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Manga",
+      "oficial": "ARROYO MANGA",
+      "tipo": "arroyo",
+      "x": 21638.5,
+      "z": 3011.7,
+      "largo_m": 10210,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de Melilla",
+      "oficial": "ARROYO DE MELILLA",
+      "tipo": "arroyo",
+      "x": -1026.8,
+      "z": 454.7,
+      "largo_m": 10091,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Mata Siete",
+      "oficial": "ARROYO MATA SIETE",
+      "tipo": "arroyo",
+      "x": 24419.8,
+      "z": -20420.7,
+      "largo_m": 9914,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Chaná",
+      "oficial": "CAÑADA DEL CHANÁ",
+      "tipo": "cañada",
+      "x": 18987.0,
+      "z": -14362.0,
+      "largo_m": 9592,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Frasquito",
+      "oficial": "ARROYO FRASQUITO",
+      "tipo": "arroyo",
+      "x": 29955.2,
+      "z": -4352.1,
+      "largo_m": 9570,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Conchillas",
+      "oficial": "CAÑADA DE LAS CONCHILLAS",
+      "tipo": "cañada",
+      "x": 5566.4,
+      "z": -6188.7,
+      "largo_m": 9110,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de San Gregorio",
+      "oficial": "ARROYO DE SAN GREGORIO",
+      "tipo": "arroyo",
+      "x": 377.5,
+      "z": 1233.4,
+      "largo_m": 9063,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Meireles",
+      "oficial": "ARROYO MEIRELES",
+      "tipo": "arroyo",
+      "x": 22853.0,
+      "z": -6148.6,
+      "largo_m": 8986,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Barrancas Coloradas",
+      "oficial": "ARROYO BARRANCAS COLORADAS",
+      "tipo": "arroyo",
+      "x": -9568.1,
+      "z": -19145.6,
+      "largo_m": 8614,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de la Quinta",
+      "oficial": "CAÑADA DE LA QUINTA",
+      "tipo": "cañada",
+      "x": -7244.9,
+      "z": -14997.1,
+      "largo_m": 8382,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Piedritas",
+      "oficial": "CAÑADA PIEDRITAS",
+      "tipo": "cañada",
+      "x": 17192.5,
+      "z": -5893.8,
+      "largo_m": 8148,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Piedra del Toro",
+      "oficial": "CAÑADA PIEDRA DEL TORO",
+      "tipo": "cañada",
+      "x": 45213.1,
+      "z": -5136.6,
+      "largo_m": 8131,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Paso Hondo",
+      "oficial": "CAÑADA PASO HONDO",
+      "tipo": "cañada",
+      "x": -16051.9,
+      "z": -14651.4,
+      "largo_m": 8124,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Pajas Blancas",
+      "oficial": "CAÑADA DE LAS PAJAS BLANCAS",
+      "tipo": "cañada",
+      "x": 48311.1,
+      "z": -21722.8,
+      "largo_m": 8027,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Marichal",
+      "oficial": "CAÑADA MARICHAL",
+      "tipo": "cañada",
+      "x": 17983.7,
+      "z": -20647.9,
+      "largo_m": 7999,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Cisne",
+      "oficial": "CAÑADA DEL CISNE",
+      "tipo": "cañada",
+      "x": 47424.4,
+      "z": -9426.2,
+      "largo_m": 7903,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de Rocha",
+      "oficial": "CAÑADA DE ROCHA",
+      "tipo": "cañada",
+      "x": 25545.1,
+      "z": -10694.1,
+      "largo_m": 7844,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Canteras",
+      "oficial": "CAÑADA DE LAS CANTERAS",
+      "tipo": "cañada",
+      "x": 21823.7,
+      "z": 9043.8,
+      "largo_m": 7661,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Clara",
+      "oficial": "CAÑADA CLARA",
+      "tipo": "cañada",
+      "x": -23330.8,
+      "z": -19260.7,
+      "largo_m": 7604,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de la Chacarita",
+      "oficial": "CAÑADA DE LA CHACARITA",
+      "tipo": "cañada",
+      "x": 23185.2,
+      "z": 5269.4,
+      "largo_m": 7421,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Mulas",
+      "oficial": "CAÑADA DE LAS MULAS",
+      "tipo": "cañada",
+      "x": -1230.3,
+      "z": 5917.1,
+      "largo_m": 7372,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de las Toscas",
+      "oficial": "ARROYO DE LAS TOSCAS",
+      "tipo": "arroyo",
+      "x": -4534.2,
+      "z": -6852.5,
+      "largo_m": 7335,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Ojo de Agua",
+      "oficial": "ARROYO OJO DE AGUA",
+      "tipo": "arroyo",
+      "x": -14926.4,
+      "z": -8760.0,
+      "largo_m": 6841,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Benítez",
+      "oficial": "CAÑADA BENÍTEZ",
+      "tipo": "cañada",
+      "x": 21768.3,
+      "z": -7683.8,
+      "largo_m": 6837,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Meneses",
+      "oficial": "CAÑADA MENESES",
+      "tipo": "cañada",
+      "x": 30654.1,
+      "z": -2316.7,
+      "largo_m": 6818,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Valenzuela",
+      "oficial": "CAÑADA VALENZUELA",
+      "tipo": "cañada",
+      "x": 15245.5,
+      "z": -22803.7,
+      "largo_m": 6666,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de los Negros",
+      "oficial": "CAÑADA DE LOS NEGROS",
+      "tipo": "cañada",
+      "x": 48292.1,
+      "z": -18838.0,
+      "largo_m": 6437,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Colorado",
+      "oficial": "CAÑADA DEL COLORADO",
+      "tipo": "cañada",
+      "x": 7981.2,
+      "z": -11462.9,
+      "largo_m": 6325,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de Ramos",
+      "oficial": "CAÑADA DE RAMOS",
+      "tipo": "cañada",
+      "x": 37934.8,
+      "z": -6531.5,
+      "largo_m": 6224,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de la Totora",
+      "oficial": "CAÑADA DE LA TOTORA",
+      "tipo": "cañada",
+      "x": 33619.8,
+      "z": -2861.4,
+      "largo_m": 6021,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Conchas",
+      "oficial": "CAÑADA DE LAS CONCHAS",
+      "tipo": "cañada",
+      "x": -2562.6,
+      "z": 5200.1,
+      "largo_m": 6012,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada San Antonio",
+      "oficial": "CAÑADA SAN ANTONIO",
+      "tipo": "cañada",
+      "x": 24362.0,
+      "z": -24751.1,
+      "largo_m": 5929,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Tigrecito",
+      "oficial": "ARROYO TIGRECITO",
+      "tipo": "arroyo",
+      "x": -24367.3,
+      "z": -9470.1,
+      "largo_m": 5864,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de los Perros",
+      "oficial": "CAÑADA DE LOS PERROS",
+      "tipo": "cañada",
+      "x": -8042.8,
+      "z": -12544.6,
+      "largo_m": 5737,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Valdenegro",
+      "oficial": "CAÑADA DEL VALDENEGRO",
+      "tipo": "cañada",
+      "x": 33901.1,
+      "z": -18725.9,
+      "largo_m": 5613,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Fea",
+      "oficial": "CAÑADA FEA",
+      "tipo": "cañada",
+      "x": -20514.4,
+      "z": -20351.6,
+      "largo_m": 5550,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Colorado",
+      "oficial": "ARROYO DEL COLORADO",
+      "tipo": "arroyo",
+      "x": 25558.5,
+      "z": -13735.6,
+      "largo_m": 5478,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo del Descarnado",
+      "oficial": "ARROYO DEL DESCARNADO",
+      "tipo": "arroyo",
+      "x": 36488.7,
+      "z": -23387.5,
+      "largo_m": 5303,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de las Brujas Chico",
+      "oficial": "ARROYO DE LAS BRUJAS CHICO",
+      "tipo": "arroyo",
+      "x": 466.4,
+      "z": -18374.6,
+      "largo_m": 5059,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Peral",
+      "oficial": "CAÑADA DEL PERAL",
+      "tipo": "cañada",
+      "x": 68.6,
+      "z": -41.3,
+      "largo_m": 4898,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de Echevarría",
+      "oficial": "CAÑADA DE ECHEVARRÍA",
+      "tipo": "cañada",
+      "x": 2007.6,
+      "z": -24524.5,
+      "largo_m": 4823,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de los Burros",
+      "oficial": "CAÑADA DE LOS BURROS",
+      "tipo": "cañada",
+      "x": -18697.1,
+      "z": -22696.6,
+      "largo_m": 4791,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Tajamar",
+      "oficial": "CAÑADA DEL TAJAMAR",
+      "tipo": "cañada",
+      "x": 7781.5,
+      "z": -23088.9,
+      "largo_m": 4790,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Barrancas Negras",
+      "oficial": "CAÑADA DE LAS BARRANCAS NEGRAS",
+      "tipo": "cañada",
+      "x": 48115.1,
+      "z": -23311.0,
+      "largo_m": 4710,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Totoral",
+      "oficial": "CAÑADA DEL TOTORAL",
+      "tipo": "cañada",
+      "x": 47214.0,
+      "z": -17329.7,
+      "largo_m": 4612,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de Villa Nueva",
+      "oficial": "CAÑADA DE VILLA NUEVA",
+      "tipo": "cañada",
+      "x": 21333.5,
+      "z": -17933.3,
+      "largo_m": 4534,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de las Tortugas",
+      "oficial": "ARROYO DE LAS TORTUGAS",
+      "tipo": "arroyo",
+      "x": -4311.2,
+      "z": -6052.7,
+      "largo_m": 4388,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada García",
+      "oficial": "CAÑADA GARCÍA",
+      "tipo": "cañada",
+      "x": 29986.4,
+      "z": -12472.2,
+      "largo_m": 4277,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Violetas",
+      "oficial": "CAÑADA DE LAS VIOLETAS",
+      "tipo": "cañada",
+      "x": 1178.2,
+      "z": -22785.7,
+      "largo_m": 4268,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Albornoz",
+      "oficial": "ARROYO ALBORNOZ",
+      "tipo": "arroyo",
+      "x": -23166.2,
+      "z": -25272.4,
+      "largo_m": 4247,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Potrero",
+      "oficial": "CAÑADA DEL POTRERO",
+      "tipo": "cañada",
+      "x": -13447.7,
+      "z": -21483.4,
+      "largo_m": 4104,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Circo",
+      "oficial": "CAÑADA DEL CIRCO",
+      "tipo": "cañada",
+      "x": -363.8,
+      "z": -12966.8,
+      "largo_m": 4025,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Rincón",
+      "oficial": "CAÑADA DEL RINCÓN",
+      "tipo": "cañada",
+      "x": 3065.6,
+      "z": 1777.4,
+      "largo_m": 4009,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Falsa",
+      "oficial": "CAÑADA FALSA",
+      "tipo": "cañada",
+      "x": 4170.5,
+      "z": -16646.2,
+      "largo_m": 3849,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Pajas Blancas Chica",
+      "oficial": "CAÑADA PAJAS BLANCAS CHICA",
+      "tipo": "cañada",
+      "x": -16.6,
+      "z": -427.5,
+      "largo_m": 3830,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Pírez",
+      "oficial": "CAÑADA PÍREZ",
+      "tipo": "cañada",
+      "x": 6822.3,
+      "z": -8409.3,
+      "largo_m": 3788,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Bellaca",
+      "oficial": "CAÑADA BELLACA",
+      "tipo": "cañada",
+      "x": 4430.6,
+      "z": 7506.5,
+      "largo_m": 3574,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Burro Muerto",
+      "oficial": "CAÑADA DEL BURRO MUERTO",
+      "tipo": "cañada",
+      "x": 32087.4,
+      "z": -6856.7,
+      "largo_m": 3518,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de la Chancha Mora",
+      "oficial": "CAÑADA DE LA CHANCHA MORA",
+      "tipo": "cañada",
+      "x": -22031.3,
+      "z": -24931.6,
+      "largo_m": 3396,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Sangrado",
+      "oficial": "CAÑADA SANGRADO",
+      "tipo": "cañada",
+      "x": -10270.8,
+      "z": -22764.0,
+      "largo_m": 3342,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Yeguas",
+      "oficial": "CAÑADA DE LAS YEGUAS",
+      "tipo": "cañada",
+      "x": 1577.1,
+      "z": 12724.3,
+      "largo_m": 3195,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de San Isidro",
+      "oficial": "CAÑADA DE SAN ISIDRO",
+      "tipo": "cañada",
+      "x": 9186.4,
+      "z": -8351.1,
+      "largo_m": 2877,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Pajarito",
+      "oficial": "CAÑADA DEL PAJARITO",
+      "tipo": "cañada",
+      "x": 27822.3,
+      "z": -18519.1,
+      "largo_m": 2865,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de Arbelo",
+      "oficial": "CAÑADA DE ARBELO",
+      "tipo": "cañada",
+      "x": 43320.8,
+      "z": -16338.0,
+      "largo_m": 2771,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Tala",
+      "oficial": "CAÑADA DEL TALA",
+      "tipo": "cañada",
+      "x": 4085.8,
+      "z": 12422.9,
+      "largo_m": 2545,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Molino",
+      "oficial": "CAÑADA DEL MOLINO",
+      "tipo": "cañada",
+      "x": 21371.9,
+      "z": 12361.3,
+      "largo_m": 2429,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada del Medio",
+      "oficial": "CAÑADA DEL MEDIO",
+      "tipo": "cañada",
+      "x": -13474.2,
+      "z": -25192.6,
+      "largo_m": 2200,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada el Talita",
+      "oficial": "CAÑADA EL TALITA",
+      "tipo": "cañada",
+      "x": 48208.3,
+      "z": -8031.4,
+      "largo_m": 2101,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Sarandí Grande",
+      "oficial": "ARROYO SARANDÍ GRANDE",
+      "tipo": "arroyo",
+      "x": -20230.8,
+      "z": -24941.8,
+      "largo_m": 2062,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo Toscas Chico",
+      "oficial": "ARROYO TOSCAS CHICO",
+      "tipo": "arroyo",
+      "x": -6346.1,
+      "z": -7166.9,
+      "largo_m": 1973,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de las Piedritas",
+      "oficial": "CAÑADA DE LAS PIEDRITAS",
+      "tipo": "cañada",
+      "x": -7230.4,
+      "z": 4331.9,
+      "largo_m": 1217,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada de Guerra",
+      "oficial": "CAÑADA DE GUERRA",
+      "tipo": "cañada",
+      "x": 3676.7,
+      "z": -24854.0,
+      "largo_m": 649,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Jesús María",
+      "oficial": "CAÑADA JESÚS MARÍA",
+      "tipo": "cañada",
+      "x": 7547.5,
+      "z": 9219.1,
+      "largo_m": 461,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Casavalle",
+      "oficial": "CAÑADA CASAVALLE",
+      "tipo": "cañada",
+      "x": 15226.7,
+      "z": 6658.9,
+      "largo_m": 340,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Arroyo de los Negros",
+      "oficial": "ARROYO DE LOS NEGROS",
+      "tipo": "arroyo",
+      "x": -2603.6,
+      "z": -9272.6,
+      "largo_m": 290,
+      "en_mapa": false,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cañada Malvín",
+      "oficial": "CAÑADA MALVÍN",
+      "tipo": "cañada",
+      "x": 20088.4,
+      "z": 11979.3,
+      "largo_m": 74,
+      "en_mapa": true,
+      "fuente": "IDE (eje_curso_de_agua_l)"
+    },
+    {
+      "nombre": "Cerro de Montevideo",
+      "tipo": "cerro",
+      "x": 5943.3,
+      "z": 12252.5,
+      "altura_m": 132.1,
+      "en_mapa": true,
+      "fuente": "IDE (cerros_ide)"
+    },
+    {
+      "nombre": "Cuchilla Grande",
+      "tipo": "cuchilla",
+      "x": 20063.2,
+      "z": -7888.1,
+      "linea": [
+        [
+          16904,
+          4951
+        ],
+        [
+          17209,
+          2990
+        ],
+        [
+          17287,
+          659
+        ],
+        [
+          17141,
+          -140
+        ],
+        [
+          17263,
+          -958
+        ],
+        [
+          17483,
+          -1745
+        ],
+        [
+          17399,
+          -2573
+        ],
+        [
+          17126,
+          -3048
+        ],
+        [
+          16683,
+          -3578
+        ],
+        [
+          16516,
+          -3634
+        ],
+        [
+          16426,
+          -3964
+        ],
+        [
+          15814,
+          -4074
+        ],
+        [
+          15630,
+          -4005
+        ],
+        [
+          15425,
+          -3748
+        ],
+        [
+          15162,
+          -3827
+        ],
+        [
+          14839,
+          -4052
+        ],
+        [
+          14548,
+          -4672
+        ],
+        [
+          14440,
+          -5217
+        ],
+        [
+          14983,
+          -6342
+        ],
+        [
+          15599,
+          -6469
+        ],
+        [
+          16140,
+          -6868
+        ],
+        [
+          16450,
+          -6994
+        ],
+        [
+          16654,
+          -7269
+        ],
+        [
+          17241,
+          -7111
+        ],
+        [
+          17904,
+          -7321
+        ],
+        [
+          18363,
+          -7306
+        ],
+        [
+          20152,
+          -7919
+        ],
+        [
+          19818,
+          -9748
+        ],
+        [
+          19613,
+          -10184
+        ],
+        [
+          19459,
+          -11140
+        ],
+        [
+          19236,
+          -11619
+        ],
+        [
+          19292,
+          -12325
+        ],
+        [
+          19699,
+          -12809
+        ],
+        [
+          19981,
+          -12845
+        ],
+        [
+          20666,
+          -13115
+        ],
+        [
+          20778,
+          -13614
+        ],
+        [
+          19977,
+          -14679
+        ],
+        [
+          19493,
+          -16916
+        ],
+        [
+          19373,
+          -18163
+        ],
+        [
+          20110,
+          -20096
+        ],
+        [
+          20264,
+          -20845
+        ],
+        [
+          20760,
+          -21053
+        ],
+        [
+          21240,
+          -21718
+        ],
+        [
+          21600,
+          -22591
+        ],
+        [
+          21702,
+          -24316
+        ],
+        [
+          22405,
+          -24399
+        ]
+      ],
+      "en_mapa": true,
+      "fuente": "IDE (cuchillas_y_sierras)"
+    },
+    {
+      "nombre": "Cuchilla Mangrullo",
+      "tipo": "cuchilla",
+      "x": -20350.5,
+      "z": -9387.5,
+      "linea": [
+        [
+          -24730,
+          -13648
+        ],
+        [
+          -23791,
+          -13592
+        ],
+        [
+          -23326,
+          -13460
+        ],
+        [
+          -22620,
+          -12922
+        ],
+        [
+          -22315,
+          -11960
+        ],
+        [
+          -21821,
+          -11228
+        ],
+        [
+          -21411,
+          -10802
+        ],
+        [
+          -20729,
+          -10291
+        ],
+        [
+          -20185,
+          -9014
+        ],
+        [
+          -19953,
+          -8791
+        ],
+        [
+          -18437,
+          -7977
+        ],
+        [
+          -17884,
+          -7309
+        ],
+        [
+          -17550,
+          -6107
+        ],
+        [
+          -16881,
+          -5560
+        ],
+        [
+          -16387,
+          -5507
+        ],
+        [
+          -15791,
+          -5895
+        ]
+      ],
+      "en_mapa": false,
+      "fuente": "IDE (cuchillas_y_sierras)"
+    },
+    {
+      "nombre": "Cuchilla de Rocha",
+      "tipo": "cuchilla",
+      "x": 26198.1,
+      "z": -9552.0,
+      "linea": [
+        [
+          29451,
+          -16598
+        ],
+        [
+          28807,
+          -16327
+        ],
+        [
+          28149,
+          -15083
+        ],
+        [
+          27742,
+          -13966
+        ],
+        [
+          27427,
+          -13743
+        ],
+        [
+          26993,
+          -12985
+        ],
+        [
+          26473,
+          -12478
+        ],
+        [
+          26569,
+          -11263
+        ],
+        [
+          26224,
+          -10711
+        ],
+        [
+          26155,
+          -10150
+        ],
+        [
+          26225,
+          -9387
+        ],
+        [
+          26096,
+          -9110
+        ],
+        [
+          26091,
+          -8797
+        ],
+        [
+          25985,
+          -8509
+        ],
+        [
+          25291,
+          -7979
+        ],
+        [
+          24258,
+          -7354
+        ],
+        [
+          22964,
+          -6366
+        ],
+        [
+          22584,
+          -6637
+        ],
+        [
+          21059,
+          -6697
+        ],
+        [
+          20712,
+          -7278
+        ],
+        [
+          20152,
+          -7919
+        ]
+      ],
+      "en_mapa": false,
+      "fuente": "IDE (cuchillas_y_sierras)"
+    },
+    {
+      "nombre": "Isla de las Ratas (San José)",
+      "tipo": "isla",
+      "x": 8294.0,
+      "z": 12280.0,
+      "en_mapa": true,
+      "fuente": "IDE (isla_a); nombre a mano"
+    },
+    {
+      "nombre": "Isla de Flores",
+      "tipo": "isla",
+      "x": 36054.0,
+      "z": 18493.0,
+      "en_mapa": false,
+      "fuente": "IDE (isla_a); nombre a mano"
+    }
+  ]
+}
