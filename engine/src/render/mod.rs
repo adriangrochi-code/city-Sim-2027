@@ -200,6 +200,13 @@ pub struct Renderer {
     sky_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
     overlay_pipe: wgpu::RenderPipeline,
+    /// Flora baja en micro-vóxeles: piezas de cada columna, y el búfer de instancias que se
+    /// rearma (perezoso) cuando cambian.
+    detail_pipe: wgpu::RenderPipeline,
+    detail_cols: HashMap<(u32, IVec2), Vec<crate::trees::Micro>, crate::fxhash::FxBuild>,
+    detail_static: Vec<crate::trees::Micro>,
+    detail_buf: std::cell::RefCell<Option<(wgpu::Buffer, u32)>>,
+    detail_dirty: std::cell::Cell<bool>,
     water: wgpu::Buffer,
     /// Agua de los arroyos (cintas sobre el cauce), si el mapa las tiene.
     streams: Option<wgpu::Buffer>,
@@ -573,6 +580,28 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
+        let detail_mod = shader("flora", include_str!("shaders/detail.wgsl"));
+        let detail_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("flora"),
+            layout: Some(&main_layout),
+            vertex: wgpu::VertexState {
+                module: &detail_mod,
+                entry_point: "vs_main",
+                compilation_options: Default::default(),
+                // Una instancia por caja (trees::Micro, 20 bytes): esquina, tamaño, material.
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<crate::trees::Micro>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint8x4, 2 => Uint8x4],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState { module: &detail_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(format.into())] }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(reverse_depth(true, wgpu::CompareFunction::Greater)),
+            multisample: ms,
+            multiview: None,
+            cache: None,
+        });
         let overlay_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("resaltado"),
             layout: Some(&simple_layout),
@@ -700,6 +729,11 @@ impl Renderer {
             water_pipe,
             streams: None,
             overlay_pipe,
+            detail_pipe,
+            detail_cols: HashMap::default(),
+            detail_static: Vec::new(),
+            detail_buf: std::cell::RefCell::new(None),
+            detail_dirty: std::cell::Cell::new(false),
             water,
             origins,
             shadow_vox_bg,
@@ -748,6 +782,12 @@ impl Renderer {
 
     /// Sube mallas sueltas a la GPU (modo captura: cada malla con su origen).
     pub fn upload(&mut self, meshes: &[(u32, Mesh)]) {
+        for (_, m) in meshes {
+            if !m.detail.is_empty() {
+                self.detail_static.extend_from_slice(&m.detail);
+                self.detail_dirty.set(true);
+            }
+        }
         for (lod, m) in meshes {
             if let Some(b) = self.make_batch(m, *lod) {
                 self.batches.push(b);
@@ -828,6 +868,7 @@ impl Renderer {
 
     /// Reemplaza la malla de una columna del mundo en streaming (vacía = la quita).
     pub fn set_column(&mut self, key: (u32, IVec2), mesh: &Mesh) {
+        self.set_detail(key, &mesh.detail);
         let new = self.make_batch(mesh, key.0);
         let old = match new {
             Some(b) => self.columns.insert(key, b),
@@ -841,6 +882,41 @@ impl Renderer {
         }
     }
 
+    fn set_detail(&mut self, key: (u32, IVec2), d: &[crate::trees::Micro]) {
+        if d.is_empty() {
+            if self.detail_cols.remove(&key).is_some() {
+                self.detail_dirty.set(true);
+            }
+        } else {
+            self.detail_cols.insert(key, d.to_vec());
+            self.detail_dirty.set(true);
+        }
+    }
+
+    /// Rearma el búfer de la flora si cambió alguna columna (a lo sumo una vez por cuadro).
+    fn refresh_detail(&self) {
+        if !self.detail_dirty.replace(false) {
+            return;
+        }
+        let n: usize = self.detail_static.len() + self.detail_cols.values().map(|v| v.len()).sum::<usize>();
+        if n == 0 {
+            *self.detail_buf.borrow_mut() = None;
+            return;
+        }
+        let mut all = Vec::with_capacity(n);
+        all.extend_from_slice(&self.detail_static);
+        for v in self.detail_cols.values() {
+            all.extend_from_slice(v);
+        }
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("flora"), contents: bytemuck::cast_slice(&all), usage: wgpu::BufferUsages::VERTEX });
+        *self.detail_buf.borrow_mut() = Some((buf, n as u32));
+    }
+
+    /// Piezas de flora baja cargadas.
+    pub fn detail_count(&self) -> usize {
+        self.detail_static.len() + self.detail_cols.values().map(|v| v.len()).sum::<usize>()
+    }
+
     /// Sube el agua de los arroyos (una vez por mapa).
     pub fn set_streams(&mut self, verts: &[[f32; 5]]) {
         self.streams = (!verts.is_empty()).then(|| self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("arroyos"), contents: bytemuck::cast_slice(verts), usage: wgpu::BufferUsages::VERTEX }));
@@ -851,6 +927,7 @@ impl Renderer {
     }
 
     pub fn remove_column(&mut self, key: (u32, IVec2)) {
+        self.set_detail(key, &[]);
         if let Some(b) = self.columns.remove(&key) {
             if self.shadow_planes.get().map_or(true, |p| box_visible(&p, b.lo, b.hi)) {
                 self.shadow_dirty.set(true);
@@ -888,6 +965,9 @@ impl Renderer {
     pub fn clear_columns(&mut self) {
         self.shadow_dirty.set(true);
         self.columns.clear();
+        self.detail_cols.clear();
+        self.detail_static.clear();
+        self.detail_dirty.set(true);
         self.batches.clear();
         self.free_slots.clear();
         self.next_slot = 0;
@@ -1222,6 +1302,14 @@ impl Renderer {
                 pass.draw_indexed(0..6, 0, a.first_instance..a.first_instance + a.instance_count);
                 dm += 1;
             }
+        }
+        self.refresh_detail();
+        let detail = self.detail_buf.borrow();
+        if let Some((buf, n)) = detail.as_ref() {
+            pass.set_pipeline(&self.detail_pipe);
+            pass.set_bind_group(0, &self.main_bg, &[]);
+            pass.set_vertex_buffer(0, buf.slice(..));
+            pass.draw(0..30, 0..*n);
         }
         pass.set_pipeline(&self.water_pipe);
         pass.set_bind_group(0, &self.shadow_bg, &[]);

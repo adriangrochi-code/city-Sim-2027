@@ -252,6 +252,13 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         let k = max(smoothstep(3.0, 6.0, v.voxel), smoothstep(0.1, 0.5, fw) * 0.7);
         albedo = mix(albedo, canopy, k);
     }
+    // Follaje: cada racimo de hojas (~0,8 m) con su tono, y las hojas de adentro y de abajo
+    // de la copa más oscuras (la oclusión de los vóxeles no alcanza a verse de lejos).
+    if (mat == 18u || mat == 24u || mat == 44u || mat == 54u || mat == 55u || mat == 57u) {
+        let q = v.world / 0.8;
+        let r = hash3(floor(q)) * 0.6 + hash3(floor(q * 2.0) + 77.0) * 0.4;
+        albedo *= mix(0.68, 1.15, r) * mix(0.72, 1.0, smoothstep(-0.6, 0.6, ln.y));
+    }
     // Pastos y arenas: manchas de color de decenas de metros (más verde azulado en unas,
     // más pajizo en otras), para que de lejos el campo no sea un verde parejo.
     if (mat == 1u || mat == 20u || mat == 49u || mat == 3u || mat == 51u) {

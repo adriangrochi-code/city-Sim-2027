@@ -217,11 +217,13 @@ pub struct Mesh {
     /// Caja envolvente en vóxeles relativos al origen (min, max).
     pub lo: [u16; 3],
     pub hi: [u16; 3],
+    /// Flora baja en micro-vóxeles (solo en el nivel más fino), dibujada aparte.
+    pub detail: Vec<crate::trees::Micro>,
 }
 
 impl Default for Mesh {
     fn default() -> Self {
-        Mesh { quads: Default::default(), origin: Vec3::ZERO, voxel: 1.0, lo: [u16::MAX; 3], hi: [0; 3] }
+        Mesh { quads: Default::default(), origin: Vec3::ZERO, voxel: 1.0, lo: [u16::MAX; 3], hi: [0; 3], detail: Vec::new() }
     }
 }
 

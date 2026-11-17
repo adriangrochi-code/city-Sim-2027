@@ -357,13 +357,14 @@ pub fn extent(s: &Shape) -> (f32, f32) {
 
 // --- Flora baja ---------------------------------------------------------------------------
 
-/// Niveles de detalle con flora baja: los de vóxel de hasta 0,5 m (0,25 y 0,5 m); más lejos
-/// no se distingue y costaría muchos triángulos.
-pub const PLANT_MAX_VOXEL: f32 = 0.5;
+/// Lado del micro-vóxel de la flora baja (m): la mitad del vóxel del terreno. Con él una hoja
+/// de paja o un junco es una tira fina y no un poste.
+pub const MICRO: f32 = 0.125;
+/// La flora baja se arma solo en el nivel más fino (vóxel de 0,25 m), cerca de la cámara; más
+/// lejos la pradera se ve por el color del suelo.
+pub const PLANT_MAX_VOXEL: f32 = 0.26;
 /// Altura máxima de una planta (m): los juncos y totoras más altos.
 pub const PLANT_MAX_HEIGHT: f32 = 2.4;
-/// Vóxeles de alto que puede tener una planta en el nivel más fino.
-pub const PLANT_SLOTS: usize = (PLANT_MAX_HEIGHT / crate::lod::BASE_VOXEL + 0.25) as usize;
 
 fn hash_u(x: i32, z: i32, salt: u32) -> f32 {
     let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (z as u32).wrapping_mul(0xd816_3841) ^ salt.wrapping_mul(0x9e37_79b9);
@@ -373,8 +374,6 @@ fn hash_u(x: i32, z: i32, salt: u32) -> f32 {
     (h & 0xffff) as f32 / 65535.0
 }
 
-/// Ruido de valores (hash en los vértices de una grilla, interpolado suave): manchas de
-/// bordes redondeados, no cuadradas.
 fn value_noise(x: f32, z: f32, salt: u32) -> f32 {
     let (i, j) = (x.floor() as i32, z.floor() as i32);
     let (tx, tz) = (x - i as f32, z - j as f32);
@@ -384,126 +383,330 @@ fn value_noise(x: f32, z: f32, salt: u32) -> f32 {
     a + (b - a) * sz
 }
 
-/// Una planta: materiales de abajo hacia arriba (el último es la flor o la espiga) y altura (m).
-struct Plant {
-    stem: Mat,
-    top: Mat,
-    height: f32,
+/// Qué crece en una columna.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PlantKind {
+    /// Macollo de flechilla o paja (con espiga clara en el pasto seco).
+    Macollo { espiga: bool, verde: bool },
+    Flor(Mat),
+    Cardo,
+    /// Junco (verde) o totora (con la espiga parda).
+    Junco { totora: bool },
+    PajaBrava,
+    Camalote { flor: bool },
+    Espartillo,
+    Senecio { flor: bool },
+    Redondita,
+    Helecho,
+    Caraguata { flor: bool },
+    Gramilla,
+    MataSerrana,
+    Tuna,
+}
+
+/// Una planta: qué es, su altura (m) y el centro de su mata (m), hacia donde no se abren las hojas.
+#[derive(Clone, Copy, Debug)]
+pub struct Plant {
+    pub kind: PlantKind,
+    pub height: f32,
+    pub center: (f32, f32),
 }
 
 /// Flora baja nativa sobre una columna del terreno natural, según la zona (el material del
 /// suelo): matas de flechilla y paja, cardos y flores (margaritas, macachines) en la pradera;
 /// juncos, totoras y paja brava en los bañados; camalotes y redondita de agua en las orillas;
 /// espartillo y senecio en los médanos; helechos y caraguatá en el monte; tunas y matas entre
-/// las piedras. Escribe los materiales en `out` (de abajo hacia arriba) y devuelve cuántos son
-/// (0: nada). `gx`, `gz`: columna de vóxeles del nivel; `vs`: lado del vóxel (m). Barato: un
+/// las piedras. `gx`, `gz`: columna de vóxeles del nivel; `vs`: lado del vóxel (m). Barato: un
 /// par de hashes por columna, sin consultar el terreno.
-pub fn ground_plant(surf: Mat, gx: i32, gz: i32, vs: f32, out: &mut [Mat; PLANT_SLOTS]) -> usize {
+pub fn ground_plant(surf: Mat, gx: i32, gz: i32, vs: f32) -> Option<Plant> {
     if vs > PLANT_MAX_VOXEL {
-        return 0;
+        return None;
     }
-    // Las plantas crecen en macollos: celdas de 1,5 m (6 × 6 vóxeles de cerca) que tienen o no
-    // una mata, y dentro de la celda algunos vóxeles. Las manchas (juncales, parches de flores)
-    // se miden en metros, así caen igual en todos los niveles.
-    let (fx, fz) = (gx as f32 * vs, gz as f32 * vs);
+    // Las matas crecen en celdas de 1,5 m: cada celda tiene o no una mata, con su centro en
+    // algún lugar de la celda, y la mata ocupa las columnas a menos de su radio. Las manchas
+    // (juncales, parches de flores) se miden en metros.
+    let (fx, fz) = ((gx as f32 + 0.5) * vs, (gz as f32 + 0.5) * vs);
     let (cx, cz) = ((fx / 1.5).floor() as i32, (fz / 1.5).floor() as i32);
     let cell = hash_u(cx, cz, 1);
+    let center = ((cx as f32 + 0.25 + 0.5 * hash_u(cx, cz, 8)) * 1.5, (cz as f32 + 0.25 + 0.5 * hash_u(cx, cz, 9)) * 1.5);
+    let dc = ((fx - center.0).powi(2) + (fz - center.1).powi(2)).sqrt();
+    let size = 0.2 + 0.25 * hash_u(cx, cz, 10);
     let u = hash_u(gx, gz, 6);
     let clump = value_noise(fx / 7.0, fz / 7.0, 2) * 0.75 + value_noise(fx / 2.5, fz / 2.5, 7) * 0.25;
     let patch = value_noise(fx / 15.0, fz / 15.0, 3);
     let v = hash_u(gx, gz, 4);
-    let hv = 0.7 + 0.6 * hash_u(gx, gz, 5);
-    // ¿Este vóxel es parte de una mata? (celda con mata y el vóxel dentro de ella)
-    let mata = |p: f32, fill: f32| cell < p && u < fill;
+    let hv = 0.7 + 0.6 * hash_u(cx, cz, 5);
+    // ¿Esta columna es parte de la mata de su celda?
+    let mata = |p: f32, r: f32| cell < p && dc < r * size / 0.3;
     let flor = |p: f32| u < p && cell > 0.5;
     let pf = |m: Mat| match (patch * 3.0) as u32 {
         0 => FLOR_BLANCA,
         1 => FLOR_VIOLETA,
         _ => m,
     };
-    let p: Option<Plant> = match surf {
+    use PlantKind::*;
+    let (kind, height) = match surf {
         GRASS | GRASS_LUSH | GRASS_DRY => {
-            let tuft = if surf == GRASS_DRY { 0.1 } else { 0.05 } * (0.2 + 1.6 * clump * clump);
+            let tuft = if surf == GRASS_DRY { 0.5 } else { 0.3 } * (0.2 + 1.6 * clump * clump);
             // Flores en parches: la mayoría del campo casi sin flores, algún parche florido.
-            let fl = if surf == GRASS_LUSH { 0.02 } else { 0.008 } * patch * patch * patch * 3.0;
-            if mata(tuft, 0.55) {
-                // Flechilla y paja; en el pasto seco, cola de zorro con la espiga clara.
-                let top = if surf == GRASS_DRY && v < 0.3 { GRASS_DRY } else { PASTO_MATA };
-                Some(Plant { stem: PASTO_MATA, top, height: 0.75 * hv })
+            let fl = if surf == GRASS_LUSH { 0.05 } else { 0.02 } * patch * patch * patch * 3.0;
+            if mata(tuft, 0.3) {
+                (Macollo { espiga: surf == GRASS_DRY && v < 0.5, verde: surf != GRASS_DRY }, 0.55 * hv)
             } else if flor(fl) {
-                let m = pf(FLOR_AMARILLA);
-                Some(Plant { stem: m, top: m, height: 0.4 })
-            } else if cell < 0.0015 && u < 0.4 {
-                Some(Plant { stem: LEAF_TALA, top: FLOR_VIOLETA, height: 1.1 * hv }) // cardo
+                (Flor(pf(FLOR_AMARILLA)), 0.25 + 0.15 * v)
+            } else if cell < 0.004 && dc < 0.2 {
+                (Cardo, 1.0 * hv)
             } else {
-                None
+                return None;
             }
         }
         MARSH => {
             // Juncales y totorales cerrados en manchas, y matas de paja brava entre ellos.
-            if clump > 0.58 && u < 0.14 + (clump - 0.58) * 1.2 {
-                let top = if v < 0.1 { TRUNK } else { JUNCO };
-                Some(Plant { stem: JUNCO, top, height: 0.6 + 1.8 * hv * hv })
-            } else if mata(0.12, 0.6) {
-                Some(Plant { stem: PASTO_MATA, top: PASTO_MATA, height: 1.1 * hv }) // paja brava
+            if clump > 0.58 && u < 0.3 + (clump - 0.58) * 2.0 {
+                (Junco { totora: patch > 0.55 }, 0.8 + 1.6 * hash_u(gx, gz, 5).powi(2))
+            } else if mata(0.15, 0.45) {
+                (PajaBrava, 1.2 * hv)
             } else {
-                None
+                return None;
             }
         }
-        MUD => {
-            // Orillas: camalotes (con flor lila) y redondita de agua.
-            if mata(0.15 * (0.3 + clump), 0.6) {
-                let top = if v < 0.2 { FLOR_VIOLETA } else { LEAF_SAUCE };
-                Some(Plant { stem: LEAF_SAUCE, top, height: 0.5 })
-            } else {
-                None
-            }
-        }
+        // Orillas: camalotes (con flor lila) y redondita de agua.
+        MUD if mata(0.3 * (0.3 + clump), 0.45) => (Camalote { flor: v < 0.25 }, 0.4),
         DUNE | SAND => {
             let k = if surf == DUNE { 1.0 } else { 0.25 };
-            if mata(0.16 * k * (0.3 + clump), 0.5) {
-                Some(Plant { stem: PASTO_MATA, top: PASTO_MATA, height: 0.6 * hv }) // espartillo
-            } else if cell > 0.97 - 0.03 * k && u < 0.5 {
-                Some(Plant { stem: LEAF_ESPINILLO, top: if v < 0.4 { FLOR_AMARILLA } else { LEAF_ESPINILLO }, height: 0.8 * hv }) // senecio
-            } else if cell > 0.9 && cell < 0.9 + 0.03 * k && u < 0.7 {
-                Some(Plant { stem: LEAF, top: LEAF, height: 0.3 }) // redondita de agua
+            if mata(0.35 * k * (0.3 + clump), 0.3) {
+                (Espartillo, 0.6 * hv)
+            } else if cell > 0.97 - 0.03 * k && dc < 0.35 {
+                (Senecio { flor: patch > 0.4 }, 0.7 * hv)
+            } else if cell > 0.9 && cell < 0.9 + 0.03 * k && dc < 0.3 {
+                (Redondita, 0.1)
             } else {
-                None
+                return None;
             }
         }
         FOREST_FLOOR => {
-            if mata(0.1 * (0.3 + clump), 0.5) {
-                Some(Plant { stem: LEAF, top: LEAF, height: 0.5 }) // helechos
-            } else if cell > 0.95 && u < 0.6 {
+            if mata(0.25 * (0.3 + clump), 0.35) {
+                (Helecho, 0.5 * hv)
+            } else if cell > 0.95 && dc < 0.35 {
                 // Caraguatá: roseta espinosa, con el centro rojo cuando florece.
-                Some(Plant { stem: LEAF_DARK, top: if v < 0.15 { CEIBO_FLOR } else { LEAF_DARK }, height: 0.9 * hv })
+                (Caraguata { flor: hash_u(cx, cz, 11) < 0.3 }, 0.9 * hv)
             } else {
-                None
+                return None;
             }
         }
         ROCK | COAST_ROCK => {
-            if mata(0.15 * clump, 0.5) {
-                Some(Plant { stem: GRASS, top: GRASS, height: 0.3 }) // gramilla entre las piedras
-            } else if cell > 0.95 && u < 0.5 {
-                Some(Plant { stem: LEAF_DARK, top: LEAF_DARK, height: 0.8 * hv }) // matas
-            } else if cell > 0.93 && cell <= 0.95 && u < 0.4 {
-                Some(Plant { stem: LEAF_TALA, top: LEAF_TALA, height: 1.0 * hv }) // tuna
+            if mata(0.3 * clump, 0.3) {
+                (Gramilla, 0.25) // gramilla entre las piedras
+            } else if cell > 0.95 && dc < 0.35 {
+                (MataSerrana, 0.7 * hv)
+            } else if cell > 0.93 && cell <= 0.95 && dc < 0.3 {
+                (Tuna, 0.9 * hv)
             } else {
-                None
+                return None;
             }
         }
-        _ => None,
+        _ => return None,
     };
-    let Some(p) = p else { return 0 };
-    let n = ((p.height.min(PLANT_MAX_HEIGHT) / vs + 0.25) as usize).min(out.len());
-    if n == 0 {
-        return 0;
+    Some(Plant { kind, height: height.min(PLANT_MAX_HEIGHT), center })
+}
+
+/// Una pieza de la flora baja: una caja de micro-vóxeles de [`MICRO`] m (posición de la esquina
+/// en metros, alineada a la grilla de 0,125 m; tamaño en micro-vóxeles; material y matiz).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Micro {
+    pub pos: [f32; 3],
+    /// x, y, z en micro-vóxeles; w libre.
+    pub size: [u8; 4],
+    /// Material, matiz (0..255: más oscuro a más claro), altura de la base sobre el suelo
+    /// (micro-vóxeles), libre.
+    pub info: [u8; 4],
+}
+
+/// Una caja de micro-vóxeles con la base `k` micro-vóxeles por encima del suelo (`y0`, m).
+#[allow(clippy::too_many_arguments)]
+fn micro(out: &mut Vec<Micro>, x: i32, y0: f32, k: i32, z: i32, s: [u8; 3], mat: Mat, shade: u8) {
+    out.push(Micro { pos: [x as f32 * MICRO, y0 + k as f32 * MICRO, z as f32 * MICRO], size: [s[0], s[1], s[2], 0], info: [mat, shade, k.clamp(0, 255) as u8, 0] });
+}
+
+/// Una hoja, tallo o junco: tira de un micro-vóxel de lado y `h` de alto que se inclina hacia
+/// `dir` (curva: casi recta abajo, más tumbada arriba). Los últimos `tip` micro-vóxeles son de
+/// `tip_mat` (espiga, flor). Se arma con un tramo por cada escalón de la inclinación.
+#[allow(clippy::too_many_arguments)]
+fn blade(out: &mut Vec<Micro>, x: i32, y0: f32, z: i32, dir: (f32, f32), h: i32, bend: f32, mat: Mat, tip: i32, tip_mat: Mat, shade: u8) {
+    let mut k = 0;
+    while k < h {
+        let t = k as f32 / h.max(1) as f32;
+        let o = bend * t * t * h as f32 * 0.45;
+        let (ox, oz) = ((dir.0 * o).round() as i32, (dir.1 * o).round() as i32);
+        let m = if k >= h - tip { tip_mat } else { mat };
+        // Hasta dónde sigue el mismo escalón y el mismo material.
+        let mut e = k + 1;
+        while e < h {
+            let te = e as f32 / h as f32;
+            let oe = bend * te * te * h as f32 * 0.45;
+            let me = if e >= h - tip { tip_mat } else { mat };
+            if (dir.0 * oe).round() as i32 != ox || (dir.1 * oe).round() as i32 != oz || me != m {
+                break;
+            }
+            e += 1;
+        }
+        // Una hoja que se tumba también baja: el tramo se corre un poco hacia abajo.
+        micro(out, x + ox, y0, k, z + oz, [1, (e - k) as u8, 1], m, shade);
+        k = e;
     }
-    for m in out.iter_mut().take(n - 1) {
-        *m = p.stem;
+}
+
+/// Arma con micro-vóxeles la planta de la columna (`gx`, `gz`) de lado `vs`, con el suelo a
+/// `y0` m. Determinista.
+pub fn plant_micro(p: &Plant, gx: i32, gz: i32, vs: f32, y0: f32, out: &mut Vec<Micro>) {
+    use PlantKind::*;
+    let n = (vs / MICRO).round().max(1.0) as i32;
+    let (mx, mz) = (gx * n, gz * n);
+    let hm = |m: f32| ((m / MICRO).round() as i32).max(1);
+    let r = |k: u32| hash_u(gx, gz, 40 + k);
+    // Hacia afuera de la mata (con algo de azar).
+    let out_dir = |sx: i32, sz: i32, k: u32| {
+        let (px, pz) = ((mx + sx) as f32 * MICRO, (mz + sz) as f32 * MICRO);
+        let (mut dx, mut dz) = (px - p.center.0, pz - p.center.1);
+        let a = r(k) * std::f32::consts::TAU;
+        dx += a.cos() * 0.15;
+        dz += a.sin() * 0.15;
+        let l = (dx * dx + dz * dz).sqrt().max(1e-3);
+        (dx / l, dz / l)
+    };
+    let shade = |k: u32| (60.0 + 140.0 * r(k)) as u8;
+    match p.kind {
+        Macollo { espiga, verde } => {
+            // Varias hojas finas por columna, de largo desparejo, abiertas hacia afuera.
+            for s in 0..(n * n) {
+                let (sx, sz) = (s % n, s / n);
+                if s > 0 && r(s as u32) > 0.75 {
+                    continue;
+                }
+                let h = hm(p.height * (0.55 + 0.45 * r(10 + s as u32)));
+                let tip = if espiga && r(20 + s as u32) < 0.5 { 2 } else { 0 };
+                // En el pasto verde, hojas verdes con alguna seca; en el seco, color paja.
+                let m = if verde && r(50 + s as u32) < 0.7 { GRASS_LUSH } else { PASTO_MATA };
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 0.6 + 0.6 * r(30 + s as u32), m, tip, GRASS_DRY, shade(s as u32));
+            }
+        }
+        Flor(m) => {
+            let (sx, sz) = ((r(1) * n as f32) as i32, (r(2) * n as f32) as i32);
+            let h = hm(p.height);
+            blade(out, mx + sx, y0, mz + sz, (0.0, 0.0), h, 0.0, GRASS_LUSH, 1, m, shade(3));
+            // Dos hojitas en la base.
+            micro(out, mx + sx - 1, y0, 0, mz + sz, [1, 1, 1], GRASS_LUSH, shade(4));
+            micro(out, mx + sx + 1, y0, 0, mz + sz, [1, 1, 1], GRASS_LUSH, shade(5));
+        }
+        Cardo => {
+            let (sx, sz) = (0, 0);
+            let h = hm(p.height);
+            blade(out, mx + sx, y0, mz + sz, (0.0, 0.0), h - 2, 0.0, LEAF_TALA, 0, LEAF_TALA, shade(1));
+            // Roseta de hojas espinosas abajo y la cabeza violeta arriba.
+            for (k, d) in [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().enumerate() {
+                blade(out, mx + sx + d.0, y0, mz + sz + d.1, (d.0 as f32, d.1 as f32), 3, 1.6, LEAF_TALA, 0, LEAF_TALA, shade(2 + k as u32));
+            }
+            micro(out, mx + sx, y0, h - 2, mz + sz, [1, 2, 1], FLOR_VIOLETA, shade(9));
+        }
+        Junco { totora } => {
+            // Uno o dos tallos finos por columna, casi rectos; la totora con su espiga parda.
+            for s in 0..(n * n) {
+                if s > 0 && r(s as u32) > 0.45 {
+                    continue;
+                }
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.7 + 0.3 * r(10 + s as u32)));
+                let tip = if totora && r(20 + s as u32) < 0.6 { 2 } else { 0 };
+                let a = r(30 + s as u32) * std::f32::consts::TAU;
+                blade(out, mx + sx, y0, mz + sz, (a.cos(), a.sin()), h, 0.15, JUNCO, tip, TRUNK, shade(s as u32));
+            }
+        }
+        PajaBrava => {
+            for s in 0..(n * n) {
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.6 + 0.4 * r(10 + s as u32)));
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 1.0 + 0.5 * r(30 + s as u32), PASTO_MATA, if r(20 + s as u32) < 0.3 { 3 } else { 0 }, GRASS_DRY, shade(s as u32));
+            }
+        }
+        Camalote { flor } => {
+            // Hojas redondas y anchas, paradas, y a veces la flor lila.
+            micro(out, mx, y0, 0, mz, [2, 2, 1], LEAF_SAUCE, shade(1));
+            micro(out, mx + (r(2) * 2.0) as i32, y0, 0, mz + 1, [1, 2, 2], LEAF_SAUCE, shade(2));
+            if flor {
+                blade(out, mx + 1, y0, mz + 1, (0.0, 0.0), 4, 0.0, LEAF_SAUCE, 1, FLOR_VIOLETA, shade(3));
+            }
+        }
+        Espartillo => {
+            for s in 0..(n * n) {
+                if s > 0 && r(s as u32) > 0.8 {
+                    continue;
+                }
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.5 + 0.5 * r(10 + s as u32)));
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 0.9, PASTO_MATA, 2, GRASS_DRY, shade(s as u32));
+            }
+        }
+        Senecio { flor } => {
+            for s in 0..(n * n) {
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.6 + 0.4 * r(10 + s as u32)));
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 0.5, LEAF_ESPINILLO, if flor { 1 } else { 0 }, FLOR_AMARILLA, shade(s as u32));
+            }
+        }
+        Redondita => micro(out, mx, y0, 0, mz, [2, 1, 2], LEAF, shade(1)),
+        Helecho => {
+            // Frondas que salen del centro y se arquean hacia afuera.
+            for s in 0..(n * n) {
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.6 + 0.4 * r(10 + s as u32)));
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 2.2, LEAF, 0, LEAF, shade(s as u32));
+            }
+        }
+        Caraguata { flor } => {
+            for s in 0..(n * n) {
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.7 + 0.3 * r(10 + s as u32)));
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 2.0, LEAF_DARK, 0, LEAF_DARK, shade(s as u32));
+            }
+            if flor {
+                micro(out, mx, y0, 0, mz, [n as u8, 2, n as u8], CEIBO_FLOR, shade(9));
+            }
+        }
+        Gramilla => {
+            for s in 0..(n * n) {
+                if s > 0 && r(s as u32) > 0.6 {
+                    continue;
+                }
+                let (sx, sz) = (s % n, s / n);
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), hm(p.height), 0.8, GRASS, 0, GRASS, shade(s as u32));
+            }
+        }
+        MataSerrana => {
+            for s in 0..(n * n) {
+                let (sx, sz) = (s % n, s / n);
+                let h = hm(p.height * (0.6 + 0.4 * r(10 + s as u32)));
+                blade(out, mx + sx, y0, mz + sz, out_dir(sx, sz, s as u32), h, 0.8, LEAF_DARK, 0, LEAF_DARK, shade(s as u32));
+            }
+        }
+        Tuna => {
+            // Paletas chatas encimadas y giradas, a veces con una flor amarilla.
+            let h = hm(p.height);
+            let mut k = 0;
+            while k * 2 < h && k < 4 {
+                let ox = (r(k as u32) * 3.0) as i32 - 1;
+                if k % 2 == 0 {
+                    micro(out, mx + ox, y0, k * 2, mz, [3, 3, 1], LEAF_TALA, shade(k as u32));
+                } else {
+                    micro(out, mx, y0, k * 2, mz + ox, [1, 3, 3], LEAF_TALA, shade(k as u32));
+                }
+                k += 1;
+            }
+            if r(9) < 0.3 {
+                micro(out, mx, y0, k * 2 + 1, mz, [1, 1, 1], FLOR_AMARILLA, 200);
+            }
+        }
     }
-    out[n - 1] = p.top;
-    n
 }
 
 #[cfg(test)]
@@ -535,29 +738,50 @@ mod tests {
     #[test]
     fn flora_baja_por_zona() {
         // Cuántas columnas de cada zona tienen plantas, y que no haya plantas de lejos.
-        let cuenta = |surf: Mat, vs: f32| {
-            let mut out = [AIR; PLANT_SLOTS];
-            (0..200 * 200).filter(|k| ground_plant(surf, k % 200, k / 200, vs, &mut out) > 0).count()
-        };
-        let pradera = cuenta(GRASS, 0.5);
-        let banado = cuenta(MARSH, 0.5);
-        assert!(pradera > 100 && pradera < 1500, "pradera {pradera} de 40000");
-        assert!(banado > pradera, "bañado {banado} / pradera {pradera}");
-        assert!(cuenta(DUNE, 0.5) > 200, "médanos {}", cuenta(DUNE, 0.5));
-        assert_eq!(cuenta(GRASS, 1.0), 0);
-        assert_eq!(cuenta(STREAM, 0.5), 0);
-        assert_eq!(cuenta(DIRT_ROAD, 0.5), 0);
-        // Los juncos son más altos que las flores (de 1,5 m a 2,4 m en el nivel más fino).
-        let mut out = [AIR; PLANT_SLOTS];
-        let alto = (0..20000).map(|k| ground_plant(MARSH, k % 100, k / 100, 0.5, &mut out)).max().unwrap();
-        assert!(alto >= 3, "juncos de {alto} vóxeles");
         let vs = crate::lod::BASE_VOXEL;
-        let alto = (0..20000).map(|k| ground_plant(MARSH, k % 100, k / 100, vs, &mut out)).max().unwrap();
-        assert!(alto as f32 * vs >= 1.5 && alto as f32 * vs <= PLANT_MAX_HEIGHT + vs, "juncos de {alto} vóxeles de {vs} m");
-        assert!(cuenta(MARSH, vs) > 0);
-        // Hay flores de colores en la pradera.
-        let flores = (0..40000).filter(|k| ground_plant(GRASS_LUSH, k % 200, k / 200, 0.5, &mut out) > 0 && matches!(out[0], FLOR_AMARILLA | FLOR_VIOLETA | FLOR_BLANCA)).count();
+        let cuenta = |surf: Mat, vs: f32| (0..200 * 200).filter(|k| ground_plant(surf, k % 200, k / 200, vs).is_some()).count();
+        let pradera = cuenta(GRASS, vs);
+        let banado = cuenta(MARSH, vs);
+        assert!(pradera > 100 && pradera < 6000, "pradera {pradera} de 40000");
+        assert!(banado > pradera, "bañado {banado} / pradera {pradera}");
+        assert!(cuenta(DUNE, vs) > 200, "médanos {}", cuenta(DUNE, vs));
+        assert_eq!(cuenta(GRASS, 0.5), 0);
+        assert_eq!(cuenta(STREAM, vs), 0);
+        assert_eq!(cuenta(DIRT_ROAD, vs), 0);
+        // Los juncos llegan a 1,5–2,4 m; las flores son bajas y de colores.
+        let alto = (0..20000).filter_map(|k| ground_plant(MARSH, k % 100, k / 100, vs)).map(|p| p.height).fold(0.0, f32::max);
+        assert!((1.5..=PLANT_MAX_HEIGHT).contains(&alto), "juncos de {alto} m");
+        let flores = (0..40000).filter(|k| matches!(ground_plant(GRASS_LUSH, k % 200, k / 200, vs), Some(Plant { kind: PlantKind::Flor(_), .. }))).count();
         assert!(flores > 20, "{flores} flores");
+    }
+
+    #[test]
+    fn la_flora_es_fina_y_esta_sobre_el_suelo() {
+        // Las piezas son de un micro-vóxel de lado (o pocas), no columnas de 0,25 m, y nacen
+        // en la columna o al lado (las hojas tumbadas salen un poco).
+        let vs = crate::lod::BASE_VOXEL;
+        let mut out = Vec::new();
+        let mut plantas = 0;
+        for surf in [GRASS, GRASS_DRY, GRASS_LUSH, MARSH, MUD, DUNE, FOREST_FLOOR, ROCK] {
+            for k in 0..40000 {
+                let (gx, gz) = (k % 200, k / 200);
+                if let Some(p) = ground_plant(surf, gx, gz, vs) {
+                    plantas += 1;
+                    out.clear();
+                    plant_micro(&p, gx, gz, vs, 10.0, &mut out);
+                    assert!(!out.is_empty(), "{:?} sin piezas", p.kind);
+                    for m in &out {
+                        assert!(m.pos[1] >= 10.0 - 1e-4, "{:?} bajo el suelo", p.kind);
+                        assert!(m.size[0] <= 3 && m.size[2] <= 3, "{:?} pieza ancha {:?}", p.kind, m.size);
+                        let top = m.pos[1] + m.size[1] as f32 * MICRO - 10.0;
+                        assert!(top <= PLANT_MAX_HEIGHT + 0.3, "{:?} de {top} m", p.kind);
+                        let (cx, cz) = ((gx as f32 + 0.5) * vs, (gz as f32 + 0.5) * vs);
+                        assert!((m.pos[0] - cx).abs() < 1.5 && (m.pos[2] - cz).abs() < 1.5, "{:?} lejos de su columna", p.kind);
+                    }
+                }
+            }
+        }
+        assert!(plantas > 1000);
     }
 
     #[test]

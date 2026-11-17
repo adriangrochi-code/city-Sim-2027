@@ -477,6 +477,31 @@ struct VoxTree {
     seed: u32,
     /// Largo de las hebras de las ramas colgantes (vóxeles del nivel, unos 1,5 m).
     strand: i32,
+    /// Racimos de hojas: 1 / tamaño del racimo (en vóxeles del nivel) y cuánto pesan (0 en los
+    /// niveles gruesos, donde un racimo sería menos de un vóxel y solo haría ruido).
+    clump_k: f32,
+    clump_amp: f32,
+}
+
+/// Ruido de valor 3D (0..1) en una grilla entera, para los racimos de hojas.
+fn vnoise3(p: Vec3, seed: u32) -> f32 {
+    let i = p.floor();
+    let f = p - i;
+    let u = f * f * (Vec3::splat(3.0) - 2.0 * f);
+    let h = |x: i32, y: i32, z: i32| {
+        let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xcb1a_b31f) ^ (z as u32).wrapping_mul(0xd816_3841) ^ seed;
+        h ^= h >> 13;
+        h = h.wrapping_mul(0x5bd1_e995);
+        h ^= h >> 15;
+        (h & 0xffff) as f32 / 65535.0
+    };
+    let (x, y, z) = (i.x as i32, i.y as i32, i.z as i32);
+    let l = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let x00 = l(h(x, y, z), h(x + 1, y, z), u.x);
+    let x10 = l(h(x, y + 1, z), h(x + 1, y + 1, z), u.x);
+    let x01 = l(h(x, y, z + 1), h(x + 1, y, z + 1), u.x);
+    let x11 = l(h(x, y + 1, z + 1), h(x + 1, y + 1, z + 1), u.x);
+    l(l(x00, x10, u.y), l(x01, x11, u.y), u.z)
 }
 
 /// Niveles con árboles: hasta 4 m por vóxel (más lejos, una copa sería un solo vóxel).
@@ -561,6 +586,9 @@ fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, 
             flower: shape.flower,
             seed: (gx as u32).wrapping_mul(73_856_093) ^ (gz as u32).wrapping_mul(19_349_663),
             strand: ((1.5 / vs).round() as i32).max(1),
+            // Racimos de unos 0,8 m; se notan con vóxeles de 0,25 y 0,5 m, no más lejos.
+            clump_k: vs / 0.8,
+            clump_amp: (1.0 - (vs - 0.5).max(0.0) / 1.0).clamp(0.0, 1.0),
         });
     }
     out
@@ -613,6 +641,16 @@ fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
                         if e < best {
                             best = e;
                             droop = b.3;
+                        }
+                    }
+                    // Racimos de hojas: el contorno de la copa se abulta y se hunde según un
+                    // ruido de ~0,8 m, y entre racimo y racimo quedan huecos por donde pasa la
+                    // luz (no una cáscara lisa con agujeros sueltos).
+                    if tr.clump_amp > 0.0 {
+                        let c = vnoise3(p * tr.clump_k, tr.seed);
+                        best += (0.5 - c) * 0.7 * tr.clump_amp;
+                        if best > 0.4 && c < 0.34 * tr.clump_amp {
+                            continue;
                         }
                     }
                     if best > 1.0 {
@@ -722,23 +760,24 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     let trees = column_trees(t, ls, spec, col);
     let tree_top = trees.iter().map(|tr| tr.top).max().unwrap_or(i32::MIN);
     // Flora baja (matas, juncos, flores) de cada columna natural, por encima del agua.
-    let mut plants: Vec<(usize, i32, [Mat; crate::trees::PLANT_SLOTS], usize)> = Vec::new();
+    // Flora baja (matas, juncos, flores) de cada columna natural, por encima del agua: en
+    // micro-vóxeles, aparte de la malla (ver `trees::plant_micro`).
+    let mut detail: Vec<crate::trees::Micro> = Vec::new();
     if t.is_real() && vs <= crate::trees::PLANT_MAX_VOXEL {
-        for j in 0..Q {
-            for i in 0..Q {
+        for j in 1..=N {
+            for i in 1..=N {
                 let k = (i + j * Q) as usize;
                 if !natural[k] || top[k] == i32::MIN || (top[k] as f32 + 1.0) * vs < 0.4 {
                     continue;
                 }
-                let mut m = [AIR; crate::trees::PLANT_SLOTS];
-                let n = crate::trees::ground_plant(surf[k], base.x + i - 1, base.y + j - 1, vs, &mut m);
-                if n > 0 {
-                    plants.push((k, top[k], m, n));
+                let (gx, gz) = (base.x + i - 1, base.y + j - 1);
+                if let Some(p) = crate::trees::ground_plant(surf[k], gx, gz, vs) {
+                    // Sin plantas bajo la copa de un árbol que llega hasta el suelo ni en un vóxel ocupado.
+                    crate::trees::plant_micro(&p, gx, gz, vs, (top[k] + 1) as f32 * vs, &mut detail);
                 }
             }
         }
     }
-    let tree_top = tree_top.max(plants.iter().map(|p| p.1 + p.3 as i32).max().unwrap_or(i32::MIN));
     let y0 = (tmin - 1).div_euclid(N);
     let y1 = tmax.max(edit_top).max(tree_top).div_euclid(N);
     // Origen de la malla de la columna: esquina inferior del chunk más bajo.
@@ -786,18 +825,6 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         for tr in &trees {
             solid += raster_tree(tr, lo, &top, &mut pad);
         }
-        for &(k, ty, m, n) in &plants {
-            for (d, &mat) in m.iter().take(n).enumerate() {
-                let y = ty + 1 + d as i32 - lo.y;
-                if (0..Q).contains(&y) {
-                    let idx = k + (y * Q * Q) as usize;
-                    if pad[idx] == AIR {
-                        pad[idx] = mat;
-                        solid += 1;
-                    }
-                }
-            }
-        }
         if any_edit {
             // Ediciones del propio chunk: se recorren todas.
             ls.for_each_in_chunk(ck, |idx, m| {
@@ -833,6 +860,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         out.append(&m);
         *mesh_ns += tm.elapsed().as_nanos() as u64;
     }
+    out.detail = detail;
     out
 }
 
