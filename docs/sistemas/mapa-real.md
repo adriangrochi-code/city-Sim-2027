@@ -38,6 +38,7 @@ la República)**, por sus servicios OGC en `mapas.ide.uy`:
 | Lagos y lagunas | `hidrografia:lago_laguna_a` | `biomas.bin` = 4, alturas |
 | Islas | `hidrografia:isla_a` | `biomas.bin` = 5, alturas |
 | Cerros y cuchillas | `ideuy:cerros_ide`, `ideuy:cuchillas_y_sierras` | `nombres.json` |
+| Monte nativo | Cartografía de Bosque Nativo 2021 (MGAP-DGF), servicio ArcGIS REST del SNIG `DGF/Monte_Nativo_2021`; áreas urbanizadas `ideuy:areas_urbanizadas_3` (IDE) | `bosque*.bin` (ver [vegetacion-historica.md](vegetacion-historica.md)) |
 
 - La hidrografía nacional es la cartografía **1:50.000**; en las zonas urbanas (Montevideo, Ciudad
   de la Costa, Las Piedras…) la capa nacional tiene huecos y los cubre la capa **urbana**, más
@@ -75,6 +76,8 @@ la República)**, por sus servicios OGC en `mapas.ide.uy`:
 | `assets/mapas/montevideo/contexto.bin` | Entorno de 25 km alrededor, cada 100 m (741 × 741, 1,1 MB) |
 | `assets/mapas/montevideo/biomas.bin` | Biomas oficiales en la grilla del mapa (1201 × 1201, `uint8`) |
 | `assets/mapas/montevideo/biomas_contexto.bin` | Biomas oficiales en la grilla del entorno (741 × 741) |
+| `assets/mapas/montevideo/bosque.bin`, `bosque_contexto.bin` | Monte nativo reconstruido para 1726: cobertura de copas `uint8` (valor / 255) en las dos grillas. Ver [vegetacion-historica.md](vegetacion-historica.md) |
+| `assets/mapas/montevideo/bosque_actual.bin` | Monte nativo de hoy (DGF 2021) en la grilla del mapa, solo de referencia |
 | `assets/mapas/montevideo/arroyos.json` | Cauces del mapa jugable (y 1 km alrededor), el más largo primero |
 | `assets/mapas/montevideo/arroyos_contexto.json` | Cauces del entorno con nombre o de más de 5 m de ancho (solo el motor) |
 | `assets/mapas/montevideo/nombres.json` | Arroyos, cerros, cuchillas e islas con nombre, para rótulos |
@@ -176,7 +179,8 @@ entorno (2430 km); 110 ha de playa y 666 ha de bañado dentro del mapa jugable.
   oficial más cercana con la distancia al agua; la franja de médanos (`dune_belt`) se multiplica
   por ese factor. Donde la costa no tiene playa (Ciudad Vieja, Cerro, bahía) la orilla es de
   piedra si es empinada o de barro si es llana.
-- Sin árboles en playas, bañados, bancos de arena ni lagunas.
+- Sin árboles en playas, bañados, bancos de arena ni lagunas. El monte ribereño, las especies,
+  las formas de los árboles y la flora baja están en [vegetacion-historica.md](vegetacion-historica.md).
 - El cauce de un arroyo que baja del nivel del río se pinta como arroyo (agua) y no como fondo
   del río.
 - Carga también `arroyos_contexto.json` y los nombres (`TerrainGen::arroyo_nombres`).

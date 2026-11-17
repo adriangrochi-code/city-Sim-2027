@@ -60,7 +60,20 @@ pub const COAST_ROCK: Mat = 50;
 pub const DUNE: Mat = 51;
 pub const STREAM: Mat = 52;
 pub const FOREST_FLOOR: Mat = 53;
-pub const COUNT: usize = 54;
+// Árboles nativos (ver docs/sistemas/vegetacion-historica.md).
+pub const LEAF_SAUCE: Mat = 54;
+pub const LEAF_ESPINILLO: Mat = 55;
+pub const CEIBO_FLOR: Mat = 56;
+pub const LEAF_TALA: Mat = 57;
+pub const TRUNK_GRAY: Mat = 58;
+// Flora baja (matas, juncos y flores; ver docs/sistemas/vegetacion-historica.md). La paleta del
+// render tiene 64 lugares: con estos quedan todos ocupados.
+pub const FLOR_AMARILLA: Mat = 59;
+pub const FLOR_VIOLETA: Mat = 60;
+pub const FLOR_BLANCA: Mat = 61;
+pub const PASTO_MATA: Mat = 62;
+pub const JUNCO: Mat = 63;
+pub const COUNT: usize = 64;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -117,7 +130,17 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [98, 92, 86],    // piedra de la costa
     [216, 200, 158], // médano
     [64, 82, 82],    // agua del arroyo
-    [86, 80, 52],    // hojarasca del monte
+    [90, 86, 54],    // hojarasca del monte
+    [112, 144, 62],  // hojas de sauce criollo (verde claro)
+    [118, 130, 70],  // hojas de espinillo (verde oliva, finas)
+    [176, 40, 38],   // flor de ceibo
+    [78, 96, 54],    // hojas de tala (verde grisáceo)
+    [112, 104, 92],  // corteza gris (ombú, sauce viejo)
+    [212, 184, 76],  // flor amarilla (senecio, margarita de campo, cola de zorro en flor)
+    [150, 118, 168], // flor violeta (macachín, cardo, camalote)
+    [232, 228, 212], // flor blanca (margarita, verbena blanca)
+    [146, 146, 84],  // mata de paja (flechilla, paja brava, espartillo)
+    [82, 104, 56],   // junco y totora
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)

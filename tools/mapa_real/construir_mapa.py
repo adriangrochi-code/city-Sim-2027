@@ -1075,6 +1075,8 @@ def hidrografia_ide(args, h, h_o, xs, xs_o):
           f"{len(relleno)} del relieve en los huecos", flush=True)
     principal += relleno
     principal.sort(key=lambda a: -largo(a[0]))
+    # Todos los cauces (también las cañadas del entorno) para calibrar el monte ribereño.
+    cauces_todos = [pts for pts, _, _ in principal + contexto]
     # En el entorno solo los cauces con nombre o anchos: los demás no se ven desde el mapa.
     contexto = [c for c in contexto if c[1] or max(p[2] for p in c[0]) >= 5.0]
     contexto.sort(key=lambda a: -largo(a[0]))
@@ -1124,9 +1126,220 @@ def hidrografia_ide(args, h, h_o, xs, xs_o):
     salida = {
         "arroyos": a_json(principal), "arroyos_contexto": a_json(contexto),
         "biomas": bio, "biomas_contexto": bio_o, "nombres": nombres, "conteo": conteo,
-        "mascaras": mk, "islas_manuales": [i[0] for i in manuales],
+        "mascaras": mk, "islas_manuales": [i[0] for i in manuales], "cauces_todos": cauces_todos,
     }
     return h, h_o, salida
+
+
+# --- Bosque nativo (MGAP-DGF, SNIG) y monte de 1726 ------------------------------------------
+# Cartografía de Bosque Nativo 2021 de la Dirección General Forestal (imágenes Sentinel), por el
+# servicio ArcGIS REST del SNIG. Solo monte nativo: no trae plantaciones de eucaliptos ni pinos.
+SNIG_BOSQUE = ("https://web.snig.gub.uy/arcgisserver/rest/services/DGF/Monte_Nativo_2021/MapServer/1/query"
+               "?where=1%3D1&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects"
+               "&outFields=OBJECTID,HA,Especie&outSR=4326&f=geojson&orderByFields=OBJECTID")
+# Áreas urbanizadas actuales (IDE): solo para dejarlas fuera de la calibración.
+CAPA_URBANA = "ideuy:areas_urbanizadas_3"
+# Clases del modelo del monte ribereño: distancia al borde del agua (m), ancho del cauce (m) y
+# altura sobre el agua del cauce (m). Ver docs/sistemas/vegetacion-historica.md.
+BOSQUE_DIST = [0, 15, 30, 50, 75, 105, 140, 190, 260, 350]
+BOSQUE_ANCHO = [0, 3, 5, 8, 14, 25, 1000]
+BOSQUE_SOBRE = [-1000, 1.5, 3, 5, 8, 1000]
+BOSQUE_DIST_MAX = 350.0      # más lejos de un cauce no hay monte ribereño en el modelo
+BOSQUE_MIN_CELDAS = 150      # celdas de 20 m (6 ha) para que una clase tenga dato propio
+URBANO_MARGEN_M = 300.0      # calibración: solo a más de esto de la ciudad actual
+BOSQUE_GANANCIA = 2.5        # monte ribereño de 1726 frente al rural de hoy (leña, quemas, ganado)
+BOSQUE_TOPE = 0.9            # ni el monte más cerrado tiene copas en el 100 % de las celdas
+
+
+def bajar_bosque(cache):
+    """Polígonos de monte nativo en el mapa y su entorno, de a 1000 (el máximo del servicio es
+    2000). Se guarda como GeoJSON en la caché."""
+    ruta = os.path.join(cache, f"snig_monte_nativo_2021_{int(OUTER)}.geojson")
+    if os.path.exists(ruta):
+        with open(ruta) as f:
+            return json.load(f)["features"]
+    lo, la_s, le, la_n = bbox_geo()
+    feats, inicio, pagina = [], 0, 1000
+    while True:
+        url = (f"{SNIG_BOSQUE}&geometry={lo:.5f},{la_s:.5f},{le:.5f},{la_n:.5f}"
+               f"&resultOffset={inicio}&resultRecordCount={pagina}")
+        fs = json.loads(_bajar(url, timeout=180)).get("features", [])
+        feats += fs
+        print(f"    {len(feats)} polígonos", flush=True)
+        if len(fs) < pagina:
+            break
+        inicio += len(fs)
+    with open(ruta, "w") as f:
+        json.dump({"type": "FeatureCollection", "features": feats}, f)
+    return feats
+
+
+def cobertura(poligonos, desde, paso, n, sub):
+    """Fracción (0..1) de cada celda cubierta por los polígonos: se pintan en una grilla `sub`
+    veces más fina y se promedia por bloques."""
+    img = rasterizar(poligonos, desde - paso / 2 + paso / sub / 2, paso / sub, n * sub, borde=False)
+    a = np.asarray(img) > 0
+    return a.reshape(n, sub, n, sub).mean(axis=(1, 3), dtype=np.float32)
+
+
+def distancia_cauces(lista, h, desde, paso, d_max):
+    """Para cada celda: distancia (m) al eje del cauce más cercano, ancho del agua de ese cauce
+    (m) y altura de su agua (m). Los cauces se dibujan en la grilla (los anchos encima) y la
+    distancia se propaga con una transformada de chaflán de 8 vecinos hasta d_max."""
+    from PIL import ImageDraw
+    n = h.shape[0]
+    img = Image.new("F", (n, n), 0.0)
+    d = ImageDraw.Draw(img)
+    segs = sorted((((a[2] + b[2]) / 2), a, b) for pts in lista for a, b in zip(pts[:-1], pts[1:]))
+    for w, a, b in segs:
+        d.line([((a[0] - desde) / paso, (a[1] - desde) / paso), ((b[0] - desde) / paso, (b[1] - desde) / paso)],
+               fill=float(w), width=1)
+    W = np.asarray(img, dtype=np.float32).copy()
+    sem = W > 0
+    D = np.where(sem, 0.0, np.inf).astype(np.float32)
+    H = np.where(sem, h, 0.0).astype(np.float32)
+    for _ in range(int(math.ceil(d_max / paso)) + 1):
+        for di, dj in VEC:
+            c = paso * (math.sqrt(2) if di and dj else 1.0)
+            a_i, b_i = slice(max(di, 0), n + min(di, 0)), slice(max(-di, 0), n + min(-di, 0))
+            a_j, b_j = slice(max(dj, 0), n + min(dj, 0)), slice(max(-dj, 0), n + min(-dj, 0))
+            cand = D[a_i, a_j] + c
+            dst = D[b_i, b_j]
+            m = cand < dst
+            dst[m] = cand[m]
+            W[b_i, b_j][m] = W[a_i, a_j][m]
+            H[b_i, b_j][m] = H[a_i, a_j][m]
+    return D, W, H
+
+
+def clases_bosque(D, W, sobre):
+    """Clase de cada celda (distancia al borde del agua × ancho × altura sobre el agua); -1
+    lejos de los cauces."""
+    borde = np.maximum(D - W / 2, 0.0)
+    kd = np.digitize(borde, BOSQUE_DIST) - 1
+    kw = np.digitize(W, BOSQUE_ANCHO) - 1
+    ks = np.digitize(sobre, BOSQUE_SOBRE) - 1
+    nw, ns = len(BOSQUE_ANCHO) - 1, len(BOSQUE_SOBRE) - 1
+    k = (kd * nw + kw) * ns + ks
+    return np.where(np.isfinite(D) & (borde < BOSQUE_DIST_MAX), k, -1)
+
+
+def tabla_bosque(k, f):
+    """Cobertura media de monte por clase. Las clases con pocas celdas toman el promedio de sus
+    vecinas: primero sin distinguir la altura sobre el agua, después tampoco el ancho."""
+    nd, nw, ns = len(BOSQUE_DIST) - 1, len(BOSQUE_ANCHO) - 1, len(BOSQUE_SOBRE) - 1
+    cnt = np.bincount(k, minlength=nd * nw * ns).astype(np.float64).reshape(nd, nw, ns)
+    suma = np.bincount(k, weights=f, minlength=nd * nw * ns).reshape(nd, nw, ns)
+    media = suma / np.maximum(cnt, 1)
+    c2, s2 = cnt.sum(axis=2), suma.sum(axis=2)
+    c1, s1 = cnt.sum(axis=(1, 2)), suma.sum(axis=(1, 2))
+    m2 = (s2 / np.maximum(c2, 1))[:, :, None].repeat(ns, axis=2)
+    m1 = (s1 / np.maximum(c1, 1))[:, None, None].repeat(nw, axis=1).repeat(ns, axis=2)
+    pocas2 = (c2 < BOSQUE_MIN_CELDAS)[:, :, None].repeat(ns, axis=2)
+    media = np.where(cnt >= BOSQUE_MIN_CELDAS, media, np.where(pocas2, m1, m2))
+    return media, cnt
+
+
+def bosque_nativo(args, h, mdt, hidro):
+    """Monte nativo de hoy (cartografía DGF 2021) y reconstrucción del de 1726 en las dos
+    grillas. Devuelve los rasters (0..1) y un resumen para meta.json y la documentación."""
+    print("Bajando el bosque nativo 2021 (MGAP-DGF, SNIG)…", flush=True)
+    feats = bajar_bosque(args.cache)
+    polis = [p for f in feats for p in _poligonos(f["geometry"])]
+    urb = bajar_capa_wfs(args.cache, CAPA_URBANA)
+    polis_u = [p for f in urb for p in _poligonos(f["geometry"])]
+    print(f"  {len(feats)} polígonos de monte nativo, {len(urb)} áreas urbanizadas", flush=True)
+
+    # 1. Calibración en todo el entorno (74 km de lado) a 20 m, fuera de las ciudades actuales.
+    n_c = int(round((MAP_SIZE + 2 * OUTER) / STEP)) + 1
+    xs_c = -OUTER + STEP * np.arange(n_c)
+    h_c = muestrear_mdt(mdt, xs_c, xs_c).astype(np.float32)
+    agua_c = h_c <= 0.3
+    f_c = cobertura(polis, -OUTER, STEP, n_c, 2)
+    u_c = dilatar(cobertura(polis_u, -OUTER, STEP, n_c, 1) > 0.5, int(URBANO_MARGEN_M / STEP))
+    D, W, H = distancia_cauces(hidro["cauces_todos"], h_c, -OUTER, STEP, BOSQUE_DIST_MAX + 60.0)
+    k_c = clases_bosque(D, W, h_c - H)
+    rural = ~agua_c & ~u_c
+    cal = rural & (k_c >= 0)
+    media, cnt = tabla_bosque(k_c[cal], f_c[cal])
+    # El monte de los cauces es lo que sobra sobre el fondo (montes lejos de todo cauce: serranos,
+    # de parque, costeros), que no se extrapola.
+    lejos = rural & (k_c < 0)
+    fondo = float(f_c[lejos].mean())
+    pot = np.clip((media - fondo) * BOSQUE_GANANCIA, 0.0, BOSQUE_TOPE).ravel()
+    print(f"  calibración: {rural.sum() * STEP * STEP / 1e4:.0f} ha rurales, monte "
+          f"{(f_c * rural).sum() * STEP * STEP / 1e4:.0f} ha ({(f_c[rural]).mean() * 100:.1f} %); "
+          f"lejos de los cauces {f_c[lejos].mean() * 100:.2f} %", flush=True)
+
+    def reconstruir(f_hoy, k, agua):
+        b = np.maximum(f_hoy, np.where(k >= 0, pot[np.maximum(k, 0)], 0.0))
+        return np.where(agua, 0.0, b).astype(np.float32)
+
+    b_c = reconstruir(f_c, k_c, agua_c)
+    # Entorno (100 m): promedio de los bloques de 5 × 5 celdas de 20 m centrados en cada muestra.
+    r = int(round(OUTER_STEP / STEP))
+    pad = np.pad(b_c, r // 2, mode="edge")
+    n_o = (n_c - 1) // r + 1
+    b_o = pad[:n_o * r, :n_o * r].reshape(n_o, r, n_o, r).mean(axis=(1, 3))
+    f_o = np.pad(f_c, r // 2, mode="edge")[:n_o * r, :n_o * r].reshape(n_o, r, n_o, r).mean(axis=(1, 3))
+
+    # 2. Mapa jugable: el relieve ya limpio, los cauces del juego (con los entubados) y biomas.
+    n = h.shape[0]
+    f_m = cobertura(polis, 0.0, STEP, n, 4)
+    Dm, Wm, Hm = distancia_cauces([[tuple(p) for p in a] for a in hidro["arroyos"]["arroyos"]], h, 0.0, STEP,
+                                  BOSQUE_DIST_MAX + 60.0)
+    k_m = clases_bosque(Dm, Wm, h - Hm)
+    bio = hidro["biomas"]
+    agua_m = (h <= 0.3) | np.isin(bio, [BIOMA_PLAYA, BIOMA_BANCO, BIOMA_LAGUNA])
+    b_m = reconstruir(f_m, k_m, agua_m)
+    u_m = cobertura(polis_u, 0.0, STEP, n, 1) > 0.5
+    ha = STEP * STEP / 1e4
+    tierra = ~agua_m
+    resumen = {
+        "monte_hoy_ha": round(float((f_m * tierra).sum() * ha)),
+        "monte_1726_ha": round(float((b_m * tierra).sum() * ha)),
+        "monte_1726_en_la_ciudad_actual_ha": round(float((b_m * (tierra & u_m)).sum() * ha)),
+        "monte_hoy_en_la_ciudad_actual_ha": round(float((f_m * (tierra & u_m)).sum() * ha)),
+        "tierra_ha": round(float(tierra.sum() * ha)),
+        "poligonos_dgf": len(feats),
+        "calibracion_rural_ha": round(float(rural.sum() * ha)),
+        "calibracion_monte_rural_pct": round(float(f_c[rural].mean() * 100), 2),
+        "fondo_lejos_de_cauces_pct": round(fondo * 100, 2),
+    }
+    # Perfil (para la documentación): cobertura de hoy y de 1726 por distancia y ancho.
+    nd, nw, ns = len(BOSQUE_DIST) - 1, len(BOSQUE_ANCHO) - 1, len(BOSQUE_SOBRE) - 1
+    perfil = []
+    for iw in range(nw):
+        fila = []
+        for idd in range(nd):
+            c = cnt[idd, iw, :]
+            hoy = float((media[idd, iw, :] * c).sum() / max(c.sum(), 1))
+            fila.append([round(hoy, 3), round(float(np.clip((hoy - fondo) * BOSQUE_GANANCIA, 0, BOSQUE_TOPE)), 3), int(c.sum())])
+        perfil.append({"ancho_m": [BOSQUE_ANCHO[iw], BOSQUE_ANCHO[iw + 1]], "por_distancia": fila})
+    # Y por altura sobre el agua, a menos de 50 m del borde.
+    sobre = []
+    for iw in range(nw):
+        c = cnt[:3, iw, :].sum(axis=0)
+        m = (media[:3, iw, :] * cnt[:3, iw, :]).sum(axis=0) / np.maximum(c, 1)
+        sobre.append({"ancho_m": [BOSQUE_ANCHO[iw], BOSQUE_ANCHO[iw + 1]],
+                      "por_altura": [[round(float(a), 3), int(b)] for a, b in zip(m, c)]})
+    resumen["perfil_altura"] = {"alturas_m": BOSQUE_SOBRE[1:-1], "filas": sobre,
+                                "nota": "[cobertura rural de hoy a menos de 50 m del agua, celdas]"}
+    for fila in sobre:
+        print(f"  ancho {fila['ancho_m']} por altura: " + " ".join(f"{a:.2f}({b})" for a, b in fila["por_altura"]), flush=True)
+    resumen["perfil"] = {"distancias_m": BOSQUE_DIST, "filas": perfil,
+                         "nota": "[cobertura rural de hoy, cobertura de 1726, celdas de 20 m]"}
+    for k, v in resumen.items():
+        if not k.startswith("perfil"):
+            print(f"  {k}: {v}", flush=True)
+    for fila in perfil:
+        print(f"  ancho {fila['ancho_m']}: " + " ".join(f"{a:.2f}/{b:.2f}" for a, b, _ in fila["por_distancia"]), flush=True)
+    return {"main": b_m, "ctx": b_o, "hoy": f_m, "hoy_ctx": f_o, "urbano": u_m, "resumen": resumen}
+
+
+def guardar_u8(ruta, v):
+    with open(ruta, "wb") as f:
+        f.write(np.clip(np.round(v * 255.0), 0, 255).astype(np.uint8).tobytes())
 
 
 def main():
@@ -1136,10 +1349,17 @@ def main():
     ap.add_argument("--hidrografia", choices=["ide", "relieve"], default=None,
                     help="arroyos, playas, bañados, lagunas e islas de la IDE (por omisión con --fuente ide) "
                          "o arroyos calculados del relieve")
+    ap.add_argument("--bosque", choices=["dgf", "no"], default=None,
+                    help="monte nativo (cartografía DGF 2021 por el SNIG) y su reconstrucción de 1726 "
+                         "(por omisión con la hidrografía de la IDE); 'no' deja los bosque*.bin como están")
     ap.add_argument("--salida", default=os.path.join(os.path.dirname(__file__), "..", "..", "assets", "mapas", "montevideo"))
     args = ap.parse_args()
     if args.hidrografia is None:
         args.hidrografia = "ide" if args.fuente == "ide" else "relieve"
+    if args.bosque is None:
+        args.bosque = "dgf" if args.fuente == "ide" and args.hidrografia == "ide" else "no"
+    if args.bosque == "dgf" and (args.fuente != "ide" or args.hidrografia != "ide"):
+        ap.error("--bosque dgf necesita --fuente ide y --hidrografia ide")
     os.makedirs(args.cache, exist_ok=True)
     os.makedirs(args.salida, exist_ok=True)
 
@@ -1204,6 +1424,15 @@ def main():
             fuentes.append({"capa": "Renare_Coneat", "servicio": CONEAT_URL, "uso": "rocosidad (afloramientos)"})
         except Exception as e:
             print(f"  sin CONEAT: {e}", flush=True)
+    bosque = None
+    if args.bosque == "dgf":
+        bosque = bosque_nativo(args, h, mdt, hidro)
+        atribucion += (" Monte nativo: Cartografía de Bosque Nativo 2021, Dirección General Forestal (MGAP),"
+                       " servicio del SNIG; reconstrucción de 1726 propia (docs/sistemas/vegetacion-historica.md).")
+        fuentes.append({"capa": "DGF/Monte_Nativo_2021 (capa 1, Monte Nativo)",
+                        "servicio": "ArcGIS REST " + SNIG_BOSQUE.split("?")[0], "uso": "bosque"})
+        fuentes.append({"capa": CAPA_URBANA, "servicio": "WFS " + IDE_WFS.split("?")[0],
+                        "uso": "bosque (excluir la ciudad actual de la calibración)"})
     atribucion += " Ver docs/sistemas/mapa-real.md."
     print(f"  {len(polis)} arroyos en el mapa", flush=True)
 
@@ -1236,6 +1465,19 @@ def main():
                                 "sites/agencia-gobierno-electronico-sociedad-informacion-conocimiento/files/documentos/publicaciones/licencia_de_datos_abiertos_0.pdf")
         meta["conteo_objetos_ide"] = hidro["conteo"]
         meta["islas_a_mano"] = hidro["islas_manuales"]
+    if bosque:
+        meta["bosque"] = {
+            "archivo": "bosque.bin", "archivo_entorno": "bosque_contexto.bin", "archivo_actual": "bosque_actual.bin",
+            "codificacion": "uint8, misma grilla y orden que altura.bin / contexto.bin; cobertura de copas = valor / 255",
+            "bosque.bin": "monte nativo reconstruido para 1726 (lo usa el motor)",
+            "bosque_actual.bin": "monte nativo de hoy (cartografía DGF 2021), solo como referencia",
+            "modelo": {"ganancia": BOSQUE_GANANCIA, "tope": BOSQUE_TOPE, "distancia_max_m": BOSQUE_DIST_MAX,
+                       "margen_urbano_m": URBANO_MARGEN_M},
+            **bosque["resumen"],
+        }
+        guardar_u8(os.path.join(args.salida, "bosque.bin"), bosque["main"])
+        guardar_u8(os.path.join(args.salida, "bosque_contexto.bin"), bosque["ctx"])
+        guardar_u8(os.path.join(args.salida, "bosque_actual.bin"), bosque["hoy"])
     guardar_u16(os.path.join(args.salida, "altura.bin"), h)
     guardar_u16(os.path.join(args.salida, "contexto.bin"), h_o)
     if hidro:
@@ -1280,7 +1522,19 @@ def main():
     d.ellipse([sitio[1] / STEP - 5, sitio[2] / STEP - 5, sitio[1] / STEP + 5, sitio[2] / STEP + 5], outline=(200, 0, 0), width=2)
     previa = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "capturas", "mapa-real-relieve.jpg")
     img.convert("RGB").save(previa, quality=85)
-    print(json.dumps({k: v for k, v in meta.items() if k not in ("fuentes",)}, ensure_ascii=False, indent=2))
+    if bosque:
+        # Vista previa del monte: el de hoy en verde oscuro, lo que se agrega para 1726 en verde
+        # claro (más intenso cuanto más cerrado) y la ciudad actual en gris.
+        rgb = np.stack([0.62 + 0.25 * gris, 0.66 + 0.22 * gris, 0.52 + 0.2 * gris], axis=-1)
+        rgb[bosque["urbano"]] = rgb[bosque["urbano"]] * 0.8 + 0.12
+        nuevo = np.clip(bosque["main"] - bosque["hoy"], 0, 1)[..., None]
+        rgb = rgb * (1 - nuevo) + nuevo * np.array([0.35, 0.62, 0.25])
+        hoy = np.clip(bosque["hoy"] * 1.5, 0, 1)[..., None]
+        rgb = rgb * (1 - hoy) + hoy * np.array([0.05, 0.30, 0.08])
+        rgb[h <= 0.3] = (0.45, 0.55, 0.70)
+        Image.fromarray((np.clip(rgb, 0, 1) * 255).astype(np.uint8)).save(
+            os.path.join(os.path.dirname(__file__), "..", "..", "docs", "capturas", "vegetacion-mapa.jpg"), quality=85)
+    print(json.dumps({k: v for k, v in meta.items() if k not in ("fuentes", "bosque")}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

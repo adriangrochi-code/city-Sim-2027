@@ -3,12 +3,14 @@
 //!   `assets/mapas/montevideo/` (24 × 24 km cada 20 m, más 25 km de entorno cada 100 m), los
 //!   arroyos oficiales de la IDE Uruguay y biomas de la época de la fundación (pradera, monte
 //!   ribereño, bañados, playas, médanos y puntas de piedra). Playas, bañados, bancos de arena,
-//!   lagunas e islas vienen de la hidrografía oficial (`biomas.bin`); el resto es heurístico.
-//!   Ver `docs/sistemas/mapa-real.md`.
+//!   lagunas e islas vienen de la hidrografía oficial (`biomas.bin`); el monte nativo, de la
+//!   cartografía forestal reconstruida para 1726 (`bosque.bin`); el resto es heurístico.
+//!   Ver `docs/sistemas/mapa-real.md` y `docs/sistemas/vegetacion-historica.md`.
 //! - **Ficticio** ([`TerrainGen::new`]): puerto directo de `scripts/world/terrain_gen.gd`, usado
 //!   por el sandbox, el banco de pruebas y las pruebas.
 
 use crate::palette::*;
+use crate::trees::{Species, TreeSpec, VARIANTS};
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use glam::Vec2;
 use std::collections::HashMap;
@@ -57,6 +59,10 @@ const ARROYOS_CTX_JSON: &str = include_str!("../../assets/mapas/montevideo/arroy
 const BIOMAS_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/biomas.bin");
 const BIOMAS_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/biomas_contexto.bin");
 const META_JSON: &str = include_str!("../../assets/mapas/montevideo/meta.json");
+/// Monte nativo reconstruido para 1726 (cobertura de copas 0..255, misma grilla que las
+/// alturas). Ver `docs/sistemas/vegetacion-historica.md`.
+const BOSQUE_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/bosque.bin");
+const BOSQUE_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/bosque_contexto.bin");
 
 /// Códigos de `biomas.bin`.
 pub const BIO_NADA: u8 = 0;
@@ -101,6 +107,11 @@ impl Grid {
         assert_eq!(bytes.len(), n * n * 2, "mapa real incompleto");
         let v = bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]]) as f32 / 200.0 - 50.0).collect();
         Grid { v, n, step, from }
+    }
+    /// Valores de un byte (0..255) llevados a 0..1.
+    fn from_u8(bytes: &[u8], n: usize, step: f32, from: f32) -> Grid {
+        assert_eq!(bytes.len(), n * n, "raster incompleto");
+        Grid { v: bytes.iter().map(|&b| b as f32 / 255.0).collect(), n, step, from }
     }
     #[inline]
     fn at(&self, i: i32, j: i32) -> f32 {
@@ -186,6 +197,9 @@ struct RealMap {
     /// Distancia a la playa oficial más cercana (m).
     beach_main: Grid,
     beach_ctx: Grid,
+    /// Cobertura del monte nativo de 1726 (0..1).
+    forest_main: Grid,
+    forest_ctx: Grid,
 }
 
 impl RealMap {
@@ -321,16 +335,54 @@ fn hashf(x: i32, z: i32, salt: u32) -> f32 {
     (hash2(x, z, salt) & 0xffff) as f32 / 65535.0
 }
 
-/// Un árbol del paisaje (ver [`TerrainGen::trees_in`]).
+/// Un árbol del paisaje (ver [`TerrainGen::trees_in`]); su forma sale de [`crate::trees::shape`].
 #[derive(Clone, Copy, Debug)]
 pub struct Tree {
     pub x: f32,
     pub z: f32,
-    /// Altura de la copa (m sobre el suelo) y radio de la copa (m).
+    /// Altura total (m sobre el suelo), radio de la copa (m) y radio del tronco al pie (m).
     pub height: f32,
     pub radius: f32,
     pub trunk: f32,
-    pub leaf: Mat,
+    pub species: Species,
+    /// Variante de forma (0..[`VARIANTS`]) y semilla del azar de la forma.
+    pub variant: u8,
+    pub seed: u32,
+}
+
+impl Tree {
+    pub fn spec(&self) -> TreeSpec {
+        TreeSpec { species: self.species, variant: self.variant, height: self.height, radius: self.radius, trunk: self.trunk, seed: self.seed }
+    }
+}
+
+/// Medidas de cada especie: altura (m), radio de copa (m) y radio del tronco (m), de un árbol
+/// adulto común. Ver docs/sistemas/vegetacion-historica.md.
+fn species_size(s: Species) -> (f32, f32, f32) {
+    match s {
+        Species::Sauce => (10.0, 3.2, 0.32),
+        Species::Sarandi => (3.0, 1.8, 0.09),
+        Species::Ceibo => (6.5, 3.4, 0.3),
+        Species::Coronilla => (6.0, 2.8, 0.25),
+        Species::Tala => (7.5, 3.8, 0.28),
+        Species::Canelon => (8.5, 3.0, 0.25),
+        Species::Espinillo => (4.0, 2.6, 0.14),
+        Species::Ombu => (11.0, 6.2, 1.2),
+        Species::Molle => (4.0, 2.0, 0.14),
+    }
+}
+
+/// Elige una especie de una lista de (especie, peso) con `u` en 0..1.
+fn pick(u: f32, opts: &[(Species, f32)]) -> Species {
+    let total: f32 = opts.iter().map(|o| o.1).sum();
+    let mut acc = 0.0;
+    for &(s, w) in opts {
+        acc += w / total;
+        if u < acc {
+            return s;
+        }
+    }
+    opts[opts.len() - 1].0
 }
 
 /// Lado de la celda de la grilla de árboles (m).
@@ -422,7 +474,20 @@ impl TerrainGen {
         let is_beach = |b: &u8| *b == BIO_PLAYA || *b == BIO_BANCO;
         let beach_main = main.distance_to(&BIOMAS_BIN.iter().map(is_beach).collect::<Vec<_>>());
         let beach_ctx = ctx.distance_to(&BIOMAS_CTX_BIN.iter().map(is_beach).collect::<Vec<_>>());
-        t.real = Some(Box::new(RealMap { main, ctx, sea_main, sea_ctx, bio_main: BIOMAS_BIN, bio_ctx: BIOMAS_CTX_BIN, beach_main, beach_ctx }));
+        let forest_main = Grid::from_u8(BOSQUE_BIN, main_n, main_step, 0.0);
+        let forest_ctx = Grid::from_u8(BOSQUE_CTX_BIN, ctx_n, ctx_step, ctx_from);
+        t.real = Some(Box::new(RealMap {
+            main,
+            ctx,
+            sea_main,
+            sea_ctx,
+            bio_main: BIOMAS_BIN,
+            bio_ctx: BIOMAS_CTX_BIN,
+            beach_main,
+            beach_ctx,
+            forest_main,
+            forest_ctx,
+        }));
         for txt in [ARROYOS_JSON, ARROYOS_CTX_JSON] {
             let (arroyos, names) = parse_arroyos(txt);
             for (a, name) in arroyos.into_iter().zip(names) {
@@ -459,6 +524,47 @@ impl TerrainGen {
             r.beach_main.linear(x, z)
         };
         1.0 - smoothstep(80.0, 350.0, bd - self.sea_distance(x, z))
+    }
+
+    /// Cobertura de copas del monte nativo de 1726 (0..1) según `bosque.bin`: dentro del mapa la
+    /// grilla de 20 m, afuera la de 100 m, con una transición en el borde. 0 en el mapa ficticio.
+    pub fn forest_cover(&self, x: f32, z: f32) -> f32 {
+        let Some(r) = &self.real else { return 0.0 };
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        if edge <= 0.0 {
+            r.forest_ctx.linear(x, z)
+        } else if edge < 400.0 {
+            let w = smoothstep(0.0, 400.0, edge);
+            r.forest_ctx.linear(x, z) * (1.0 - w) + r.forest_main.linear(x, z) * w
+        } else {
+            r.forest_main.linear(x, z)
+        }
+    }
+
+    /// ¿Dentro del monte? (0..1). La cobertura del raster es una fracción (un 30 % de copas
+    /// en la celda); en el terreno se vuelve manchas de monte cerrado de unos 100 m con claros
+    /// entre ellas: hay monte donde un ruido de manchas queda por debajo de la cobertura.
+    pub fn forest_density(&self, x: f32, z: f32) -> f32 {
+        let c = self.forest_cover(x, z);
+        if c < 0.015 {
+            return 0.0;
+        }
+        let u = 0.5 + self.n_hills.get_noise_2d(x * 22.0, z * 22.0) * 0.95 + self.n_detail.get_noise_2d(x * 4.0, z * 4.0) * 0.12;
+        smoothstep(-0.08, 0.08, c - u.clamp(0.02, 0.98))
+    }
+
+    /// Franja de la orilla (0..1): sauces, sarandíes y ceibos sueltos pegados al agua, también
+    /// en las cañadas donde no hay monte. Son franjas de pocos metros, más angostas que lo que
+    /// distingue la cartografía satelital, y por eso salen de la bibliografía y no del raster.
+    /// `edge`: distancia al borde del agua (m); `hw`: medio ancho del cauce (m).
+    pub fn bank_fringe(&self, x: f32, z: f32, edge: f32, hw: f32) -> f32 {
+        let w = 2.5 + hw * 1.2;
+        if !(0.7..w).contains(&edge) {
+            return 0.0;
+        }
+        // Tramos con y sin franja (la mitad, aprox.), más seguidos en los arroyos anchos.
+        let n = self.n_hills.get_noise_2d(x * 30.0 + 517.0, z * 30.0);
+        smoothstep(-0.1, 0.1, n + 0.05 + hw * 0.04) * (1.0 - smoothstep(w * 0.6, w, edge))
     }
 
     pub fn is_real(&self) -> bool {
@@ -764,27 +870,36 @@ impl TerrainGen {
         if slope < 0.05 && h < 5.0 + blot * 2.0 && (da < 25.0 + hw * 22.0 || (da < 700.0 && hw > 5.0 && sd < 350.0)) && fine > -0.35 {
             return MARSH;
         }
-        // Monte ribereño: suelo de hojarasca bajo los árboles.
-        if da < 4.0 + hw * 4.5 + blot * (2.0 + hw * 1.5) {
+        // Monte nativo (bosque.bin): suelo de hojarasca bajo el monte cerrado; en el borde de
+        // las manchas, pasto verde a la sombra entre la hojarasca.
+        let grain = self.n_detail.get_noise_2d(x * 14.0, z * 14.0) * 0.18;
+        let dens = self.forest_density(x, z);
+        if dens > 0.78 + fine * 0.15 {
             return FOREST_FLOOR;
         }
-        // Pradera: más verde y húmeda en los bajos, seca y amarillenta en las cuchillas.
+        if dens > 0.45 + fine * 0.2 {
+            return GRASS_LUSH;
+        }
+        // Pradera: más verde y húmeda en los bajos, seca y amarillenta en las cuchillas, en las
+        // laderas y en la franja costera (suelos arenosos y viento salino).
         // Grano fino (metros) para que los bordes de las manchas no sean líneas limpias.
-        let grain = self.n_detail.get_noise_2d(x * 14.0, z * 14.0) * 0.18;
-        let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain;
+        let coast = (1.0 - sd / 900.0).max(0.0) * 0.35;
+        let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain + coast + slope * 0.6;
         if dry > 0.45 {
             GRASS_DRY
-        } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05) || dry < -0.45 {
+        } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05) || dry < -0.45 || dens > 0.2 {
             GRASS_LUSH
         } else {
             GRASS
         }
     }
 
-    /// Árboles con el tronco en el rectángulo `[x0, x1) × [z0, z1)` (en metros), según el bioma:
-    /// monte cerrado en las orillas de los arroyos, algún coronilla y tala cerca de la costa, y
-    /// árboles sueltos en la pradera (ombúes, talas). Determinista: el mismo lugar da el mismo
-    /// árbol en todos los niveles de detalle. Solo el mapa real tiene árboles.
+    /// Árboles con el tronco en el rectángulo `[x0, x1) × [z0, z1)` (en metros): el monte nativo
+    /// de 1726 (`bosque.bin`, en manchas), la franja de sauces, sarandíes y ceibos de las
+    /// orillas, el matorral costero y serrano, y árboles sueltos en la pradera (ombúes, talas,
+    /// espinillos). La especie depende de la distancia al agua, la pendiente y lo cerrado del
+    /// monte; la forma, de la especie y de una de sus variantes. Determinista: el mismo lugar
+    /// da el mismo árbol en todos los niveles de detalle. Solo el mapa real tiene árboles.
     pub fn trees_in(&self, x0: f32, z0: f32, x1: f32, z1: f32, out: &mut Vec<Tree>) {
         if self.real.is_none() {
             return;
@@ -799,11 +914,20 @@ impl TerrainGen {
                     continue;
                 }
                 let roll = hashf(i, j, 3);
-                // Descarte barato antes de calcular alturas: casi toda la pradera no tiene árboles.
+                // Descarte barato: casi toda la pradera no tiene árboles.
+                if roll >= 0.88 {
+                    continue;
+                }
+                let dens = self.forest_density(x, z);
                 let (da, hw) = self.arroyo_query(x, z);
-                let (dense, open) = (2.0 + hw * 4.0, 4.0 + hw * 7.5);
-                let p_max = if da < open { 0.8 } else { 0.025 };
-                if roll >= p_max {
+                let edge = da - hw;
+                if edge < 0.7 {
+                    continue; // en el agua
+                }
+                let fringe = self.bank_fringe(x, z, edge, hw);
+                let p_forest = 0.86 * dens;
+                let p_fringe = 0.4 * fringe;
+                if roll >= p_forest.max(p_fringe).max(0.025) {
                     continue;
                 }
                 let h = self.height(x, z);
@@ -814,41 +938,73 @@ impl TerrainGen {
                 if matches!(self.official_biome(x, z), BIO_PLAYA | BIO_BANADO | BIO_BANCO | BIO_LAGUNA) {
                     continue;
                 }
-                let (p, kind) = if da < hw + 2.0 {
-                    (0.0, 0)
-                } else if da < dense {
-                    (0.8, 1) // monte ribereño cerrado
-                } else if da < open {
-                    (0.3, 1)
-                } else {
-                    let sd = self.sea_distance(x, z);
-                    if sd < 110.0 || sd < self.dune_belt(x, z) {
-                        (0.0, 0) // playa y médanos: arena suelta, sin árboles
-                    } else if sd < 400.0 {
-                        (0.01, 2) // matorral costero
-                    } else if h > 100.0 {
-                        (0.02, 2) // espinillos en el Cerro
+                let u = hashf(i, j, 5);
+                // Pendiente aproximada (quebradas y laderas del Cerro).
+                let slope = ((self.height(x + 3.0, z) - self.height(x - 3.0, z)).abs() + (self.height(x, z + 3.0) - self.height(x, z - 3.0)).abs()) / 6.0;
+                use Species::*;
+                let species = if roll < p_forest {
+                    if edge < 3.0 + hw * 0.6 {
+                        // Pegado al agua: sauce criollo, sarandí y ceibo.
+                        pick(u, &[(Sauce, 4.0), (Sarandi, 3.0), (Ceibo, 3.0)])
+                    } else if slope > 0.25 {
+                        // Monte de quebrada y de ladera.
+                        pick(u, &[(Coronilla, 3.5), (Molle, 2.5), (Tala, 3.0), (Canelon, 1.0), (Espinillo, 1.0)])
+                    } else if dens > 0.85 && edge < 45.0 {
+                        // Monte cerrado de la galería.
+                        pick(u, &[(Canelon, 2.5), (Tala, 2.5), (Coronilla, 2.5), (Ceibo, 1.0), (Sauce, 0.8), (Molle, 0.7)])
                     } else {
-                        (0.0035, 3) // árbol suelto en la pradera
+                        // Borde exterior del monte, más seco y abierto.
+                        pick(u, &[(Coronilla, 3.0), (Tala, 3.5), (Espinillo, 2.5), (Molle, 1.5)])
                     }
+                } else if roll < p_fringe {
+                    pick(u, &[(Sauce, 3.0), (Sarandi, 4.5), (Ceibo, 2.5)])
+                } else {
+                    // Lo suelto (pradera, costa, serranía), lejos de las orillas.
+                    if edge < 8.0 + hw {
+                        continue;
+                    }
+                    let sd = self.sea_distance(x, z);
+                    let (p, s) = if sd < 110.0 || sd < self.dune_belt(x, z) {
+                        (0.0, Tala) // playa y médanos: arena suelta, sin árboles
+                    } else if sd < 400.0 {
+                        (0.01, pick(u, &[(Coronilla, 3.0), (Molle, 3.0), (Tala, 2.0)])) // matorral costero
+                    } else if h > 100.0 || slope > 0.35 {
+                        (0.02, pick(u, &[(Espinillo, 3.0), (Coronilla, 2.0), (Molle, 3.0)])) // serranía del Cerro
+                    } else {
+                        (0.0035, pick(u, &[(Ombu, 4.5), (Tala, 3.0), (Espinillo, 2.5)])) // árbol suelto en la pradera
+                    };
+                    if roll >= p {
+                        continue;
+                    }
+                    s
                 };
-                if roll >= p {
-                    continue;
-                }
+                let variant = (hash2(i, j, 7) % VARIANTS as u32) as u8;
+                let (bh, br, bt) = species_size(species);
+                // Tamaño: la variante 3 es joven (salvo el sauce, que es viejo y ancho).
+                let age = if variant == 3 && species != Sauce { 0.62 } else { 1.0 };
                 let r2 = hashf(i, j, 4);
-                let t = match kind {
-                    1 => Tree { x, z, height: 5.5 + r2 * 4.0, radius: 2.4 + r2 * 1.6, trunk: 0.35, leaf: if hashf(i, j, 5) < 0.6 { LEAF_DARK } else { LEAF } },
-                    2 => Tree { x, z, height: 3.5 + r2 * 2.0, radius: 1.8 + r2 * 1.0, trunk: 0.3, leaf: LEAF_DARK },
-                    _ if hashf(i, j, 6) < 0.45 => Tree { x, z, height: 8.0 + r2 * 3.0, radius: 5.5 + r2 * 2.0, trunk: 1.0, leaf: LEAF_OMBU },
-                    _ => Tree { x, z, height: 6.0 + r2 * 2.0, radius: 3.0 + r2 * 1.0, trunk: 0.4, leaf: LEAF },
-                };
-                out.push(t);
+                let k = age * (0.82 + 0.36 * r2);
+                // En el borde del monte y en la pradera los árboles son algo más bajos y anchos.
+                let open = if roll < p_forest { 1.0 - 0.15 * (1.0 - dens) } else { 0.9 };
+                // En el monte cerrado las copas se tocan.
+                let closed = if roll < p_forest { 1.0 + 0.22 * dens } else { 1.0 };
+                out.push(Tree {
+                    x,
+                    z,
+                    height: bh * k * open * (1.0 + (closed - 1.0) * 0.5),
+                    radius: br * k * (2.0 - open) * closed,
+                    trunk: bt * (0.7 + 0.3 * k) * age.sqrt(),
+                    species,
+                    variant,
+                    seed: hash2(i, j, 11),
+                });
             }
         }
     }
 
-    /// Radio máximo de copa (para buscar árboles que entran en una columna desde las vecinas).
-    pub const MAX_TREE_RADIUS: f32 = 7.5;
+    /// Radio máximo que alcanza un árbol desde su tronco (para buscar árboles que entran en una
+    /// columna desde las vecinas): el ombú más grande.
+    pub const MAX_TREE_RADIUS: f32 = 13.0;
 
     fn add_arroyo(&mut self, raw: &[(f32, f32)]) {
         let raw: Vec<Vec2> = raw.iter().map(|&(x, z)| Vec2::new(x, z)).collect();
@@ -1078,6 +1234,84 @@ mod tests {
         assert!(cumbre(36217.0, 18388.0) > 2.0, "Isla de Flores");
         // Sin médanos en la costa rocosa de la Ciudad Vieja (sin playa oficial).
         assert!(t.dune_belt(11000.0, 15050.0) < 30.0, "médanos inventados en la Ciudad Vieja");
+    }
+
+    #[test]
+    fn monte_nativo_de_1726() {
+        let t = TerrainGen::montevideo();
+        // El raster de monte existe y tiene monte ribereño a lo largo del Miguelete.
+        let migue: Vec<usize> = (0..t.arroyos.len()).filter(|&k| t.arroyo_nombres[k].as_deref() == Some("Arroyo Miguelete")).collect();
+        assert!(!migue.is_empty());
+        let (mut junto, mut n) = (0.0, 0);
+        for &k in &migue {
+            for p in t.arroyos[k].iter().step_by(3) {
+                if p.x > 0.0 && p.y > 0.0 && p.x < MAP_SIZE && p.y < MAP_SIZE {
+                    junto += (0..8).map(|a| {
+                        let ang = a as f32 * std::f32::consts::FRAC_PI_4;
+                        t.forest_cover(p.x + ang.cos() * 25.0, p.y + ang.sin() * 25.0)
+                    }).sum::<f32>() / 8.0;
+                    n += 1;
+                }
+            }
+        }
+        let junto = junto / n as f32;
+        // Cobertura media en tierra firme, lejos de todo.
+        let (mut campo, mut m) = (0.0, 0);
+        for k in 0..4000 {
+            let (x, z) = (300.0 + (k % 80) as f32 * 290.0, 300.0 + (k / 80) as f32 * 230.0);
+            if t.height(x, z) > 2.0 {
+                campo += t.forest_cover(x, z);
+                m += 1;
+            }
+        }
+        let campo = campo / m as f32;
+        assert!(junto > 0.3 && junto > campo * 5.0, "Miguelete {junto:.2}, campo {campo:.3}");
+        // Galería más ancha en los arroyos grandes que en las cañadas: cobertura a 20–60 m del
+        // agua según el ancho del cauce.
+        let (mut ancho, mut na, mut angosto, mut nn) = (0.0, 0, 0.0, 0);
+        for k in 0..250_000 {
+            let (x, z) = (200.0 + (k % 500) as f32 * 47.0, 200.0 + (k / 500) as f32 * 31.0);
+            let (d, hw) = t.arroyo_query(x, z);
+            let e = d - hw;
+            if (20.0..60.0).contains(&e) && t.height(x, z) > 1.0 {
+                if hw > 4.0 {
+                    ancho += t.forest_cover(x, z);
+                    na += 1;
+                } else if hw < 1.6 {
+                    angosto += t.forest_cover(x, z);
+                    nn += 1;
+                }
+            }
+        }
+        let (ancho, angosto) = (ancho / na as f32, angosto / nn as f32);
+        assert!(na > 100 && nn > 100);
+        assert!(ancho > 0.15 && ancho > angosto * 3.0, "a 20–60 m: arroyos {ancho:.3} ({na}), cañadas {angosto:.3} ({nn})");
+        // Ni árboles en el agua, las playas, los bañados ni los bancos de arena; y la franja de
+        // la orilla y el monte de las cañadas son angostos.
+        let mut trees = Vec::new();
+        t.trees_in(4000.0, 2000.0, 16000.0, 11000.0, &mut trees);
+        assert!(trees.len() > 2000, "{} árboles", trees.len());
+        let mut por_especie = std::collections::HashMap::new();
+        for a in &trees {
+            assert!(!t.is_water(a.x, a.z), "árbol en el agua ({}, {})", a.x, a.z);
+            assert!(t.height(a.x, a.z) > 1.0);
+            let b = t.official_biome(a.x, a.z);
+            assert!(!matches!(b, BIO_PLAYA | BIO_BANADO | BIO_BANCO | BIO_LAGUNA), "árbol en bioma {b}");
+            *por_especie.entry(a.species).or_insert(0) += 1;
+            let (reach, _) = crate::trees::extent(&crate::trees::shape(&a.spec()));
+            assert!(reach <= TerrainGen::MAX_TREE_RADIUS, "{:?} alcanza {reach} m", a.species);
+        }
+        // Monte variado: varias especies y variantes de forma.
+        assert!(por_especie.len() >= 7, "especies: {por_especie:?}");
+        let variantes: std::collections::HashSet<(Species, u8)> = trees.iter().map(|a| (a.species, a.variant)).collect();
+        assert!(variantes.len() >= 20, "{} combinaciones de especie y variante", variantes.len());
+        // Sauces, sarandíes y ceibos junto al agua; ombúes lejos.
+        for a in &trees {
+            let (d, hw) = t.arroyo_query(a.x, a.z);
+            if a.species == Species::Ombu {
+                assert!(d - hw > 5.0, "ombú en la orilla");
+            }
+        }
     }
 
     #[test]

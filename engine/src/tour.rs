@@ -51,7 +51,7 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 15] = [
+    let views: [(&'static str, [f32; 5]); 21] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
         // Hidrografía oficial (IDE): la playa de Pocitos y los bañados del Carrasco y el Pantanoso.
         ("paisaje-playa-pocitos", [16500.0, 15000.0, 700.0, 200.0, 28.0]),
@@ -69,9 +69,20 @@ pub fn landscape_steps() -> Vec<Act> {
         // La cámara no sale del mapa: la isla (x 36 200, z 18 400) se ve a 12 km, en el horizonte.
         ("paisaje-isla-flores", [24000.0, 18400.0, 300.0, 270.0, 3.0]),
         ("paisaje-cenital-este", [21500.0, 13000.0, 14000.0, 230.0, 85.0]),
+        // Monte nativo de 1726 (bosque.bin): galería del Miguelete de cerca, a media distancia
+        // y el monte del Miguelete alto (que hoy sigue en pie).
+        ("vegetacion-galeria-cerca", [12140.0, 7560.0, 40.0, 200.0, 12.0]),
+        ("vegetacion-galeria-media", [12120.0, 7600.0, 260.0, 210.0, 26.0]),
+        ("vegetacion-monte-norte", [13000.0, 6140.0, 140.0, 160.0, 20.0]),
+        // Flora baja por zonas, de cerca: bañado del Pantanoso, médanos de Carrasco y el Cerro.
+        ("vegetacion-banado-cerca", [5840.0, 8300.0, 35.0, 200.0, 14.0]),
+        ("vegetacion-medanos-cerca", [22600.0, 13150.0, 35.0, 180.0, 14.0]),
+        ("vegetacion-cerro-cerca", [5900.0, 12350.0, 40.0, 200.0, 16.0]),
     ];
     let mut out = vec![Hour(10.5)];
-    for (name, cam) in views {
+    // `MOTOR_VISTAS=vegetacion` saca solo las vistas cuyo nombre contiene ese texto.
+    let filtro = std::env::var("MOTOR_VISTAS").unwrap_or_default();
+    for (name, cam) in views.into_iter().filter(|(n, _)| n.contains(filtro.as_str())) {
         out.push(Cam(cam));
         out.push(WaitIdle(name));
         out.push(Shot(name));
