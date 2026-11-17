@@ -45,7 +45,8 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 3c. [x] Mapa real de Montevideo en el motor (geografía, agua, clima, vegetación y costa reales)
 4. [x] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
 5. [x] Servicios, agua, incendios, puerto, muralla, campo e iglesia (primera versión; ver [sistemas/servicios.md](sistemas/servicios.md))
-5b. [ ] *(en curso)* Población: personas con personalidad e historial, familias y linajes, llegadas por época, economía de cada hogar, desigualdad y felicidad por grupo
+5b. [x] Población: personas con personalidad e historial, familias y linajes, llegadas por época, economía de cada hogar, desigualdad y felicidad por grupo
+5d. [x] Trazado de calles práctico: enganche a 45° y 90° de la calle de arranque y del damero, largo alineado con las esquinas vecinas o el módulo de la cuadra, guías punteadas, largo y ángulo en pantalla, Shift para trazar libre
 5c. [x] Pendiente de las calles medida en tramos de 10 m con la altura promediada (antes, una bocha de piedra o la ondulación fina cortaba el damero del mapa real: la ciudad de la demostración pasa de ~450 a ~1.600 vecinos y nadie queda sin poder salir)
 6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real

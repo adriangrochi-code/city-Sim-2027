@@ -36,6 +36,16 @@ pub const TOOLS: [(Tool, &str); 8] = [
     (Tool::Inspect, "inspeccionar"),
 ];
 
+/// Trazado de una calle con sus enganches (ver [`Game::draft`]).
+pub struct Draft {
+    /// Punto final (enganchado).
+    pub end: Vec2,
+    /// Guías a dibujar (pares de puntos).
+    pub guides: Vec<(Vec2, Vec2)>,
+    /// Qué enganche manda: "ángulo", "alineada" o "cuadra".
+    pub locked: Option<&'static str>,
+}
+
 pub struct Game {
     /// Nombre de la ciudad (el que eligió el jugador al empezar la partida).
     pub city_name: String,
@@ -47,6 +57,8 @@ pub struct Game {
     pub p1: Vec2,
     pub brush: f32,
     pub plaza_angle: f32,
+    /// Shift apretado: la calle se traza libre, sin enganches de ángulo ni de largo.
+    pub free_draw: bool,
     pub painting: bool,
     pub hover: Option<Vec2>,
     /// Velocidad de la simulación (0 = pausa).
@@ -121,6 +133,7 @@ impl Default for Game {
             layer: None,
             orders: Vec::new(),
             plaza_angle: 0.0,
+            free_draw: false,
             painting: false,
             hover: None,
             speed: 1.0,
@@ -183,6 +196,130 @@ impl Game {
         self.city.net.snap(p).pos
     }
 
+    /// Direcciones de referencia para trazar desde `from`: el eje de la plaza mayor (el damero
+    /// fundacional) y la calle de la que se arranca, si se arranca de una.
+    fn reference_dirs(&self, from: Vec2) -> Vec<Vec2> {
+        let mut refs = vec![self.city.plaza.map_or(Vec2::X, |(_, a)| plaza_frame(a).0)];
+        let net = &self.city.net;
+        let sn = net.snap(from);
+        let mut add_edge = |eid: u32, near: Vec2| {
+            if let Some(ed) = net.edges.get(&eid) {
+                // Tangente del tramo en el punto más cercano a `from`.
+                let (mut best, mut bd) = (Vec2::ZERO, f32::MAX);
+                for w in ed.pts.windows(2) {
+                    let q = super::roads::closest_on_segment(near, w[0], w[1]);
+                    let d = q.distance(near);
+                    if d < bd {
+                        bd = d;
+                        best = (w[1] - w[0]).normalize_or_zero();
+                    }
+                }
+                if best != Vec2::ZERO {
+                    refs.push(best);
+                }
+            }
+        };
+        if let Some(n) = sn.node {
+            let ids: Vec<u32> = net.edges.iter().filter(|(_, e)| e.a == n || e.b == n).map(|(&id, _)| id).collect();
+            for id in ids {
+                add_edge(id, from);
+            }
+        } else if let Some((eid, _)) = sn.edge {
+            add_edge(eid, from);
+        }
+        refs
+    }
+
+    /// Calle recta desde `from` hacia el cursor con los enganches de los juegos de ciudad:
+    /// ángulo a 0°, 45° y 90° respecto de la calle de arranque y del damero de la plaza (a
+    /// menos de 7°), largo alineado con las esquinas de otras calles (para que las cuadras
+    /// salgan parejas) o con el módulo de la cuadra, y enganche a esquinas y calles. Con Shift,
+    /// libre.
+    pub fn draft(&self, from: Vec2, cursor: Vec2) -> Draft {
+        let net = &self.city.net;
+        let sn = net.snap(cursor);
+        let mut d = Draft { end: sn.pos, guides: Vec::new(), locked: None };
+        if sn.node.is_some() || self.free_draw {
+            return d;
+        }
+        let v = cursor - from;
+        let len = v.length();
+        if len < 2.0 {
+            return d;
+        }
+        // Ángulo más cercano entre los de referencia (cada 45°).
+        let mut best: Option<(Vec2, f32)> = None;
+        for r in self.reference_dirs(from) {
+            for k in 0..8 {
+                let c = r.rotate(Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_4));
+                let a = c.angle_to(v).abs();
+                if best.is_none_or(|b| a < b.1) {
+                    best = Some((c, a));
+                }
+            }
+        }
+        let Some((dir, err)) = best else { return d };
+        if err > 7f32.to_radians() {
+            return d; // fuera de los enganches de ángulo: lo que diga el cursor (o la calle cercana)
+        }
+        let mut l = v.dot(dir).max(1.0);
+        d.locked = Some("ángulo");
+        // Alineación: una esquina cuya proyección sobre la calle cae cerca del largo actual.
+        let mut align: Option<(f32, Vec2)> = None;
+        for &q in net.nodes.values() {
+            if q.distance(from) < 1.0 || q.distance(from) > 900.0 {
+                continue;
+            }
+            let along = (q - from).dot(dir);
+            if along > 5.0 && (along - l).abs() < 4.0 && align.is_none_or(|a| (along - l).abs() < (a.0 - l).abs()) {
+                align = Some((along, q));
+            }
+        }
+        if let Some((along, q)) = align {
+            l = along;
+            d.guides.push((q, from + dir * l));
+            d.locked = Some("alineada");
+        } else {
+            let m = (l / BLOCK).round() * BLOCK;
+            if m > 0.0 && (l - m).abs() < 3.0 {
+                l = m;
+                d.locked = Some("cuadra");
+            }
+        }
+        let end = from + dir * l;
+        // Si el final cae sobre una esquina o una calle, se engancha (cruce).
+        let s2 = net.snap(end);
+        d.end = if s2.node.is_some() || s2.edge.is_some() { s2.pos } else { end };
+        d.guides.push((from - dir * 30.0, end + dir * 30.0));
+        d
+    }
+
+    /// Texto junto al cursor mientras se traza una calle: largo, ángulo y enganche.
+    pub fn draft_label(&self, _t: &TerrainGen) -> Option<String> {
+        let h = self.hover?;
+        let (from, to) = match (self.tool, self.stage) {
+            (Tool::Straight | Tool::Curve, 1) | (Tool::Grid, 1) => (self.p0, self.draft(self.p0, h)),
+            _ => return None,
+        };
+        let v = to.end - from;
+        let deg = (v.y.atan2(v.x).to_degrees() + 360.0) % 360.0;
+        // Ángulo respecto del damero de la plaza (lo que importa para cuadricular).
+        let base = self.city.plaza.map_or(0.0, |(_, a)| {
+            let f = plaza_frame(a).0;
+            f.y.atan2(f.x).to_degrees()
+        });
+        let rel = ((deg - base) % 90.0 + 90.0) % 90.0;
+        let rel = if rel > 45.0 { rel - 90.0 } else { rel };
+        let mut s = format!("{} m · {:+.0}° del damero", v.length().round() as i32, rel);
+        if let Some(l) = to.locked {
+            s.push_str(&format!(" · {l}"));
+        }
+        if self.free_draw {
+            s.push_str(" · libre (Shift)");
+        }
+        Some(s)
+    }
+
     fn curve_points(&self, cursor: Vec2) -> Vec<Vec2> {
         let ctrl = cursor * 2.0 - (self.p0 + self.p1) * 0.5;
         bezier(self.p0, ctrl, self.snap(self.p1))
@@ -214,7 +351,7 @@ impl Game {
                     self.stage = 1;
                     return None;
                 }
-                let end = self.snap(p);
+                let end = self.draft(self.p0, p).end;
                 let r = self.city.build_road(t, &line(self.p0, end), self.kind);
                 let e = self.report(r)?;
                 self.p0 = end;
@@ -227,7 +364,7 @@ impl Game {
                     None
                 }
                 1 => {
-                    self.p1 = self.snap(p);
+                    self.p1 = self.draft(self.p0, p).end;
                     if self.p1.distance(self.p0) > 5.0 {
                         self.stage = 2;
                     }
@@ -249,7 +386,7 @@ impl Game {
                     None
                 }
                 1 => {
-                    self.p1 = p;
+                    self.p1 = self.draft(self.p0, p).end;
                     if self.p1.distance(self.p0) > 40.0 {
                         self.stage = 2;
                     }
@@ -420,7 +557,7 @@ impl Game {
         let (cost, err) = match self.tool {
             Tool::Plaza => (None, self.city.plaza_problem(t, h, self.plaza_angle)),
             Tool::Straight | Tool::Curve if self.stage == 1 => {
-                let (c, e) = road(&line(self.p0, self.snap(h)));
+                let (c, e) = road(&line(self.p0, self.draft(self.p0, h).end));
                 (Some(c), e)
             }
             Tool::Curve if self.stage == 2 => {
@@ -559,10 +696,17 @@ impl Game {
                 let good = self.city.plaza_problem(t, h, self.plaza_angle).is_none();
                 outline(&mut out, t, &corners_of(h, f, BLOCK + 8.0, BLOCK + 8.0), 4.0, if good { ok } else { bad });
             }
-            Tool::Straight if self.stage == 1 => self.road_preview(&mut out, t, &line(self.p0, self.snap(h))),
-            Tool::Curve if self.stage == 1 => self.road_preview(&mut out, t, &line(self.p0, self.snap(h))),
+            Tool::Straight | Tool::Curve if self.stage == 1 => {
+                let d = self.draft(self.p0, h);
+                self.guides_preview(&mut out, t, &d);
+                self.road_preview(&mut out, t, &line(self.p0, d.end));
+            }
             Tool::Curve if self.stage == 2 => self.road_preview(&mut out, t, &self.curve_points(h)),
-            Tool::Grid if self.stage == 1 => ribbon(&mut out, t, &line(self.p0, h), 3.0, [1.0, 1.0, 1.0, 0.6]),
+            Tool::Grid if self.stage == 1 => {
+                let d = self.draft(self.p0, h);
+                self.guides_preview(&mut out, t, &d);
+                ribbon(&mut out, t, &line(self.p0, d.end), 3.0, [1.0, 1.0, 1.0, 0.6]);
+            }
             Tool::Grid if self.stage == 2 => {
                 let lines = grid_lines(self.p0, self.p1, h);
                 let good = lines.iter().all(|l| self.city.road_problem(t, l, self.kind).is_none());
@@ -672,6 +816,19 @@ impl Game {
         }
     }
 
+    /// Guías de un trazado enganchado: líneas finas punteadas (la dirección y la alineación).
+    fn guides_preview(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, d: &Draft) {
+        for &(a, b) in &d.guides {
+            let len = a.distance(b);
+            let n = (len / 4.0) as usize;
+            for k in (0..n).step_by(2) {
+                let p0 = a.lerp(b, k as f32 / n as f32);
+                let p1 = a.lerp(b, ((k + 1) as f32 / n as f32).min(1.0));
+                ribbon(out, t, &[p0, p1], 0.8, [1.0, 1.0, 1.0, 0.75]);
+            }
+        }
+    }
+
     fn road_preview(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, pts: &[Vec2]) {
         let good = self.city.road_problem(t, pts, self.kind).is_none() && City::road_cost(t, pts, self.kind) <= self.city.money;
         ribbon(out, t, pts, self.kind.width(), if good { [0.45, 0.95, 0.45, 0.55] } else { [1.0, 0.35, 0.3, 0.55] });
@@ -730,6 +887,43 @@ fn quad(out: &mut Vec<OverlayVertex>, t: &TerrainGen, c: &[Vec2; 4], lift: f32, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Enganches del trazado: un cursor a pocos grados de la perpendicular da una calle a 90°
+    /// exactos del damero; el largo se alinea con la esquina de otra calle; con Shift, libre.
+    #[test]
+    fn las_calles_se_enganchan_a_90_grados_y_se_alinean() {
+        let t = TerrainGen::new(1726);
+        let mut g = Game::default();
+        let c = Vec2::new(13500.0, 16300.0);
+        g.set_tool(1);
+        assert!(g.press(&t, c).is_some(), "{}", g.message);
+        g.city.money = 1_000_000;
+        let corner = c + Vec2::new(BLOCK * 0.5, -BLOCK * 0.5);
+        // Hacia el norte, con el cursor torcido 6°.
+        let cur = corner + Vec2::from_angle((-90.0f32 + 6.0).to_radians()) * 150.0;
+        let d = g.draft(corner, cur);
+        let v = (d.end - corner).normalize();
+        assert!(v.x.abs() < 1e-3 && v.y < 0.0, "calle a 90°: {v:?}");
+        assert!(d.locked.is_some());
+        // Torcido 20°: fuera del enganche, sigue al cursor.
+        let cur2 = corner + Vec2::from_angle((-90.0f32 + 20.0).to_radians()) * 150.0;
+        assert!((g.draft(corner, cur2).end - cur2).length() < 1.0);
+        // Con Shift, libre aunque esté cerca de 90°.
+        g.free_draw = true;
+        assert!((g.draft(corner, cur).end - cur).length() < 1.0);
+        g.free_draw = false;
+        // Alineación: desde la otra esquina de la plaza, el largo engancha con el final de la
+        // calle anterior (cuadras parejas).
+        g.set_tool(1);
+        g.press(&t, corner);
+        let first_end = g.draft(corner, corner + Vec2::new(0.0, -131.0)).end;
+        assert!(g.press(&t, corner + Vec2::new(0.0, -131.0)).is_some(), "{}", g.message);
+        g.cancel();
+        let other = c + Vec2::new(-BLOCK * 0.5, -BLOCK * 0.5);
+        let d = g.draft(other, other + Vec2::new(1.5, -(first_end.distance(corner) + 2.5)));
+        assert!((d.end.y - first_end.y).abs() < 0.01, "alineada con la esquina: {} vs {}", d.end.y, first_end.y);
+        assert_eq!(d.locked, Some("alineada"));
+    }
 
     /// El flujo de clics de la ventana: plaza, recta encadenada, curva en 3 clics, damero,
     /// zona con pincel, demoler y cancelar.

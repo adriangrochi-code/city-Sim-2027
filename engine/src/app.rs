@@ -501,6 +501,12 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::ModifiersChanged(m) => {
+                // Shift: trazar las calles libres, sin enganches.
+                if let Some(g) = self.session.game.as_mut() {
+                    g.free_draw = m.state().shift_key();
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let (dx, dy) = ((position.x - self.mouse.x) as f32, (position.y - self.mouse.y) as f32);
                 self.mouse = position;

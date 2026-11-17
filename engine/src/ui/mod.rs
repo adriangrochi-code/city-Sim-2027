@@ -572,6 +572,18 @@ impl GameUi {
             None => self.drawer_h = 0.0,
         }
         self.hint(ctx, game, terrain);
+        // Junto al cursor, mientras se traza una calle: largo, ángulo respecto del damero y costo.
+        if let (Some(txt), Some(pos)) = (game.draft_label(terrain), ctx.pointer_hover_pos()) {
+            egui::Area::new(egui::Id::new("trazado"))
+                .fixed_pos(pos + vec2(18.0, 14.0))
+                .order(egui::Order::Tooltip)
+                .interactable(false)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.label(RichText::new(txt).small());
+                    });
+                });
+        }
         if let Some(info) = game.inspect_info() {
             inspect_panel(ctx, &info, &mut acts);
         }
@@ -770,6 +782,12 @@ impl GameUi {
                 ui.label(RichText::new(first).small());
                 for l in rest {
                     ui.label(RichText::new(l).small().strong());
+                }
+                if let Some(d) = game.draft_label(terrain) {
+                    ui.label(RichText::new(d).small().strong().color(theme::INK));
+                }
+                if matches!(game.tool, Tool::Straight | Tool::Curve | Tool::Grid) {
+                    ui.label(RichText::new("Se engancha a 45° y 90° de la calle de arranque y del damero; Shift: libre").small().color(theme::INK_SOFT));
                 }
                 if let Some(e) = err {
                     ui.label(RichText::new(e).small().color(theme::BAD));

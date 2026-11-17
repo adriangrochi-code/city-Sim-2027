@@ -244,6 +244,7 @@ pub fn city_steps() -> Vec<Act> {
         Cam([c.x + 40.0, c.y + 30.0, 330.0, 205.0, 40.0]),
         WaitIdle("vista para la interfaz"),
         UiShot("motor-ui-barra", ui_toolbar),
+        UiShot("motor-ui-trazar-calle", ui_trazar),
         UiShot("motor-ui-cajon-servicios", ui_services),
         UiShot("motor-ui-zonas", ui_zones),
         UiShot("motor-ui-detalle-pan", |s, u| ui_detail(s, u, ui::Detail::Recurso(crate::city::economy::Res::Pan))),
@@ -337,6 +338,30 @@ fn ui_toolbar(s: &mut Session, u: &mut GameUi) {
     g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
     u.sync_news(g);
     u.time += 30.0; // sin avisos en esta captura
+}
+
+/// Trazando una calle desde una esquina de la plaza con el cursor algo torcido: la calle se
+/// engancha a 90° del damero, con la guía punteada y el largo, el ángulo y el costo.
+fn ui_trazar(s: &mut Session, u: &mut GameUi) {
+    let (corner, f) = {
+        let g = s.game.as_ref().unwrap();
+        let (c, a) = g.city.plaza.unwrap();
+        let (f, side) = crate::city::plaza_frame(a);
+        (c + (f + side) * (crate::city::BLOCK * 0.5), f)
+    };
+    s.cam.target = glam::Vec3::new(corner.x + f.x * 120.0, s.terrain.height(corner.x, corner.y), corner.y + f.y * 120.0);
+    s.cam.distance = 380.0;
+    s.cam.pitch = 58.0;
+    s.update(0.0);
+    let g = s.game.as_mut().unwrap();
+    let side = crate::city::plaza_frame(g.city.plaza.unwrap().1).1;
+    g.inspected = None;
+    g.set_tool(1);
+    g.p0 = corner;
+    g.stage = 1;
+    g.hover = Some(corner + f * 260.0 + side * 22.0);
+    u.open = Some(ui::Category::Calles);
+    u.time += 30.0;
 }
 
 /// Cajón de servicios: tarjetas de lo que llega más adelante, desactivadas con el motivo.
