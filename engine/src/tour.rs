@@ -2,7 +2,9 @@
 //! excava, viaja lejos (streaming) y guarda capturas en puntos clave con métricas.
 //! Funciona igual con ventana o sin pantalla.
 
+use crate::menu::{Menu, MenuAction, Screen};
 use crate::render::Renderer;
+use crate::save;
 use crate::ui::{self, paint::UiPainter, GameUi};
 use crate::session::{memory_mb, Session};
 use glam::Vec2;
@@ -28,6 +30,10 @@ pub enum Act {
     /// Captura con la interfaz del juego encima, después de prepararla (herramienta, ficha,
     /// avisos, panel) con la función dada.
     UiShot(&'static str, fn(&mut Session, &mut GameUi)),
+    /// Captura con el menú (principal, pausa, cargar…) armado por la función dada.
+    MenuShot(&'static str, fn(&mut Session, &mut GameUi, &mut Menu)),
+    /// Guarda la partida, la vuelve a cargar (mundo regenerado desde el archivo) y compara.
+    SaveLoad(&'static str),
 }
 
 /// Interfaz para las capturas sin pantalla: contexto de egui, pintor y estado del juego.
@@ -35,6 +41,7 @@ struct TourUi {
     ctx: egui::Context,
     painter: UiPainter,
     game_ui: GameUi,
+    menu: Menu,
     ms: Vec<f64>,
 }
 
@@ -105,7 +112,69 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-ficha", ui_inspect),
         UiShot("motor-ui-gaceta", ui_gazette),
         UiShot("motor-ui-panel", ui_panel),
+        // Guardar y cargar: la ciudad cargada tiene que verse igual que la general.
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        SaveLoad("guardar y cargar la ciudad"),
+        WaitIdle("ciudad cargada"),
+        Shot("motor-ciudad-cargada"),
+        Cam([c.x + 40.0, c.y + 30.0, 330.0, 205.0, 40.0]),
+        WaitIdle("vista para el menú de pausa"),
+        MenuShot("motor-menu-pausa", menu_pause),
+        Cam(crate::menu::BACKGROUND_CAM),
+        Hour(crate::menu::BACKGROUND_HOUR),
+        WaitIdle("fondo del menú principal"),
+        MenuShot("motor-menu-principal", menu_main),
+        MenuShot("motor-menu-cargar", menu_load),
+        MenuShot("motor-menu-opciones", menu_options),
+        MenuShot("motor-menu-nueva", menu_new),
     ]
+}
+
+/// Menú de pausa sobre la partida (con la interfaz del juego detrás).
+fn menu_pause(s: &mut Session, u: &mut GameUi, m: &mut Menu) {
+    let g = s.game.as_mut().unwrap();
+    g.inspected = None;
+    u.open = None;
+    u.time += 30.0;
+    m.open_pause();
+}
+
+/// Menú principal con la ciudad de fondo; deja guardadas otras dos partidas para el listado.
+fn menu_main(s: &mut Session, u: &mut GameUi, m: &mut Menu) {
+    let t = s.terrain.clone();
+    let (cam, hour) = (s.cam_array(), s.hour);
+    let g = s.game.as_mut().unwrap();
+    // Un autoguardado de hace dos días y una fundación nueva en otro sitio.
+    let mut auto = save::snapshot(g, cam, hour, true);
+    auto.guardada -= 2 * 86_400 + 3600;
+    let _ = save::write(&save::path_for(&m.saves_dir, &g.city_name, true), &auto);
+    let mut colonia = crate::city::game::Game::default();
+    colonia.city_name = "Colonia del Sacramento".into();
+    let _ = colonia.city.found_plaza(&t, crate::city::game_demo::PLAZA, 0.4);
+    colonia.city.fast_forward(&t, 7);
+    let mut f = save::snapshot(&colonia, crate::menu::new_game_cam(), 10.5, false);
+    f.guardada -= 5 * 3600;
+    let _ = save::write(&save::unique_path(&m.saves_dir, "Colonia del Sacramento"), &f);
+    u.time += 30.0;
+    // Como al volver al menú principal: sin partida en curso.
+    m.current = None;
+    m.stack.clear();
+    m.push(Screen::Main);
+}
+
+fn menu_load(_s: &mut Session, _u: &mut GameUi, m: &mut Menu) {
+    m.push(Screen::Load);
+}
+
+fn menu_options(_s: &mut Session, _u: &mut GameUi, m: &mut Menu) {
+    m.stack.truncate(1);
+    m.push(Screen::Options);
+}
+
+fn menu_new(_s: &mut Session, _u: &mut GameUi, m: &mut Menu) {
+    m.stack.truncate(1);
+    m.push(Screen::NewGame);
+    m.name_input = "San Felipe de Montevideo".into();
 }
 
 /// Barra de categorías con el cajón de calles abierto (calle recta elegida).
@@ -244,6 +313,73 @@ impl Tour {
         Tour { steps, i: 0, dir: dir.to_string(), width, height, step_start: Instant::now(), travel: None, report: Vec::new(), ui: None }
     }
 
+    /// La interfaz de las capturas (se arma la primera vez que hace falta).
+    fn tour_ui(&mut self, r: &Renderer) -> &mut TourUi {
+        let dir = self.dir.clone();
+        self.ui.get_or_insert_with(|| {
+            let ctx = egui::Context::default();
+            ui::theme::install(&ctx);
+            // Las partidas del recorrido van a una carpeta propia (se vacía al empezar).
+            let base = std::path::Path::new(&dir).join("datos");
+            let _ = std::fs::remove_dir_all(&base);
+            let mut menu = Menu::new(base, save::Settings::default(), 8, 2, false);
+            menu.threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1);
+            TourUi { ctx, painter: UiPainter::new(r.device(), r.format()), game_ui: GameUi::default(), menu, ms: Vec::new() }
+        })
+    }
+
+    /// Captura con la interfaz del juego y el menú encima.
+    fn ui_capture(&mut self, name: &str, s: &mut Session, r: &mut Renderer) {
+        let u = self.ui.as_mut().unwrap();
+        r.set_overlay(&if u.menu.in_main_menu() { Vec::new() } else { s.overlay() });
+        let ppp = ui::zoom_for(self.height, 1.0);
+        let (w, h) = (self.width, self.height);
+        let terrain = s.terrain.clone();
+        let hour = s.hour;
+        let g = s.game.as_ref();
+        // Varias pasadas: egui mide las áreas en la primera y las muestra en la siguiente.
+        // Las texturas (la fuente) de las pasadas descartadas se suben en orden.
+        let mut full = None;
+        let t0 = Instant::now();
+        for k in 0..3 {
+            u.game_ui.time += 0.05;
+            let (game_ui, menu) = (&mut u.game_ui, &mut u.menu);
+            let mut out = u.ctx.run(ui::headless_input(w, h, ppp, game_ui.time), |ctx| {
+                if let Some(g) = g.filter(|_| !menu.in_main_menu()) {
+                    let _ = game_ui.draw(ctx, g, &terrain, hour, "");
+                }
+                let _ = menu.draw(ctx, g, 0.0);
+            });
+            if k == 2 {
+                full = Some(out);
+            } else {
+                u.painter.update_textures(r.device(), r.queue(), &std::mem::take(&mut out.textures_delta));
+            }
+        }
+        let full = full.unwrap();
+        let ms_run = t0.elapsed().as_secs_f64() * 1000.0 / 3.0;
+        let path = format!("{}/{}.png", self.dir, name);
+        let (ctx, painter) = (&u.ctx, &mut u.painter);
+        let mut paint_ms = 0.0;
+        let mut out = Some(full);
+        let mut hook = |d: &wgpu::Device, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, size: (u32, u32)| {
+            if let Some(f) = out.take() {
+                let t = Instant::now();
+                painter.paint(d, q, enc, view, size, ctx, f);
+                paint_ms = t.elapsed().as_secs_f64() * 1000.0;
+            }
+        };
+        match r.capture_with(&s.cam, s.hour, w, h, &path, Some(&mut hook)) {
+            Ok(()) => {
+                u.ms.push(ms_run + paint_ms);
+                let line = format!("Captura con interfaz {path}: interfaz {:.2} ms de CPU (egui {ms_run:.2} + pintar {paint_ms:.2})", ms_run + paint_ms);
+                println!("{line}");
+                self.report.push(line);
+            }
+            Err(e) => eprintln!("Error en la captura {path}: {e}"),
+        }
+    }
+
     pub fn done(&self) -> bool {
         self.i >= self.steps.len()
     }
@@ -317,55 +453,51 @@ impl Tour {
                     self.next();
                 }
                 Act::UiShot(name, setup) => {
-                    let u = self.ui.get_or_insert_with(|| {
-                        let ctx = egui::Context::default();
-                        ui::theme::install(&ctx);
-                        TourUi { ctx, painter: UiPainter::new(r.device(), r.format()), game_ui: GameUi::default(), ms: Vec::new() }
-                    });
+                    let (name, setup) = (*name, *setup);
+                    let u = self.tour_ui(r);
                     setup(s, &mut u.game_ui);
-                    r.set_overlay(&s.overlay());
-                    let ppp = ui::zoom_for(self.height, 1.0);
-                    let (w, h) = (self.width, self.height);
-                    let terrain = s.terrain.clone();
-                    let hour = s.hour;
-                    let g = s.game.as_ref().unwrap();
-                    // Varias pasadas: egui mide las áreas en la primera y las muestra en la siguiente.
-                    // Las texturas (la fuente) de las pasadas descartadas se suben en orden.
-                    let mut full = None;
-                    let t0 = Instant::now();
-                    for k in 0..3 {
-                        u.game_ui.time += 0.05;
-                        let mut out = u.ctx.run(ui::headless_input(w, h, ppp, u.game_ui.time), |ctx| {
-                            let _ = u.game_ui.draw(ctx, g, &terrain, hour, "");
-                        });
-                        if k == 2 {
-                            full = Some(out);
-                        } else {
-                            u.painter.update_textures(r.device(), r.queue(), &std::mem::take(&mut out.textures_delta));
-                        }
-                    }
-                    let full = full.unwrap();
-                    let ms_run = t0.elapsed().as_secs_f64() * 1000.0 / 3.0;
-                    let path = format!("{}/{}.png", self.dir, name);
-                    let (ctx, painter) = (&u.ctx, &mut u.painter);
-                    let mut paint_ms = 0.0;
-                    let mut out = Some(full);
-                    let mut hook = |d: &wgpu::Device, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, size: (u32, u32)| {
-                        if let Some(f) = out.take() {
-                            let t = Instant::now();
-                            painter.paint(d, q, enc, view, size, ctx, f);
-                            paint_ms = t.elapsed().as_secs_f64() * 1000.0;
-                        }
+                    self.ui_capture(name, s, r);
+                    self.next();
+                }
+                Act::MenuShot(name, setup) => {
+                    let (name, setup) = (*name, *setup);
+                    let u = self.tour_ui(r);
+                    setup(s, &mut u.game_ui, &mut u.menu);
+                    self.ui_capture(name, s, r);
+                    self.next();
+                }
+                Act::SaveLoad(label) => {
+                    let label = *label;
+                    let u = self.tour_ui(r);
+                    let summary = |s: &Session| {
+                        let c = &s.game.as_ref().unwrap().city;
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes)
                     };
-                    match r.capture_with(&s.cam, s.hour, w, h, &path, Some(&mut hook)) {
-                        Ok(()) => {
-                            u.ms.push(ms_run + paint_ms);
-                            let line = format!("Captura con interfaz {path}: interfaz {:.2} ms de CPU (egui {ms_run:.2} + pintar {paint_ms:.2})", ms_run + paint_ms);
-                            println!("{line}");
-                            self.report.push(line);
-                        }
-                        Err(e) => eprintln!("Error en la captura {path}: {e}"),
+                    let before = summary(s);
+                    let t0 = Instant::now();
+                    u.menu.perform(MenuAction::Save, s, Some(r), &mut u.game_ui);
+                    let t_save = t0.elapsed();
+                    let path = u.menu.current.clone().unwrap();
+                    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    let t1 = Instant::now();
+                    let res = u.menu.load(&path, s, Some(r), &mut u.game_ui);
+                    let t_load = t1.elapsed();
+                    s.update(0.0);
+                    let after = summary(s);
+                    let ok = res.is_ok() && before == after;
+                    let line = format!(
+                        "{label}: {} · guardada en {t_save:.2?} ({} KB) · cargada y regenerada en {t_load:.2?} · {} tramos, {} solares, {} vecinos",
+                        if ok { "IGUAL" } else { "¡DISTINTA!" },
+                        bytes / 1024,
+                        after.0,
+                        after.1,
+                        after.3
+                    );
+                    if let Err(e) = res {
+                        self.report.push(format!("{label}: error {e}"));
                     }
+                    println!("{line}");
+                    self.report.push(line);
                     self.next();
                 }
                 Act::Place(kind, rot, x, z) => {

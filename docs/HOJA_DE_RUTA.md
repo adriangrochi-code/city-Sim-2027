@@ -1,6 +1,6 @@
 # Hoja de ruta
 
-> Estado al 16 de noviembre de 2026. Se actualiza con cada avance.
+> Estado al 17 de noviembre de 2026. Se actualiza con cada avance.
 > Dos líneas de trabajo: el **prototipo de Godot** (para diseñar y probar la jugabilidad) y el
 > **motor de vóxeles en Rust** (donde va a vivir el juego final).
 
@@ -42,7 +42,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 3c. [ ] Mapa real de Montevideo en el motor
 4. [ ] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
 5. [ ] Servicios, agua, incendios, puerto, muralla, campo e iglesia
-6. [ ] Guardar y cargar en el motor
+6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real
 
 ## Fase 3: diseño de todas las épocas

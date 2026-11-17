@@ -76,11 +76,28 @@ impl Session {
 
     /// Sesión del modo juego: terreno virgen y la ciudad por fundar.
     pub fn new_game(levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
+        Session::with_game(Game::default(), &Edits::default(), levels, threads, cam, hour)
+    }
+
+    /// Sesión del modo juego con una partida ya armada (nueva o cargada) y los vóxeles de su
+    /// ciudad: el almacén de ediciones se llena antes de empezar a generar columnas, así que
+    /// el mundo aparece directamente como se guardó.
+    pub fn with_game(game: Game, edits: &Edits, levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
+        let started = Instant::now();
         // El juego se juega sobre la geografía real de Montevideo.
-        let mut s = Session::with_terrain("vacia", Arc::new(TerrainGen::montevideo()), levels, threads, cam, hour);
-        s.game = Some(Game::default());
-        s.day_paused = false;
-        s
+        let terrain = Arc::new(TerrainGen::montevideo());
+        let mut store = EditStore::new(levels);
+        store.apply(edits, false);
+        let store = Arc::new(RwLock::new(store));
+        let streamer = Streamer::new(terrain.clone(), store, levels, threads);
+        let ground = terrain.height(cam[0], cam[1]).max(0.0);
+        let cam = OrbitCamera { target: Vec3::new(cam[0], ground, cam[1]), yaw: cam[3], pitch: cam[4], distance: cam[2], fov_y: 50.0 };
+        Session { terrain, streamer, cam, hour, day_paused: false, tool: 2, rot: 0, hit: None, scene_ready: Some(Duration::ZERO), started, first_frame: None, seed: 1, scene_rx: None, view_h: 900.0, game: Some(game) }
+    }
+
+    /// Cámara actual como en `--cam`: x, z, distancia, giro, inclinación.
+    pub fn cam_array(&self) -> [f32; 5] {
+        [self.cam.target.x, self.cam.target.z, self.cam.distance, self.cam.yaw, self.cam.pitch]
     }
 
     /// Aplica ediciones al mundo (re-malla solo las columnas tocadas).

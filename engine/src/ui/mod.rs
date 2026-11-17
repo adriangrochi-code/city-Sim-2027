@@ -287,7 +287,7 @@ pub fn month_balance(game: &Game) -> Option<i64> {
     (!last.lines.is_empty()).then(|| last.balance())
 }
 
-fn capitalize(s: &str) -> String {
+pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     c.next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + c.as_str())
 }
@@ -504,7 +504,7 @@ impl GameUi {
         let frame = egui::Frame::none().fill(theme::PAPER).stroke(egui::Stroke::new(1.5_f32, theme::BORDER)).inner_margin(egui::Margin::symmetric(12.0, 4.0));
         egui::TopBottomPanel::top("barra").exact_height(TOP_BAR_H).frame(frame).show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
-                ui.label(RichText::new(CITY_NAME).size(theme::BODY * 1.15).strong()).on_hover_text(format!("Etapa: {}", st.stage));
+                ui.label(RichText::new(&game.city_name).size(theme::BODY * 1.15).strong()).on_hover_text(format!("Etapa: {}", st.stage));
                 ui.label(RichText::new(&st.date).color(theme::INK_SOFT));
                 ui.label(RichText::new(&st.hour).color(theme::INK_SOFT)).on_hover_text("Hora del día · atajos: , y .");
                 for (v, label, tip) in SPEEDS {

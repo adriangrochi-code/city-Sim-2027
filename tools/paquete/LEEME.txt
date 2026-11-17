@@ -18,6 +18,11 @@ Contiene dos programas:
    F5 guardar · F9 cargar · Esc cancelar
 
 2) EL JUEGO EN EL MOTOR DE VÓXELES (nuevo) ->  ./motor-voxel.sh  (Windows: motor-voxel.bat)
+   Abre en el MENÚ PRINCIPAL: Nueva partida (nombre de la ciudad), Continuar,
+   Cargar partida, Opciones (tamaño de la interfaz, sincronización vertical,
+   FPS, distancia de dibujo, suavizado, autoguardado) y Salir.
+   Las partidas se guardan en %APPDATA%\CitySim2027\partidas (Windows) o en
+   ~/.local/share/city-sim-2027/partidas (Linux).
    Fundar la plaza, trazar calles y zonificar con la interfaz nueva:
    barra de categorías abajo, cajón de tarjetas, fichas de recursos arriba.
    ZONAS: residencial, comercial e industrial, en densidad baja, media o alta,
@@ -26,7 +31,9 @@ Contiene dos programas:
    saber por qué no crece.
    Controles: WASD/flechas mover · Q/E girar · rueda zoom · botón central
    orbitar · botón derecho arrastrar · Tab tipo de calle · [ ] pincel ·
-   R girar la plaza · Espacio pausa · Esc cancelar
+   R girar la plaza · Espacio pausa · Esc cancelar / cerrar paneles / menú
+   de pausa (guardar, guardar como, cargar, opciones, salir) ·
+   F5 guardar · F9 cargar la última partida
 
    SANDBOX DE VÓXELES ->  ./motor-sandbox.sh  (Windows: motor-sandbox.bat)
    Ciudad colonial en vóxeles para recorrer, colocar estructuras, excavar y

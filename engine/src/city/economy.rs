@@ -280,7 +280,7 @@ pub struct Economy {
     /// Último presupuesto cerrado (para el panel).
     pub last: MonthReport,
     pub last_subsidy: i64,
-    rng: Rng,
+    pub(crate) rng: Rng,
 }
 
 impl Default for Economy {

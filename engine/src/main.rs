@@ -2,7 +2,8 @@
 //! niveles de detalle y lo dibuja con wgpu.
 //!
 //! Uso:
-//!   motor                              ventana con el juego: fundar, trazar calles, zonificar
+//!   motor                              ventana con el juego: menú principal, fundar, trazar calles, zonificar
+//!   motor --juego                      directo a una partida nueva (sin el menú principal)
 //!   motor --sandbox                    ventana con el sandbox de vóxeles (escena colonial)
 //!   motor --demo-ciudad carpeta        recorrido del juego sin pantalla (con --window, en la ventana)
 //!   motor --shot salida.png [...]      una captura sin ventana (todo el mundo de una vez)
@@ -20,11 +21,13 @@ mod city;
 mod fxhash;
 mod camera;
 mod lod;
+mod menu;
 mod mesher;
 mod palette;
 mod raycast;
 mod render;
 mod sandbox;
+mod save;
 mod session;
 mod store;
 mod stream;
@@ -59,6 +62,9 @@ struct Args {
     bench: Option<String>,
     /// Modo juego (ciudad colonial jugable) en vez del sandbox.
     juego: bool,
+    /// `--juego` explícito: entra directo a una partida nueva, sin el menú principal.
+    juego_directo: bool,
+    levels_set: bool,
     sandbox: bool,
     scene_set: bool,
     /// Capturas y sandbox sobre el mapa real de Montevideo (`--mapa real`).
@@ -83,6 +89,8 @@ fn parse_args() -> Args {
         smooth: true,
         bench: None,
         juego: false,
+        juego_directo: false,
+        levels_set: false,
         sandbox: false,
         scene_set: false,
         real: false,
@@ -104,6 +112,7 @@ fn parse_args() -> Args {
             "--juego" | "--sandbox" => {
                 if argv[i] == "--juego" {
                     a.juego = true;
+                    a.juego_directo = true;
                 } else {
                     a.sandbox = true;
                 }
@@ -123,7 +132,10 @@ fn parse_args() -> Args {
                     a.size = (w.parse().unwrap_or(1600), h.parse().unwrap_or(900));
                 }
             }
-            "--levels" => a.levels = next.parse().unwrap_or(8),
+            "--levels" => {
+                a.levels = next.parse().unwrap_or(8);
+                a.levels_set = true;
+            }
             "--auto-test" => a.auto_test = Some(next),
             "--bench" => a.bench = Some(next),
             "--frames" => a.frames = next.parse().ok(),
@@ -152,7 +164,7 @@ fn parse_args() -> Args {
                 continue;
             }
             "--help" | "-h" => {
-                println!("{}", include_str!("main.rs").lines().skip(3).take(12).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
+                println!("{}", include_str!("main.rs").lines().skip(3).take(13).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
                 std::process::exit(0);
             }
             other => eprintln!("argumento desconocido: {other}"),
@@ -277,8 +289,16 @@ fn main() {
         let result = match (&args.auto_test, args.window) {
             (Some(dir), false) => run_headless_tour(&args, &dir.clone()),
             _ => {
-                let s = new_session(&args);
-                app::run(s, app::Options { size: args.size, msaa: args.msaa, frames: args.frames, tour_dir: args.auto_test.clone() })
+                // Sin argumentos: menú principal con la escena colonial girando detrás.
+                let base = save::data_dir();
+                let settings = save::Settings::load(&base);
+                if !args.levels_set {
+                    args.levels = settings.niveles;
+                }
+                let main_menu = args.juego && !args.juego_directo && args.auto_test.is_none();
+                let menu = menu::Menu::new(base, settings, args.levels, args.threads, main_menu);
+                let s = if main_menu { session::Session::new(menu.background_scene, args.levels, args.threads, menu::BACKGROUND_CAM, menu::BACKGROUND_HOUR) } else { new_session(&args) };
+                app::run(s, app::Options { size: args.size, msaa: args.msaa, frames: args.frames, tour_dir: args.auto_test.clone() }, menu)
             }
         };
         if let Err(e) = result {
