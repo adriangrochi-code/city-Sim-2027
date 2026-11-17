@@ -28,8 +28,10 @@ fn curved(p: vec3<f32>) -> vec3<f32> {
 @vertex
 fn vs_main(@location(0) pos: vec3<f32>) -> VOut {
     var o: VOut;
-    o.clip = g.view_proj * vec4(curved(pos), 1.0);
-    o.world = pos;
+    // El plano del río sube y baja con la marea y los temporales (extra.y).
+    let p = vec3(pos.x, pos.y + g.extra.y, pos.z);
+    o.clip = g.view_proj * vec4(curved(p), 1.0);
+    o.world = p;
     return o;
 }
 
@@ -48,8 +50,15 @@ fn cell_shade(p: vec2<f32>, size: f32, t: f32) -> vec4<f32> {
     let h2 = hash2(c + vec2(17.0, 31.0));
     // Oleaje: un tren de olas grande (que cruza las celdas) más el titileo propio de cada una.
     let ctr = (c + 0.5) * size;
-    let swell = sin(ctr.x * 0.045 + ctr.y * 0.02 + t * 0.8) * 0.5 + sin(ctr.y * 0.07 - t * 1.1 + h * 6.28) * 0.5;
-    let tilt = vec2(cos(t * (0.6 + h) + h2 * 6.28), sin(t * (0.5 + h2) + h * 6.28)) * 0.06 + vec2(swell * 0.05, 0.0);
+    // Viento (extra.w = grados·100 + m/s): las olas avanzan hacia donde sopla y crecen con él.
+    let wdeg = floor(g.extra.w / 100.0);
+    let wspd = g.extra.w - wdeg * 100.0;
+    let wa = radians(wdeg);
+    let to = -vec2(sin(wa), -cos(wa)); // hacia dónde va (x este, z sur)
+    let amp = clamp(wspd / 8.0, 0.15, 2.0);
+    let along = dot(ctr, to);
+    let swell = sin(along * 0.06 - t * (0.6 + wspd * 0.08)) * 0.7 + sin(ctr.y * 0.07 - t * 1.1 + h * 6.28) * 0.3;
+    let tilt = vec2(cos(t * (0.6 + h) + h2 * 6.28), sin(t * (0.5 + h2) + h * 6.28)) * 0.04 * amp + to * swell * 0.05 * amp;
     let f = fract(p / size);
     let e = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
     return vec4(tilt, h, e);
@@ -73,7 +82,8 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, view), 0.0), 5.0);
     let base = pow(vec3(0.43, 0.34, 0.23), vec3(2.2)) * (0.92 + 0.16 * cs.z);
     let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, 0.3);
-    let lit = base * (g.sun_color.rgb * max(g.sun_dir.y, 0.0) * 0.8 + sky * 0.5 * g.params.w);
+    let moon = vec3(0.45, 0.5, 0.65) * 0.12 * g.extra.z * g.params.y;
+    let lit = base * (g.sun_color.rgb * max(g.sun_dir.y, 0.0) * 0.8 + sky * 0.5 * g.params.w + moon);
     var col = mix(lit, sky, fres * 0.6);
     let hv = normalize(g.sun_dir.xyz + view);
     // Brillo por celda: una celda entera destella (vóxel), no un punto de ola fina.

@@ -277,6 +277,8 @@ pub struct Economy {
     pub opinion: [f32; 3],
     pub posito: f32,
     pub drought_months: u32,
+    /// Sequía que manda el clima de la ciudad (None = sequías al azar, como antes).
+    pub climate_drought: Option<bool>,
     /// Último presupuesto cerrado (para el panel).
     pub last: MonthReport,
     pub last_subsidy: i64,
@@ -303,6 +305,7 @@ impl Default for Economy {
             opinion: [55.0; 3],
             posito: 0.0,
             drought_months: 0,
+            climate_drought: None,
             last: MonthReport::default(),
             last_subsidy: 0,
             rng: Rng::new(1780),
@@ -440,8 +443,15 @@ impl Economy {
         let mut rep = MonthReport::default();
         let pop = inp.pop.max(0) as f32;
 
-        // Sequía.
-        if self.drought_months > 0 {
+        // Sequía: si la ciudad tiene clima, la decide el clima (ver `climate_drought`).
+        if let Some(on) = self.climate_drought {
+            if on && self.drought_months == 0 {
+                rep.news.push("Sequía: las chacras rinden menos y las fuentes dan menos agua".into());
+            } else if !on && self.drought_months > 0 {
+                rep.news.push("Llovió: terminó la sequía".into());
+            }
+            self.drought_months = on as u32;
+        } else if self.drought_months > 0 {
             self.drought_months -= 1;
             if self.drought_months == 0 {
                 rep.news.push("Llovió: terminó la sequía".into());

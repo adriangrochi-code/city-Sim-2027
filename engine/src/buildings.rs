@@ -59,8 +59,9 @@ impl Rng {
     pub fn state(&self) -> u64 {
         self.0
     }
+    /// Restaura el estado exacto (xorshift: cualquier estado distinto de cero es válido).
     pub fn from_state(s: u64) -> Self {
-        Rng(s | 1)
+        Rng(if s == 0 { 1 } else { s })
     }
 }
 

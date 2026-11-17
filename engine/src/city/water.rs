@@ -43,11 +43,54 @@ pub struct WaterLevel {
     rng: Rng,
     /// Nivel más alto del último temporal (para la gaceta y la ficha).
     pub last_peak: f32,
+    /// Viento de este momento: de dónde viene (grados, 0 = norte, 90 = este) y velocidad (m/s).
+    pub wind_dir: f32,
+    pub wind_speed: f32,
+    wind_hours: f32,
+}
+
+/// Velocidad media del viento (m/s), estación Prado, INUMET 1961–1990.
+pub const VIENTO_MEDIO: [f32; 12] = [4.0, 3.8, 3.6, 3.3, 3.3, 3.4, 3.5, 3.6, 3.9, 4.2, 3.9, 4.0];
+/// Rosa de vientos aproximada de Montevideo por estación (N, NE, E, SE, S, SO, O, NO): del
+/// este y noreste en verano; del norte y del sudoeste (pampero) en invierno.
+const ROSA: [[f32; 8]; 4] = [
+    [0.10, 0.22, 0.22, 0.16, 0.10, 0.08, 0.05, 0.07], // verano
+    [0.16, 0.15, 0.12, 0.12, 0.10, 0.14, 0.10, 0.11], // otoño
+    [0.20, 0.12, 0.08, 0.09, 0.09, 0.17, 0.12, 0.13], // invierno
+    [0.13, 0.20, 0.18, 0.15, 0.10, 0.10, 0.06, 0.08], // primavera
+];
+
+/// Nombre rioplatense del viento según de dónde viene.
+pub fn wind_name(dir: f32) -> &'static str {
+    match (((dir.rem_euclid(360.0) + 22.5) / 45.0) as usize) % 8 {
+        0 => "viento norte",
+        1 => "viento del noreste",
+        2 => "viento del este",
+        3 => "viento del sudeste",
+        4 => "viento sur",
+        5 => "pampero (sudoeste)",
+        6 => "viento del oeste",
+        _ => "viento del noroeste",
+    }
+}
+
+/// Escala de Beaufort en palabras.
+pub fn wind_strength(speed: f32) -> &'static str {
+    match speed {
+        s if s < 1.5 => "calma",
+        s if s < 3.4 => "brisa leve",
+        s if s < 5.5 => "brisa",
+        s if s < 8.0 => "viento moderado",
+        s if s < 10.8 => "viento fresco",
+        s if s < 13.9 => "viento fuerte",
+        s if s < 17.2 => "temporal",
+        _ => "temporal fuerte",
+    }
 }
 
 impl Default for WaterLevel {
     fn default() -> Self {
-        WaterLevel { event_hours: 0.0, event_elapsed: 0.0, wind: Wind::Calma, river: 0.0, regime: 0.0, regime_months: 0, rng: Rng::new(1514), last_peak: 0.0 }
+        WaterLevel { event_hours: 0.0, event_elapsed: 0.0, wind: Wind::Calma, river: 0.0, regime: 0.0, regime_months: 0, rng: Rng::new(1514), last_peak: 0.0, wind_dir: 70.0, wind_speed: 4.0, wind_hours: 0.0 }
     }
 }
 
@@ -86,6 +129,35 @@ pub fn astronomical_tide(hour: f32, phase: f32) -> f32 {
 }
 
 impl WaterLevel {
+    pub fn to_state(&self) -> (Vec<f32>, u64) {
+        let (kind, val) = match self.wind {
+            Wind::Calma => (0.0, 0.0),
+            Wind::Sudestada { peak } => (1.0, peak),
+            Wind::Pampero { drop } => (2.0, drop),
+        };
+        (vec![self.event_hours, self.event_elapsed, kind, val, self.river, self.regime, self.regime_months as f32, self.last_peak, self.wind_dir, self.wind_speed, self.wind_hours], self.rng.state())
+    }
+
+    pub fn from_state(v: &[f32], azar: u64) -> WaterLevel {
+        let mut w = WaterLevel::default();
+        if v.len() >= 8 {
+            w.event_hours = v[0];
+            w.event_elapsed = v[1];
+            w.wind = match v[2] as u8 { 1 => Wind::Sudestada { peak: v[3] }, 2 => Wind::Pampero { drop: v[3] }, _ => Wind::Calma };
+            w.river = v[4];
+            w.regime = v[5];
+            w.regime_months = v[6] as u32;
+            w.last_peak = v[7];
+            if v.len() >= 11 {
+                w.wind_dir = v[8];
+                w.wind_speed = v[9];
+                w.wind_hours = v[10];
+            }
+            w.rng = Rng::from_state(azar);
+        }
+        w
+    }
+
     /// Nivel del río (m sobre el nivel medio) en este momento.
     pub fn level(&self, hour: f32, phase: f32) -> f32 {
         astronomical_tide(hour, phase) + self.surge() + self.river
@@ -108,6 +180,57 @@ impl WaterLevel {
     /// Avanza `hours` horas del reloj del día. `month` es el mes del calendario (0 = enero)
     /// para la estación de los temporales. Devuelve un aviso si empieza o termina un temporal.
     pub fn advance(&mut self, hours: f32, month: u32) -> Option<String> {
+        self.update_wind(hours, month);
+        self.advance_events(hours, month)
+    }
+
+    /// Viento de cada momento: en un temporal, el del temporal; si no, cambia cada pocas horas
+    /// según la rosa de vientos de la estación, con la velocidad media del INUMET.
+    fn update_wind(&mut self, hours: f32, month: u32) {
+        let x = if self.event_hours > 0.0 { (self.event_elapsed / self.event_hours).clamp(0.0, 1.0) } else { 0.0 };
+        let bell = (x * std::f32::consts::PI).sin();
+        match self.wind {
+            Wind::Sudestada { peak } => {
+                self.wind_dir = 135.0 + 15.0 * (self.event_elapsed * 0.3).sin();
+                self.wind_speed = 7.0 + (6.0 + peak * 4.0) * bell;
+                return;
+            }
+            Wind::Pampero { drop } => {
+                self.wind_dir = 225.0 + 20.0 * (self.event_elapsed * 0.4).sin();
+                self.wind_speed = 8.0 + (8.0 + drop * 6.0) * bell;
+                return;
+            }
+            Wind::Calma => {}
+        }
+        self.wind_hours -= hours;
+        if self.wind_hours > 0.0 {
+            return;
+        }
+        let m = (month % 12) as usize;
+        let season = match m {
+            11 | 0 | 1 => 0,
+            2..=4 => 1,
+            5..=7 => 2,
+            _ => 3,
+        };
+        let r = self.rng.f();
+        let mut acc = 0.0;
+        let mut k = 7;
+        for (i, p) in ROSA[season].iter().enumerate() {
+            acc += p;
+            if r < acc {
+                k = i;
+                break;
+            }
+        }
+        self.wind_dir = k as f32 * 45.0 + (self.rng.f() - 0.5) * 30.0;
+        // Velocidad: lognormal alrededor de la media del mes.
+        let g = (self.rng.f() + self.rng.f() + self.rng.f() - 1.5) * 2.0;
+        self.wind_speed = (VIENTO_MEDIO[m] * (0.45 * g - 0.1).exp()).clamp(0.0, 14.0);
+        self.wind_hours = 3.0 + self.rng.f() * 9.0;
+    }
+
+    fn advance_events(&mut self, hours: f32, month: u32) -> Option<String> {
         if self.event_hours > 0.0 {
             self.event_elapsed += hours;
             self.last_peak = self.last_peak.max(self.surge());
@@ -190,9 +313,10 @@ mod tests {
         assert!(range(0.5) > range(0.25) * 1.5, "vivas {} / muertas {}", range(0.5), range(0.25));
         assert!(range(0.5) < 0.9);
         // Dos pleamares por día.
-        let v: Vec<f32> = (0..240).map(|k| astronomical_tide(k as f32 * 0.1, 0.0)).collect();
+        // Dos pleamares por día (la marea dura 12 h 25 min: en 26 h hay dos o tres).
+        let v: Vec<f32> = (0..260).map(|k| astronomical_tide(k as f32 * 0.1, 0.0)).collect();
         let peaks = (1..v.len() - 1).filter(|&i| v[i] > v[i - 1] && v[i] >= v[i + 1]).count();
-        assert!((2..=3).contains(&peaks), "{peaks} pleamares en 24 h");
+        assert!((2..=3).contains(&peaks), "{peaks} pleamares en 26 h");
         assert_eq!(moon_name(0.0), "luna nueva");
         assert_eq!(moon_name(0.5), "luna llena");
         assert!(moon_light(0.5) > 0.99 && moon_light(0.0) < 0.01);
@@ -213,6 +337,32 @@ mod tests {
         assert!(events >= 4, "{events} temporales en dos años");
         assert!(hi > 0.4 && hi < 2.4, "pico {hi}");
         assert!(lo < -0.2 && lo > -1.3, "bajante {lo}");
+    }
+
+    #[test]
+    fn viento_con_rosa_y_velocidad() {
+        let mut w = WaterLevel::default();
+        let (mut sum, mut n, mut east_summer, mut sw_winter) = (0.0, 0, 0, 0);
+        for h in 0..(24 * 365) {
+            let month = (h / (24 * 30)) as u32 % 12;
+            w.advance(1.0, month);
+            if w.wind == Wind::Calma {
+                sum += w.wind_speed;
+                n += 1;
+                let name = wind_name(w.wind_dir);
+                if month <= 1 && (name.contains("este") || name.contains("noreste")) {
+                    east_summer += 1;
+                }
+                if (5..=7).contains(&month) && name.contains("pampero") {
+                    sw_winter += 1;
+                }
+            }
+        }
+        let mean = sum / n as f32;
+        assert!((2.5..5.5).contains(&mean), "velocidad media {mean} m/s");
+        assert!(east_summer > 300 && sw_winter > 150, "este en verano {east_summer} · pampero en invierno {sw_winter}");
+        assert_eq!(wind_name(135.0), "viento del sudeste");
+        assert_eq!(wind_strength(4.0), "brisa");
     }
 
     #[test]

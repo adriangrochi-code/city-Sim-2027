@@ -264,7 +264,9 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     }
     let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, ln.y * 0.5 + 0.5);
     let bounce = vec3(0.35, 0.30, 0.22) * max(-ln.y, 0.0);
-    var light = g.sun_color.rgb * ndl * sh + (sky * 0.55 + bounce * 0.2) * g.params.w * ao;
+    // Luz de luna: de noche, más clara en luna llena (extra.z), fría y desde arriba.
+    let moon = vec3(0.45, 0.5, 0.65) * 0.14 * g.extra.z * g.params.y * (0.4 + 0.6 * max(ln.y, 0.0)) * ao;
+    var light = g.sun_color.rgb * ndl * sh + (sky * 0.55 + bounce * 0.2) * g.params.w * ao + moon;
     var col = albedo * light;
     // Agua de los arroyos: refleja el cielo, más cuanto más rasante se mira.
     if (mat == M_STREAM) {

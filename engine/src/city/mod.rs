@@ -5,6 +5,7 @@
 //! Cada acción devuelve las ediciones de vóxeles que produce; la sesión las aplica al mundo
 //! en streaming, que re-malla solo las columnas tocadas.
 
+pub mod climate;
 pub mod economy;
 pub mod game;
 pub mod game_demo;
@@ -12,6 +13,7 @@ pub mod lots;
 pub mod roads;
 pub mod save;
 pub mod voxelize;
+pub mod water;
 
 use crate::buildings::{Edits, Rng};
 use crate::palette::AIR;
@@ -27,6 +29,17 @@ use voxelize::{build_rotated, plaza_edits, road_edits, road_restore, PLAZA_SIZE}
 pub const BLOCK: f32 = 86.6;
 /// Segundos de juego por mes (a velocidad 1).
 pub const MONTH_SECONDS: f32 = 10.0;
+/// Horas del reloj del día por segundo de juego (un día cada 8 minutos).
+pub const HOURS_PER_SECOND: f32 = 24.0 / 480.0;
+
+/// Inundación pendiente de evaluar.
+#[derive(Clone, Copy, Debug)]
+pub enum Flood {
+    /// El río subió hasta este nivel (m).
+    Rio(f32),
+    /// Crecientes de los arroyos.
+    Arroyos,
+}
 pub const START_YEAR: u32 = 1726;
 pub const MONTHS: [&str; 12] = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
@@ -39,14 +52,19 @@ pub struct City {
     pub plaza: Option<(Vec2, f32)>,
     /// Recursos, impuestos, presupuesto, opinión y ordenanzas.
     pub economy: economy::Economy,
+    /// Clima y estaciones (normales del INUMET) y el calendario del campo.
+    pub climate: climate::Climate,
+    /// Nivel del río: mareas, sudestadas, pampero y crecientes.
+    pub water: water::WaterLevel,
     rng: Rng,
+    pending_flood: Option<Flood>,
     month_acc: f32,
     growth_acc: f32,
 }
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), rng: Rng::new(1726), month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -382,6 +400,19 @@ impl City {
             self.month_acc -= MONTH_SECONDS;
             news.extend(self.month_tick());
         }
+        // El río: horas del reloj del día (24 h cada 8 minutos, como el ciclo de día y noche).
+        let was = self.water.wind;
+        if let Some(n) = self.water.advance(dt * HOURS_PER_SECOND, self.month % 12) {
+            news.push(n);
+        }
+        if matches!(was, water::Wind::Sudestada { .. }) && self.water.wind == water::Wind::Calma {
+            self.pending_flood = Some(Flood::Rio(self.water.last_peak + 0.3));
+        }
+        if let Some(f) = self.pending_flood.take() {
+            if let Some(n) = self.flood(t, f, e) {
+                news.push(n);
+            }
+        }
         self.growth_acc += dt;
         while self.growth_acc >= 0.5 {
             self.growth_acc -= 0.5;
@@ -402,15 +433,23 @@ impl City {
         let houses = built[ZoneKind::Residencial as usize];
         let (jobs_c, jobs_i) = self.lots.jobs();
         let mut production = [0.0f32; 6];
-        production[Res::Pan as usize] = 300.0 + pop as f32 * 1.05; // chacras privadas del ejido
-        production[Res::Carne as usize] = 400.0 + pop as f32 * 0.9;
-        production[Res::Ladrillos as usize] = 60.0;
-        production[Res::Cueros as usize] = 80.0 + pop as f32 * 0.05;
-        production[Res::Sebo as usize] = 40.0;
+        // Chacras privadas del ejido: el grano entra con las cosechas (trigo en diciembre y
+        // enero, maíz en otoño), según el año que haya tocado.
+        let annual_grain = (300.0 + pop as f32 * 1.05) * 12.0;
+        production[Res::Pan as usize] = self.climate.grain_this_month(self.month, annual_grain);
+        // Ganado del campo: depende de las pasturas.
+        let herd = self.climate.livestock_factor();
+        production[Res::Carne as usize] = (400.0 + pop as f32 * 0.9) * herd;
+        production[Res::Ladrillos as usize] = 60.0 * self.climate.brick_factor();
+        production[Res::Cueros as usize] = (80.0 + pop as f32 * 0.05) * herd;
+        production[Res::Sebo as usize] = 40.0 * herd;
         // Los talleres de las zonas industriales: ladrillos, sebo y cueros curtidos.
-        production[Res::Ladrillos as usize] += jobs_i as f32 * 1.5;
+        production[Res::Ladrillos as usize] += jobs_i as f32 * 1.5 * self.climate.brick_factor();
         production[Res::Sebo as usize] += jobs_i as f32 * 1.0;
         production[Res::Cueros as usize] += jobs_i as f32 * 0.8;
+        // El grano de la cosecha se guarda en las casas y graneros hasta la próxima.
+        let mut storage = [0.0f32; 6];
+        storage[Res::Pan as usize] = pop as f32 * 12.0;
         let mut construction = [0.0f32; 6];
         construction[Res::Ladrillos as usize] = houses[1] as f32 * 0.4 + houses[2] as f32 * 0.8;
         economy::MonthInput {
@@ -422,12 +461,66 @@ impl City {
             jobs_i,
             production,
             construction,
+            storage,
             ships: if self.month % 4 == 0 { 1 } else { 0 },
-            water_ratio: 0.6,
+            water_ratio: (0.4 + self.climate.soil / climate::SUELO_MAX * 0.4).min(0.8),
             upkeep_roads: (self.net.total_length() * 0.01) as i64,
             world_hides: 1.0,
             ..Default::default()
         }
+    }
+
+    /// Fase de la luna (0 nueva, 0,5 llena): un mes del calendario es una lunación.
+    pub fn moon_phase(&self) -> f32 {
+        water::moon_phase(self.month, self.month_acc / MONTH_SECONDS)
+    }
+
+    /// Nivel del río (m) a esta hora del día: marea, viento y caudal.
+    pub fn water_level(&self, hour: f32) -> f32 {
+        self.water.level(hour, self.moon_phase())
+    }
+
+    /// Daños de una inundación: el río que subió con la sudestada (hasta `nivel` m) o las
+    /// crecientes de los arroyos tras un temporal. Los ranchos de barro en lo bajo se pierden;
+    /// las casas de material aguantan. Devuelve el aviso para la gaceta.
+    fn flood(&mut self, t: &TerrainGen, f: Flood, e: &mut Edits) -> Option<String> {
+        let mut lost = Vec::new();
+        let mut wet = 0;
+        for l in self.lots.lots.values() {
+            if l.level == 0 {
+                continue;
+            }
+            let h = t.height(l.c.x, l.c.y);
+            let under = match f {
+                Flood::Rio(level) => h < level,
+                Flood::Arroyos => {
+                    let (d, hw) = t.arroyo_query(l.c.x, l.c.y);
+                    d < hw + 25.0 + hw * 3.0
+                }
+            };
+            if under {
+                wet += 1;
+                if l.level == 1 {
+                    lost.push(l.id);
+                }
+            }
+        }
+        for id in &lost {
+            let lot = self.lots.lots.get_mut(id).unwrap();
+            for &v in &lot.voxels {
+                e.set(v, AIR);
+            }
+            lot.voxels.clear();
+            lot.level = 0;
+            lot.age = 0;
+        }
+        if wet == 0 {
+            return None;
+        }
+        Some(match f {
+            Flood::Rio(level) => format!("La sudestada subió el río {:.1} m: {} solares bajo el agua, {} ranchos perdidos", level, wet, lost.len()),
+            Flood::Arroyos => format!("Crecieron los arroyos: {} solares inundados en los bajos, {} ranchos perdidos", wet, lost.len()),
+        })
     }
 
     fn month_tick(&mut self) -> Vec<String> {
@@ -446,6 +539,16 @@ impl City {
             news.push(format!("Llega un barco con {ship} pobladores"));
         }
         self.pool = (self.pool + arrivals).min(600);
+        // Clima del mes: cosechas, pasturas, sequía y el caudal de los ríos.
+        let (weather, cnews) = self.climate.month_tick(self.month % 12);
+        news.extend(cnews);
+        self.economy.climate_drought = Some(weather.drought);
+        if let Some(n) = self.water.month_tick(weather.drought) {
+            news.push(n);
+        }
+        if weather.deluge {
+            self.pending_flood = Some(Flood::Arroyos);
+        }
         let input = self.month_input();
         let report = self.economy.month(&input);
         self.money += report.balance();

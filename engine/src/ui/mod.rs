@@ -272,6 +272,7 @@ pub fn chips(game: &Game) -> Vec<(Icon, String, String)> {
     let (v1, t1) = opinion(1);
     let (v2, t2) = opinion(2);
     vec![
+        weather_chip(game),
         (Icon::Ladrillo, fmt_thousands(st(Res::Ladrillos).amount.round() as i64), stock_tip(Res::Ladrillos)),
         (Icon::Piedra, fmt_thousands(st(Res::Piedra).amount.round() as i64), stock_tip(Res::Piedra)),
         (Icon::Pan, fmt_dec(e.price(Res::Pan), 2), format!("Precio del pan (1,00 es el normal). {}", stock_tip(Res::Pan))),
@@ -279,6 +280,69 @@ pub fn chips(game: &Game) -> Vec<(Icon, String, String)> {
         (Icon::Comercio, v1, t1),
         (Icon::Hacienda, v2, t2),
     ]
+}
+
+/// Ficha del clima: estación y temperatura; el globo cuenta el mes, el río, la luna y qué
+/// se puede sembrar.
+pub fn weather_chip(game: &Game) -> (Icon, String, String) {
+    use crate::city::{climate, water};
+    let c = &game.city;
+    let m = (c.month % 12) as usize;
+    // Antes de cerrar el primer mes se muestran las normales del mes.
+    let normal = climate::Weather {
+        month: m,
+        temp: climate::T_MEDIA[m] + climate::EPOCA_C,
+        tmin: climate::T_MIN_MEDIA[m] + climate::EPOCA_C,
+        rain: climate::LLUVIA_MM[m],
+        soil: c.climate.soil,
+        ..Default::default()
+    };
+    let w = if c.climate.last.temp == 0.0 && c.climate.last.rain == 0.0 { &normal } else { &c.climate.last };
+    let phase = c.moon_phase();
+    let mut tip = format!(
+        "{} de {} · {} °C (mínimas de {} °C) · lluvia del mes {} mm (normal {} mm) · agua en el suelo {} % · heladas: {} días",
+        capitalize(climate::season(m)),
+        climate::MESES[m],
+        fmt_dec(w.temp, 1),
+        fmt_dec(w.tmin, 1),
+        w.rain.round() as i32,
+        climate::LLUVIA_MM[m] as i32,
+        (w.soil / climate::SUELO_MAX * 100.0).round() as i32,
+        w.frost_days.round() as i32
+    );
+    tip += match c.climate.regime {
+        climate::Regime::Lluvioso => " · años lluviosos",
+        climate::Regime::Seco => " · años secos",
+        climate::Regime::Normal => "",
+    };
+    if w.drought {
+        tip += " · SEQUÍA";
+    }
+    tip += &format!("\nRío: {} m sobre el nivel medio", fmt_dec(c.water_level(12.0), 2));
+    match c.water.wind {
+        water::Wind::Sudestada { .. } => tip += " · sudestada",
+        water::Wind::Pampero { .. } => tip += " · pampero",
+        water::Wind::Calma => {}
+    }
+    tip += &format!(
+        "\nViento: {}, {} km/h ({}) · media de {} km/h en {}",
+        water::wind_name(c.water.wind_dir),
+        (c.water.wind_speed * 3.6).round() as i32,
+        water::wind_strength(c.water.wind_speed),
+        (water::VIENTO_MEDIO[m] * 3.6).round() as i32,
+        climate::MESES[m]
+    );
+    tip += &format!(" · {}", water::moon_name(phase));
+    tip += &format!("\nPasturas al {} %", (c.climate.pasture * 100.0).round() as i32);
+    for line in c.climate.sowing_advice(c.month) {
+        tip += &format!("\n{}", capitalize(&line));
+    }
+    tip += "\nDatos: normales 1991–2020 del INUMET (estación Prado), algo más frescas por la época.";
+    // Rumbo de donde viene el viento, como en los partes meteorológicos.
+    const RUMBOS: [&str; 8] = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+    let arrow = RUMBOS[(((c.water.wind_dir.rem_euclid(360.0) + 22.5) / 45.0) as usize) % 8];
+    let value = format!("{} °C · {} {} km/h", w.temp.round() as i32, arrow, (c.water.wind_speed * 3.6).round() as i32);
+    (Icon::Agua, value, tip)
 }
 
 /// Balance del último mes cerrado según el presupuesto de la economía.
@@ -1052,10 +1116,14 @@ mod tests {
         assert_eq!(stats(&g, 9.5, Some(-1500)).balance, "-1.500/mes");
         assert_eq!(stats(&g, 9.5, Some(320)).balance, "+320/mes");
         let ch = chips(&g);
-        assert_eq!(ch.len(), 6);
-        assert_eq!(ch[0].1, "200", "ladrillos de la fundación");
-        assert_eq!(ch[2].1, "1,00", "precio normal del pan");
-        assert!(ch[3].2.contains("vecinos"), "{}", ch[3].2);
+        assert_eq!(ch.len(), 7);
+        assert!(ch[0].2.contains("INUMET") && ch[0].2.contains("Trigo"), "{}", ch[0].2);
+        assert!(ch[0].1.starts_with("21 °C"), "marzo, con la normal del INUMET: {}", ch[0].1);
+        assert!(ch[0].2.starts_with("Otoño de marzo"), "{}", ch[0].2);
+        assert!(ch[0].2.contains("Viento:"), "{}", ch[0].2);
+        assert_eq!(ch[1].1, "200", "ladrillos de la fundación");
+        assert_eq!(ch[3].1, "1,00", "precio normal del pan");
+        assert!(ch[4].2.contains("vecinos"), "{}", ch[4].2);
         assert_eq!(month_balance(&g), None, "sin mes cerrado todavía");
     }
 

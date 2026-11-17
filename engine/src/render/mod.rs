@@ -245,6 +245,12 @@ pub struct Renderer {
     pub adapter_name: String,
     /// Suaviza el sombreado de los escalones del terreno (evita las líneas oscuras de lejos).
     pub smooth_terrain: bool,
+    /// Nivel del río (m sobre el nivel medio): mareas, sudestadas, bajantes.
+    pub water_level: f32,
+    /// Luz de la luna (0 nueva, 1 llena): aclara las noches.
+    pub moon: f32,
+    /// Viento: de dónde viene (grados) y velocidad (m/s), para las olas.
+    pub wind: (f32, f32),
     /// Tiempo en segundos (para las ondas del agua).
     pub time: f32,
 }
@@ -721,6 +727,9 @@ impl Renderer {
             shadow_redraws: std::cell::Cell::new(0),
             adapter_name,
             smooth_terrain: true,
+            water_level: 0.0,
+            moon: 0.5,
+            wind: (70.0, 4.0),
             time: 3.0,
         })
     }
@@ -986,7 +995,7 @@ impl Renderer {
             // Niebla: más tenue cuanto más se aleja la cámara, para que la vista del mapa no se lave.
             // Bruma: en un día claro se ven 30 a 40 km sobre el río; desde muy alto, algo más.
             params: Vec4::new(1.0 / (32000.0f32).max(cam.distance * 10.0), l.night, self.time, l.ambient).into(),
-            extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, self.water_level, self.moon, self.wind.0.rem_euclid(360.0).round() * 100.0 + self.wind.1.clamp(0.0, 99.0)],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
         View { eye: cam.eye(), sun: l.sun_dir, view_proj, light_vp }

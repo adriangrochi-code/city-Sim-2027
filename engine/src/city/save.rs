@@ -126,6 +126,11 @@ pub struct CityData {
     pub calles: RoadsData,
     pub solares: LotsData,
     pub economia: EconomyData,
+    /// Clima y río (desde el formato 1 ampliado; las partidas viejas empiezan con clima normal).
+    #[serde(default)]
+    pub clima: Option<(Vec<f32>, u64)>,
+    #[serde(default)]
+    pub rio: Option<(Vec<f32>, u64)>,
 }
 
 impl CityData {
@@ -166,6 +171,8 @@ impl CityData {
             calles,
             solares,
             economia,
+            clima: Some(c.climate.to_state()),
+            rio: Some(c.water.to_state()),
         }
     }
 
@@ -201,6 +208,9 @@ impl CityData {
             month: self.mes,
             plaza: self.plaza.map(|(p, a)| (p2(p), a)),
             economy,
+            climate: self.clima.as_ref().map(|(v, a)| super::climate::Climate::from_state(v, *a)).unwrap_or_default(),
+            water: self.rio.as_ref().map(|(v, a)| super::water::WaterLevel::from_state(v, *a)).unwrap_or_default(),
+            pending_flood: None,
             rng: Rng::from_state(self.azar),
             month_acc: self.acumulado_mes,
             growth_acc: self.acumulado_crecimiento,
@@ -256,6 +266,13 @@ mod tests {
         assert_eq!(loaded.economy.opinion, city.economy.opinion);
         assert_eq!(loaded.economy.last.balance(), city.economy.last.balance());
         assert_eq!(loaded.demand(), city.demand());
+        assert_eq!(loaded.climate.to_state(), city.climate.to_state(), "clima");
+        assert_eq!(loaded.water.to_state(), city.water.to_state(), "río");
+        assert_eq!(loaded.economy.drought_months, city.economy.drought_months);
+        assert_eq!(loaded.economy.posito, city.economy.posito);
+        for (a, b) in loaded.economy.stocks.iter().zip(&city.economy.stocks) {
+            assert_eq!((a.amount, a.price, a.capacity), (b.amount, b.price, b.capacity), "existencias");
+        }
         // Los vóxeles regenerados son los mismos edificios que había.
         let e = loaded.rebuild_edits(&t);
         assert!(e.voxels.len() > 10_000);

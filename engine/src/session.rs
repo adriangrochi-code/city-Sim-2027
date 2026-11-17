@@ -172,6 +172,19 @@ impl Session {
 
     /// Sube a la GPU lo que terminaron los hilos de trabajo (con un presupuesto por cuadro).
     pub fn apply_ops(&mut self, r: &mut Renderer, vertex_budget: usize) -> usize {
+        // Río y luna del juego (sin partida: río en su nivel medio y media luna).
+        match &self.game {
+            Some(g) if g.city.plaza.is_some() => {
+                r.water_level = g.city.water_level(self.hour);
+                r.moon = crate::city::water::moon_light(g.city.moon_phase());
+                r.wind = (g.city.water.wind_dir, g.city.water.wind_speed);
+            }
+            _ => {
+                r.water_level = 0.0;
+                r.moon = 0.5;
+                r.wind = (70.0, 4.0);
+            }
+        }
         let ops = self.streamer.poll(vertex_budget);
         let n = ops.len();
         r.maintain();
