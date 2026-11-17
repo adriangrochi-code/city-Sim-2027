@@ -74,6 +74,9 @@ la República)**, por sus servicios OGC en `mapas.ide.uy`:
 | `tools/mapa_real/construir_mapa.py` | Constructor reproducible (Python 3 + numpy + Pillow) |
 | `assets/mapas/montevideo/altura.bin` | Mapa jugable: 1201 × 1201 muestras cada 20 m (2,9 MB) |
 | `assets/mapas/montevideo/contexto.bin` | Entorno de 25 km alrededor, cada 100 m (741 × 741, 1,1 MB) |
+| `assets/mapas/montevideo/amplio.bin` | Entorno amplio: 300 × 300 km alrededor del mapa, cada 500 m (601 × 601, 0,7 MB; `metros = valor / 100 − 50`). Ver [Entorno amplio](#entorno-amplio) |
+| `assets/mapas/montevideo/amplio_cobertura.bin` | Bañado y monte nativo del entorno amplio: 2 bytes por muestra (0..255), misma grilla (0,7 MB) |
+| `tools/mapa_real/construir_entorno_amplio.py` | Constructor del entorno amplio (aparte: no hace falta rehacer el mapa) |
 | `assets/mapas/montevideo/biomas.bin` | Biomas oficiales en la grilla del mapa (1201 × 1201, `uint8`) |
 | `assets/mapas/montevideo/biomas_contexto.bin` | Biomas oficiales en la grilla del entorno (741 × 741) |
 | `assets/mapas/montevideo/bosque.bin`, `bosque_contexto.bin` | Monte nativo reconstruido para 1726: cobertura de copas `uint8` (valor / 255) en las dos grillas. Ver [vegetacion-historica.md](vegetacion-historica.md) |
@@ -196,6 +199,68 @@ entorno (2430 km); 110 ha de playa y 666 ha de bañado dentro del mapa jugable.
 - **Godot** lee solo `arroyos.json` (el entorno tiene demasiados cauces para su generador de
   cintas y árboles).
 
+## Entorno amplio
+
+Desde lo alto, o desde un borde del mapa mirando hacia afuera, la tierra terminaba en una línea
+recta contra el plano del río: el entorno de 100 m (`contexto.bin`) llega a 25 km del mapa y el
+último anillo de detalle del motor, a unos 25 km de la cámara. Ahora hay una **tercera grilla**,
+gruesa, que llega a 150 km del centro del mapa en todas las direcciones: Colonia y San José al
+oeste, Florida al norte, Maldonado, las sierras de las Ánimas (432 m en la grilla) y Punta del
+Este al este y, cruzando el Río de la Plata, la costa argentina de Magdalena, Punta Indio y la
+bahía de Samborombón.
+
+| Dato | Fuente | Resultado |
+|---|---|---|
+| Relieve de Uruguay | MDT de 30 m de la IDE (WCS `raster__mdt_pais_30m_4326`), pedido ya reducido por el servidor (`scaleFactor=0.25`, ~120 m) en 21 recortes de medio grado, recortados a la cobertura del MDT (al sur de −34,997° el servidor da 404) | `amplio.bin` |
+| Relieve de Argentina | **Copernicus DEM GLO-90** (ESA, 90 m, superficie), recortes de 1° de `copernicus-dem-90m.s3.amazonaws.com` (12 de 16; los que faltan son mar). El mar viene en 0 exacto. Solo al sur y al oeste del río (lat < −34,85°, lon < −56,5°), donde la IDE no tiene tierra | `amplio.bin` |
+| Bañados | IDE, WFS `hidrografia:banado_a` (y `area_humeda_a` si el servidor responde: en la última corrida cortó todas las conexiones y quedó afuera) + bañados del relieve: tierra de menos de 4 m, llana, a menos de 3 km del agua (así entra Samborombón) | `amplio_cobertura.bin`, byte 0 |
+| Monte nativo | DGF 2021 por el SNIG (la misma capa que `bosque.bin`), polígonos de 3 ha o más, simplificados por el servidor (`maxAllowableOffset`), 5531 polígonos; cobertura × 1,5 (más monte en 1726 que hoy, como en el mapa) | `amplio_cobertura.bin`, byte 1 |
+
+Atribución de Copernicus (va en `meta.json`, sección `amplio`): © DLR e.V. 2010-2014 y © Airbus
+Defence and Space GmbH 2014-2018, provisto bajo COPERNICUS por la Unión Europea y la ESA.
+
+**Proceso** (`construir_entorno_amplio.py`): muestras de 100 m (5 × 5 por celda) de los dos
+modelos; una celda es tierra si lo es más de la mitad de sus muestras, con la altura media de
+las de tierra (mínimo 0,6 m). Los pozos de una o dos celdas se rellenan. El agua toma el fondo
+por distancia a la tierra como el resto del mapa (de −0,4 a −7,5 m). Altura máxima 470 m: por eso
+la codificación es de 1 cm (`valor / 100 − 50`, hasta 605 m) y no la de `altura.bin` (que llega a
+277 m). La sección `amplio` de `meta.json` tiene la grilla, las fuentes y la nota; el constructor
+del mapa la conserva al reescribir `meta.json`.
+
+```
+python3 tools/mapa_real/construir_entorno_amplio.py --cache /ruta/a/una/carpeta [--sin-hidrografia]
+```
+
+La primera vez baja ~16 MB del MDT, ~55 MB de Copernicus y las capas (minutos); después usa la
+caché. `--sin-hidrografia` no pide los bañados a la IDE (si el servidor no responde).
+
+### En el motor
+
+- `terrain.rs`: tres grillas que se funden sin escalón: el mapa (20 m) → el entorno (100 m, con
+  la transición de 400 m de siempre) → el amplio (500 m): los últimos 3 km de la grilla del
+  entorno (`WIDE_BLEND`) se mezclan con la amplia, alturas, distancia al agua y monte.
+  `RealMap::ctx_weight` da el peso.
+- Más allá de la grilla de 100 m solo se usa el relieve (bicúbico) con una ondulación de ±6 m en
+  kilómetros; las costas de piedra, médanos, restingas y cauces se apagan con el mismo peso (sus
+  datos no llegan hasta ahí, y el vóxel mide 64 m o más). Antes, fuera del entorno, las grillas
+  se muestreaban con el índice recortado y el último valor se estiraba en líneas rectas.
+- Biomas del entorno amplio (`wide_biome`): arena en la costa, bañado y monte según la cobertura,
+  roca en las laderas empinadas de las sierras, pradera más seca en las cuchillas. En la
+  transición se mezclan vóxel a vóxel con los del entorno.
+- Fuera de la grilla amplia (más de 150 km del centro; el juego no llega ahí con 11 niveles) el
+  relieve se funde en 15 km (`WIDE_FADE`) con una llanura de ruido suave, o con el agua si el
+  borde es agua: nada se estira.
+- Memoria: cuatro grillas de 601² en `f32` (alturas, distancia al agua, bañado, monte), 5,8 MB.
+- Tests: `el_entorno_amplio_tiene_la_geografia_real` (Florida, San José, las Ánimas, Maldonado,
+  el mar frente a Piriápolis, el medio del río, Punta Indio) y
+  `sin_cortes_entre_las_grillas_del_mapa_el_entorno_y_el_amplio` (altura continua a 1 m a cada
+  lado de los cuatro bordes de las tres grillas, sin escalones en la transición, y fuera de la
+  grilla amplia una llanura y no el borde estirado).
+
+La costa argentina está a unos 100 km de Montevideo: con el radio de dibujo actual (~90 km) y la
+bruma no se llega a ver, como en la realidad (desde Montevideo, la otra orilla queda bajo el
+horizonte). Sirve para que, al alejarse, el río tenga otra orilla y no un borde.
+
 ## Cómo regenerar
 
 ```
@@ -268,4 +333,8 @@ Sin cambios para el resto del código: `height`, `is_land`, `arroyo_distance`, `
 - Los arroyos del relieve que rellenan la ciudad actual pueden quedar a unos metros del cauce
   histórico (son D8 sobre un MDT de 30 m).
 - La Isla de Flores (fuera del mapa jugable) se ve solo de lejos: la cámara no sale del mapa.
+- Entorno amplio: la costa a 500 m es escalonada de cerca (solo se ve a decenas de km); el monte
+  de Maldonado es el de hoy (DGF 2021 × 1,5), sin la reconstrucción de 1726 del mapa; la capa
+  `area_humeda_a` de la IDE no bajó (el servidor cortaba las conexiones) y los bañados salen de
+  `banado_a` y del relieve. En Argentina el modelo es de superficie (Copernicus), no de suelo.
 - Calles y solares de Godot todavía no consultan `is_water`: se puede construir sobre un arroyo.

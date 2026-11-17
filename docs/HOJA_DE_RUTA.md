@@ -14,6 +14,7 @@
 | Distribución | Versión de prueba para Linux (probada) y Windows (compilada) con `tools/empaquetar.sh` |
 | Mundo real en el motor | MDT de 30 m de la IDE, hidrografía oficial (arroyos, cañadas, bañados, playas, islas), curvatura, puentes, ríos con corriente, mareas y ciclo lunar, sequías e inundaciones, clima con datos del INUMET, viento |
 | Paisaje de 1726 | Monte nativo calibrado con datos y testimonios (4,2 % del mapa, galerías por clase de cauce), 9 especies de árboles con variantes, flora baja nativa por zona, suelos y afloramientos (CONEAT), costa por tramos (arena, mixta, piedra, restingas) — ver `docs/sistemas/vegetacion-historica.md` y `costa.md` |
+| Entorno amplio | 300 × 300 km de relieve real alrededor del mapa (MDT de la IDE + Copernicus para la costa argentina, monte y bañados), 11 niveles de detalle (la tierra llega al horizonte, ~90 km), sin cortes rectos entre grillas ni contra el agua — ver `docs/sistemas/mapa-real.md#entorno-amplio` |
 | Calidad visual | Vóxel de 0,25 m, flora en micro-vóxeles de 0,125 m, copas con racimos, nivel de detalle del monte, agua sin tapar tierra en ningún nivel, niebla con sol |
 
 ## Fase 1: cerrar la época colonial (prototipo)

@@ -11,7 +11,7 @@
 //!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
 //!   motor --bench carpeta              banco de pruebas reproducible (tabla y capturas)
 //! Opciones: --mapa real (Montevideo, sin la escena), --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
-//!   --hour 10.5, --size 1600x900, --levels 9, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
+//!   --hour 10.5, --size 1600x900, --levels 11, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
 //!   --sin-suavizar (sin el suavizado de los escalones del terreno)
 
 mod app;

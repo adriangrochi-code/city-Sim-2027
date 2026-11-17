@@ -821,5 +821,36 @@
       "caliza": 0.0,
       "turba": 0.021
     }
+  },
+  "amplio": {
+    "desde_m": -138000.0,
+    "paso_m": 500.0,
+    "muestras": 601,
+    "archivo": "amplio.bin",
+    "archivo_cobertura": "amplio_cobertura.bin",
+    "codificacion": "amplio.bin: uint16 little-endian, metros = valor / 100 - 50, filas de norte a sur; amplio_cobertura.bin: 2 bytes por muestra (bañado, monte nativo), 0..255",
+    "fuentes": [
+      {
+        "capa": "raster__mdt_pais_30m_4326 (scaleFactor 0.25)",
+        "servicio": "WCS https://mapas.ide.uy/geoserver-raster/wcs",
+        "uso": "relieve de Uruguay (amplio.bin)"
+      },
+      {
+        "capa": "Copernicus DEM GLO-90",
+        "servicio": "https://copernicus-dem-90m.s3.amazonaws.com",
+        "uso": "relieve de la costa argentina (amplio.bin)"
+      },
+      {
+        "capa": "hidrografia:banado_a",
+        "servicio": "WFS https://mapas.ide.uy/geoserver-vectorial/wfs",
+        "uso": "bañados del entorno amplio (amplio_cobertura.bin)"
+      },
+      {
+        "capa": "DGF/Monte_Nativo_2021 (capa 1, polígonos de 3 ha o más)",
+        "servicio": "ArcGIS REST https://web.snig.gub.uy/arcgisserver/rest/services/DGF/Monte_Nativo_2021/MapServer/1/query",
+        "uso": "monte nativo del entorno amplio (amplio_cobertura.bin)"
+      }
+    ],
+    "nota": "Argentina (sur del Río de la Plata): Copernicus DEM GLO-90 de la ESA (superficie, no suelo). © DLR e.V. 2010-2014 y © Airbus Defence and Space GmbH 2014-2018, provisto bajo COPERNICUS por la Unión Europea y la ESA. Ver docs/sistemas/mapa-real.md."
   }
 }

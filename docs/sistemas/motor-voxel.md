@@ -72,14 +72,31 @@ y la distancia que cubre:
 | 6 | 16 m | 512 m | 12 km |
 | 7 | 32 m | 1 km | 24 km |
 | 8 | 64 m | 2 km | 49 km |
+| 9 | 128 m | 4 km | 98 km |
+| 10 | 256 m | 8 km | 197 km |
 
 - Cada anillo tiene 24 × 24 chunks y excluye el hueco que cubre el nivel más fino. Las
   regiones se alinean a la cuadrícula del nivel siguiente, así cada punto del mapa pertenece a
   **exactamente un nivel** (hay un test que lo verifica).
 - **Juntas entre niveles**: el mallador trata como aire lo que queda fuera del anillo, y eso
   genera "faldones" verticales que tapan las grietas.
-- **Mapa completo**: con 9 niveles (`lod::LEVELS`) ya se cubren los 24 km. Cuando la cámara se mueve, solo
-  se regeneran las columnas de chunks que entran en cada anillo (ver §10, *streaming*).
+- **Mapa completo**: con 9 niveles (`lod::MAP_LEVELS`) ya se cubren los 24 km. Con los 11 de
+  `lod::LEVELS` el último anillo llega a más de 85 km de la cámara desde cualquier punto del mapa
+  (hay un test) y se ve el **entorno amplio** (300 × 300 km de relieve real, ver
+  [mapa-real.md](mapa-real.md#entorno-amplio)). Cuando la cámara se mueve, solo se regeneran las
+  columnas de chunks que entran en cada anillo (ver §10, *streaming*).
+- **Niveles gruesos bajados** (`lod::far_drop`, desde el nivel 8): la regla de que la tierra firme
+  quede un vóxel entero sobre el agua (`stream::top_from_height`) hacía de cada costa un
+  acantilado de 64 a 256 m. En esos niveles la malla se dibuja `vóxel − 3 m` más abajo y la altura
+  se redondea al vóxel más cercano (`stream::top_from_height_far`): la tierra queda entre 3 m y
+  medio vóxel sobre el agua, y el fondo, debajo (con test).
+- **Distancia de dibujo** (opciones): corta = 9 niveles (el mapa), media = 10 (~45 km), larga =
+  11 (~90 km, por omisión). Las opciones guardadas con 9 niveles como máximo
+  (`Settings::niveles_max`, sin el campo = 9) suben con ellos: quien tenía "larga" sigue en "larga".
+- **Costo** (render por CPU, 1280 × 720, vistas `mundo-*` del recorrido de paisajes): 4896
+  columnas en vez de 3600 (los dos niveles nuevos suman 432 columnas cada uno, de 1 o 2 chunks),
+  +5 a 25 % de triángulos (2,54 M en vez de 2,25 M en la esquina noreste) y el mismo tiempo hasta
+  estar listo (3,6 s); los niveles gruesos no llevan árboles, flora ni sombras.
 
 ## 5. Render
 
@@ -95,6 +112,11 @@ y la distancia que cubre:
 - **Agua**: plano translúcido al nivel del mar, color "león", con reflejo del cielo
   (Fresnel) y brillo del sol.
 - **Niebla de distancia** hacia el color del horizonte, más tenue cuanto más se aleja la cámara.
+- **Fin del mundo dibujado** (`Renderer::reach`, `reach_fog` en voxel.wgsl y water.wgsl): desde el
+  60 % del radio que cubre seguro el último anillo, el terreno y el agua se funden con la niebla,
+  y el plano del río (400 km) sigue al centro de los anillos de a baldosas de 2 km. Así el último
+  anillo no se ve como un borde recto contra el agua, ni de cerca del suelo ni desde 15 km de
+  altura. El alcance va en los `.w` libres de `sky_top`, `sky_horizon` y `sun_color`.
 - **Profundidad con Z invertida** y proyección infinita: precisión de 0,5 m a 40 km.
 - MSAA 4×. Pocas llamadas de dibujo: las mallas se agrupan en lotes de hasta 6 millones de
   vértices por nivel.

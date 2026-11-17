@@ -181,6 +181,9 @@ impl Session {
         } else if !self.terrain.is_real() && r.has_streams() {
             r.set_streams(&[]);
         }
+        // [entorno amplio] Hasta dónde llega el terreno: más allá, niebla (ver `Renderer::reach`).
+        let (c, reach) = self.streamer.reach();
+        r.reach = [c.x, c.y, reach];
         // Río y luna del juego (sin partida: río en su nivel medio y media luna).
         match &self.game {
             Some(g) if g.city.plaza.is_some() => {

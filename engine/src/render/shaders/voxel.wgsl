@@ -157,6 +157,19 @@ fn fog_color(world: vec3<f32>) -> vec3<f32> {
     return mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s * 0.6);
 }
 
+// [entorno amplio] Fin del terreno dibujado: el círculo de radio sun_color.w alrededor del
+// centro de los anillos de detalle (sky_top.w, sky_horizon.w). Desde el 60 % de ese radio
+// todo se funde con la niebla, así el último anillo (y el agua más allá) no se ve como un
+// borde recto. 0 = sin límite.
+fn reach_fog(world: vec3<f32>) -> f32 {
+    let r = g.sun_color.w;
+    if (r <= 0.0) {
+        return 0.0;
+    }
+    let d = distance(world.xz, vec2(g.sky_top.w, g.sky_horizon.w));
+    return smoothstep(r * 0.6, r * 0.97, d);
+}
+
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return pow(c, vec3(2.2));
 }
@@ -395,7 +408,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
-    col = mix(col, fog_color(v.world), clamp(fog, 0.0, 0.88));
+    col = mix(col, fog_color(v.world), max(clamp(fog, 0.0, 0.88), reach_fog(v.world)));
     return vec4(curva_tonal(col), 1.0);
 }
 

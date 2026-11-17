@@ -161,6 +161,14 @@ impl Streamer {
         self.update_with(center, first);
     }
 
+    /// Centro de los anillos de detalle y radio del círculo que el último anillo cubre seguro
+    /// (m): el anillo es un cuadrado de [`crate::lod::RING_CHUNKS`] chunks alineado de a dos,
+    /// así el centro puede quedar hasta un chunk corrido.
+    pub fn reach(&self) -> (Vec2, f32) {
+        let last = self.specs.last().map_or(0.0, |s| s.chunk_m());
+        (self.center, (crate::lod::RING_CHUNKS / 2 - 1) as f32 * last)
+    }
+
     /// Recentra los anillos de detalle si la cámara se movió lo suficiente (todos los niveles).
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn update(&mut self, center: Vec2) {
@@ -468,6 +476,20 @@ pub fn top_from_height(h: f32, vs: f32) -> i32 {
         // costas, planicies de hasta medio vóxel de alto) se redondea al nivel del mar y el
         // plano del río (con la marea encima) la tapa, y cambia al mover la cámara.
         ((h / vs - 0.5).floor() as i32).max(0)
+    }
+}
+
+/// Igual que [`top_from_height`] en los niveles gruesos, cuya malla se dibuja `drop` metros
+/// más abajo (ver `lod::far_drop`): la cara de arriba del vóxel `k` queda en `(k + 1)·vs −
+/// drop`. Se elige el vóxel cuya cara queda más cerca de la altura; la tierra firme, por lo
+/// menos en el vóxel 0 (3 m sobre el agua), y el fondo, bajo el agua.
+#[inline]
+pub fn top_from_height_far(h: f32, vs: f32, drop: f32) -> i32 {
+    let k = ((h + drop) / vs).round() as i32 - 1;
+    if h < 0.0 {
+        k.min(((drop / vs).floor() as i32) - 1)
+    } else {
+        k.max(0)
     }
 }
 
@@ -830,6 +852,8 @@ pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVe
 
 fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>, mesh_ns: &mut u64) -> Mesh {
     let vs = spec.voxel();
+    // Niveles gruesos (entorno amplio): la malla baja `drop` metros (ver `lod::far_drop`).
+    let drop = crate::lod::far_drop(spec.lod);
     let ls = &store.levels[spec.lod as usize];
     let p = N + 4;
     let base = col * N;
@@ -866,7 +890,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
             let dz = hi(0, 1) - hi(0, -1);
             let slope = (dx * dx + dz * dz).sqrt() / (2.0 * vs);
             // Donde hay obras (calle, plaza), el suelo nivelado manda sobre el natural.
-            let ty = ls.ground.get(&IVec2::new(gx, gz)).copied().unwrap_or_else(|| top_from_height(h, vs));
+            let ty = ls.ground.get(&IVec2::new(gx, gz)).copied().unwrap_or_else(|| if drop > 0.0 { top_from_height_far(h, vs, drop) } else { top_from_height(h, vs) });
             let k = (i + j * Q) as usize;
             top[k] = ty;
             let x = (gx as f32 + 0.5) * vs;
@@ -922,7 +946,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     let y0 = (tmin - 1).div_euclid(N);
     let y1 = tmax.max(edit_top).max(tree_top).div_euclid(N);
     // Origen de la malla de la columna: esquina inferior del chunk más bajo.
-    let mut out = Mesh::new(Vec3::new(base.x as f32, (y0 * N) as f32, base.y as f32) * vs, vs);
+    let mut out = Mesh::new(Vec3::new(base.x as f32, (y0 * N) as f32, base.y as f32) * vs - Vec3::Y * drop, vs);
     let mut pad = vec![AIR; (Q * Q * Q) as usize];
     for cy in y0..=y1 {
         let ck = IVec3::new(col.x, cy, col.y);
@@ -1036,6 +1060,20 @@ mod tests {
                 let h = k as f32 * 0.05;
                 assert!((top_from_height(h, vs) + 1) as f32 * vs > 0.0, "tierra a {h} m tapada con vóxel de {vs} m");
                 assert!(((top_from_height(-h, vs) + 1) as f32 * vs) < 0.0, "fondo a -{h} m asoma con vóxel de {vs} m");
+            }
+        }
+        // Niveles gruesos, con la malla bajada: tierra entre 3 m y medio vóxel sobre el agua, el
+        // fondo bajo ella, y las alturas a menos de medio vóxel de la real.
+        for lod in crate::lod::DROP_LOD..crate::lod::LEVELS + 1 {
+            let vs = crate::lod::BASE_VOXEL * (1u32 << lod) as f32;
+            let drop = crate::lod::far_drop(lod);
+            let face = |k: i32| (k + 1) as f32 * vs - drop;
+            for k in 1..4000 {
+                let h = k as f32 * 0.25;
+                let up = face(super::top_from_height_far(h, vs, drop));
+                assert!(up >= 2.9, "tierra a {h} m tapada con vóxel de {vs} m ({up})");
+                assert!(up - h <= vs * 0.5 + 3.0 && h - up <= vs * 0.5 + 0.01, "tierra a {h} m dibujada a {up} m");
+                assert!(face(super::top_from_height_far(-h, vs, drop)) <= 0.0, "fondo a -{h} m asoma con vóxel de {vs} m");
             }
         }
     }

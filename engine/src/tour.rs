@@ -56,7 +56,7 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 29] = [
+    let views: [(&'static str, [f32; 5]); 39] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
         // Hidrografía oficial (IDE): la playa de Pocitos y los bañados del Carrasco y el Pantanoso.
         ("paisaje-playa-pocitos", [16500.0, 15000.0, 700.0, 200.0, 28.0]),
@@ -94,6 +94,19 @@ pub fn landscape_steps() -> Vec<Act> {
         ("costa-isla-gaviotas", [20175.0, 13600.0, 260.0, 200.0, 18.0]),
         ("costa-punta-yeguas", [1120.0, 14000.0, 200.0, 200.0, 22.0]),
         ("costa-pocitos", [16100.0, 15400.0, 180.0, 200.0, 20.0]),
+        // El mundo más allá del mapa (entorno amplio, amplio.bin): desde los bordes y las
+        // esquinas mirando hacia afuera, y la vista más alta. La tierra tiene que llegar al
+        // horizonte, sin cortes rectos contra el agua.
+        ("mundo-borde-norte", [12000.0, 400.0, 1500.0, 0.0, 10.0]),
+        ("mundo-borde-oeste", [400.0, 12000.0, 1500.0, 90.0, 10.0]),
+        ("mundo-borde-este", [23600.0, 12000.0, 1500.0, 270.0, 10.0]),
+        ("mundo-esquina-noroeste", [400.0, 400.0, 3000.0, 45.0, 14.0]),
+        ("mundo-esquina-noreste", [23600.0, 400.0, 3000.0, 315.0, 14.0]),
+        ("mundo-borde-sur-rio", [12000.0, 23600.0, 2500.0, 200.0, 8.0]),
+        ("mundo-alto-norte", [12000.0, 2000.0, 15000.0, 0.0, 25.0]),
+        ("mundo-general-maximo", [12000.0, 12000.0, 15000.0, 200.0, 45.0]),
+        ("mundo-alto-este", [23600.0, 12000.0, 15000.0, 260.0, 14.0]),
+        ("mundo-alto-rio-argentina", [2000.0, 23600.0, 15000.0, 135.0, 12.0]),
     ];
     // `MOTOR_HORA=17.3` saca las vistas a esa hora (para revisar la luz baja).
     let hora = std::env::var("MOTOR_HORA").ok().and_then(|h| h.parse().ok()).unwrap_or(10.5);

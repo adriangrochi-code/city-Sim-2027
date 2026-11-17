@@ -303,8 +303,8 @@ pub struct Settings {
     pub escala_interfaz: f32,
     pub sincronizacion_vertical: bool,
     pub mostrar_fps: bool,
-    /// Niveles de detalle del mundo (7 = vista corta, 9 = larga). Se aplica al empezar o
-    /// cargar una partida.
+    /// Niveles de detalle del mundo (9 = vista corta: el mapa; 11 = larga: el entorno amplio
+    /// hasta el horizonte). Se aplica al empezar o cargar una partida.
     pub niveles: u32,
     /// Suavizado de bordes: 0 = automático, 1 = desactivado, 4 = 4×. Se aplica al reiniciar.
     pub msaa: u32,
@@ -315,10 +315,19 @@ pub struct Settings {
     /// para ver igual de lejos.
     #[serde(default = "voxel_cm_viejo")]
     pub voxel_cm: u32,
+    /// Niveles de detalle del motor ("larga") cuando se eligieron los `niveles`. Con el entorno
+    /// amplio pasaron de 9 a 11: quien tenía "larga" sigue teniendo "larga" (las opciones de
+    /// antes no tienen este campo: eran de 9).
+    #[serde(default = "niveles_max_viejo")]
+    pub niveles_max: u32,
 }
 
 fn voxel_cm_viejo() -> u32 {
     50
+}
+
+fn niveles_max_viejo() -> u32 {
+    9
 }
 
 fn voxel_cm() -> u32 {
@@ -327,7 +336,7 @@ fn voxel_cm() -> u32 {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm() }
+        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm(), niveles_max: crate::lod::LEVELS }
     }
 }
 
@@ -346,6 +355,11 @@ impl Settings {
             cm *= 2;
         }
         self.voxel_cm = voxel_cm();
+        // Más niveles en el motor: la misma elección (corta, media, larga) sube con ellos.
+        if self.niveles_max < crate::lod::LEVELS {
+            self.niveles += crate::lod::LEVELS - self.niveles_max;
+        }
+        self.niveles_max = crate::lod::LEVELS;
         let max = crate::lod::LEVELS;
         self.niveles = self.niveles.clamp(max - 3, max);
         if !matches!(self.msaa, 0 | 1 | 4) {
@@ -444,7 +458,7 @@ mod tests {
         assert!(list(&d).iter().all(|s| s.path != path));
         // Opciones: valores por omisión, ida y vuelta, y corrección de lo que está fuera de rango.
         assert_eq!(Settings::load(&d), Settings::default());
-        let s = Settings { escala_interfaz: 1.25, mostrar_fps: true, niveles: 6, ..Default::default() };
+        let s = Settings { escala_interfaz: 1.25, mostrar_fps: true, niveles: crate::lod::LEVELS - 3, ..Default::default() };
         s.store(&d).unwrap();
         assert_eq!(Settings::load(&d), s);
         std::fs::write(d.join("opciones.json"), r#"{"escala_interfaz": 9, "msaa": 3}"#).unwrap();
@@ -453,6 +467,11 @@ mod tests {
         // Opciones de antes del vóxel de 25 cm: "media" (7 niveles de 0,5 m) sigue siendo media.
         std::fs::write(d.join("opciones.json"), r#"{"niveles": 7}"#).unwrap();
         assert_eq!(Settings::load(&d).niveles, crate::lod::LEVELS - 1);
+        // Opciones de antes del entorno amplio (9 niveles = "larga"): siguen en "larga".
+        std::fs::write(d.join("opciones.json"), r#"{"niveles": 9, "voxel_cm": 25}"#).unwrap();
+        assert_eq!(Settings::load(&d).niveles, crate::lod::LEVELS);
+        std::fs::write(d.join("opciones.json"), r#"{"niveles": 7, "voxel_cm": 25}"#).unwrap();
+        assert_eq!(Settings::load(&d).niveles, crate::lod::MAP_LEVELS);
         let _ = std::fs::remove_dir_all(&d);
     }
 }
