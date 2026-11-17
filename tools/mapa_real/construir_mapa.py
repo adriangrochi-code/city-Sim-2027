@@ -43,6 +43,7 @@ import math
 import os
 import struct
 import sys
+import urllib.parse
 import urllib.request
 
 import numpy as np
@@ -564,6 +565,96 @@ def _lineas(g):
         c = g["coordinates"]
         return [_local_arr([c] if g["type"] == "Point" else c)]
     return []
+
+
+# --- Suelos CONEAT: afloramientos de roca ----------------------------------------------------
+CONEAT_URL = "https://web.snig.gub.uy/arcgisserver/rest/services/MapasBase/Renare_Coneat/MapServer/0/query"
+
+# Rocosidad aproximada (fracción de la superficie con roca a la vista) según la zona CONEAT
+# (primer número del grupo). El servicio solo trae el código del grupo y su aptitud; la
+# descripción de cada grupo (con su porcentaje de rocosidad) está en las publicaciones de
+# RENARE/MGAP. Esta tabla resume esas descripciones a grandes rasgos; ver
+# docs/sistemas/suelos-y-roca.md.
+ROCOSIDAD_ZONA = {
+    "1": 0.35,   # sierras rocosas (Minas, Lavalleja): afloramientos y bochas de granito
+    "2": 0.30,   # sierras del este
+    "4": 0.12,   # colinas sobre el basamento cristalino del sur: suelos superficiales
+    "5": 0.04,   # lomadas del basamento cristalino
+    "8": 0.05,
+    "9": 0.02,
+    "11": 0.05,
+    "12": 0.25,  # basalto superficial
+    "13": 0.10,
+}
+
+
+def rocosidad_grupo(sc, aptitud):
+    zona = (sc or "").split(".")[0].lstrip("0") or "0"
+    if (sc or "").startswith("03"):
+        return 0.0  # planicies bajas y bañados
+    r = ROCOSIDAD_ZONA.get(zona, 0.0)
+    a = (aptitud or "").lower()
+    if "no aptas" in a:
+        r *= 1.5
+    elif "marginal" in a:
+        r *= 1.2
+    return min(r, 0.6)
+
+
+def bajar_coneat(cache):
+    """Polígonos CONEAT de la ventana (mapa + entorno), en GeoJSON, de a 1000."""
+    ruta = os.path.join(cache, f"coneat_{int(OUTER)}.json")
+    if os.path.exists(ruta):
+        with open(ruta) as f:
+            return json.load(f)
+    lat_s = LAT_N - (MAP_SIZE + OUTER) / KY
+    lat_n = LAT_N + OUTER / KY
+    lon_w = LON_W - OUTER / KX
+    lon_e = LON_W + (MAP_SIZE + OUTER) / KX
+    feats, offset = [], 0
+    while True:
+        q = urllib.parse.urlencode({
+            "where": "1=1", "geometry": f"{lon_w},{lat_s},{lon_e},{lat_n}", "geometryType": "esriGeometryEnvelope",
+            "inSR": 4326, "outSR": 4326, "spatialRel": "esriSpatialRelIntersects", "outFields": "SC,APTITUD",
+            "returnGeometry": "true", "f": "geojson", "resultOffset": offset, "resultRecordCount": 1000,
+        })
+        for intento in range(5):
+            try:
+                with urllib.request.urlopen(CONEAT_URL + "?" + q, timeout=120) as r:
+                    d = json.load(r)
+                break
+            except Exception as e:  # el servidor corta conexiones de vez en cuando
+                if intento == 4:
+                    raise
+                print(f"  reintento CONEAT ({e})", flush=True)
+        fs = d.get("features", [])
+        feats.extend(fs)
+        if len(fs) < 1000:
+            break
+        offset += len(fs)
+    with open(ruta, "w") as f:
+        json.dump(feats, f)
+    return feats
+
+
+def rocas_coneat(cache):
+    """Rasters de rocosidad (0 a 255 = 0 a 100 %) en las grillas del mapa y del entorno."""
+    feats = bajar_coneat(cache)
+    print(f"  CONEAT: {len(feats)} polígonos", flush=True)
+    grillas = []
+    for desde, paso, n in ((0.0, STEP, int(MAP_SIZE / STEP) + 1), (-OUTER, OUTER_STEP, int((MAP_SIZE + 2 * OUTER) / OUTER_STEP) + 1)):
+        img = Image.new("L", (n, n), 0)
+        for ft in feats:
+            pr = ft.get("properties") or {}
+            v = int(round(rocosidad_grupo(pr.get("SC"), pr.get("APTITUD")) * 255))
+            if v > 0:
+                rasterizar(_poligonos(ft.get("geometry")), desde, paso, n, valor=v, img=img, borde=False)
+        grillas.append(np.asarray(img, dtype=np.uint8))
+    grupos = {}
+    for ft in feats:
+        sc = (ft.get("properties") or {}).get("SC")
+        grupos[sc] = grupos.get(sc, 0) + 1
+    return grillas[0], grillas[1], grupos
 
 
 def area_perimetro(anillo):
@@ -1104,6 +1195,15 @@ def main():
             if largo(p) >= ARROYO_MIN_LEN:
                 polis.append([[round(x, 1), round(z, 1), round(w, 1)] for x, z, w in p])
         polis.sort(key=lambda p: -largo(p))
+    rocas = None
+    if args.fuente == "ide":
+        print("Suelos CONEAT (rocosidad)…", flush=True)
+        try:
+            rocas = rocas_coneat(args.cache)
+            atribucion += " Suelos: grupos CONEAT (RENARE, MGAP), servicio SNIG MapasBase/Renare_Coneat."
+            fuentes.append({"capa": "Renare_Coneat", "servicio": CONEAT_URL, "uso": "rocosidad (afloramientos)"})
+        except Exception as e:
+            print(f"  sin CONEAT: {e}", flush=True)
     atribucion += " Ver docs/sistemas/mapa-real.md."
     print(f"  {len(polis)} arroyos en el mapa", flush=True)
 
@@ -1148,6 +1248,17 @@ def main():
             f.write(hidro["biomas_contexto"].astype(np.uint8).tobytes())
     else:
         guardar_json(os.path.join(args.salida, "arroyos.json"), {"arroyos": polis})
+    if rocas is not None:
+        with open(os.path.join(args.salida, "rocas.bin"), "wb") as f:
+            f.write(rocas[0].tobytes())
+        with open(os.path.join(args.salida, "rocas_contexto.bin"), "wb") as f:
+            f.write(rocas[1].tobytes())
+        meta["rocas"] = {
+            "archivo": "rocas.bin", "archivo_entorno": "rocas_contexto.bin",
+            "codificacion": "uint8, misma grilla que altura.bin / contexto.bin: rocosidad 0-255 = 0-100 % de roca a la vista",
+            "fuente": "grupos CONEAT (SNIG), rocosidad aproximada por zona: ver docs/sistemas/suelos-y-roca.md",
+            "grupos_en_la_ventana": rocas[2],
+        }
     guardar_json(os.path.join(args.salida, "meta.json"), meta, compacto=False)
     # Vista previa: relieve sombreado con agua, biomas oficiales y arroyos.
     gris = np.clip(h / 80.0, 0, 1)
