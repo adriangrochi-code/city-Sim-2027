@@ -31,7 +31,7 @@
 - [x] Mapa por defecto con la geografía real de Montevideo (24 km, ver `docs/sistemas/mapa-real.md`)
 - [x] Casas y calles a tamaño real (cuadra de 100 varas, calles de 10 y 12 varas)
 - [ ] Uruguay a escala país; las calles y solares deben esquivar los arroyos
-- [ ] Alcantarillas y saneamiento por épocas (diseñado)
+- [ ] Alcantarillas y saneamiento por épocas (diseñado; **en parte**: la versión colonial —letrinas y pozos negros por tipo de casa, pozos de agua que se contaminan, basurales, recolección con carretilla y basurero— ya está en el motor; faltan los colectores y el agua corriente de las épocas siguientes, que ya figuran como datos)
 - [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (diseñado; la versión colonial ya existe)
 
 ## Fase 2: el juego sobre el motor de vóxeles
@@ -48,6 +48,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 5b. [x] Población: personas con personalidad e historial, familias y linajes, llegadas por época, economía de cada hogar, desigualdad y felicidad por grupo
 5d. [x] Trazado de calles práctico: enganche a 45° y 90° de la calle de arranque y del damero, largo alineado con las esquinas vecinas o el módulo de la cuadra, guías punteadas, largo y ángulo en pantalla, Shift para trazar libre
 5c. [x] Pendiente de las calles medida en tramos de 10 m con la altura promediada (antes, una bocha de piedra o la ondulación fina cortaba el damero del mapa real: la ciudad de la demostración pasa de ~450 a ~1.600 vecinos y nadie queda sin poder salir)
+5e. [x] Educación, salud, seguridad y saneamiento coloniales: escuela de primeras letras y convento (cupo de alumnos y alcance), botica, médico y hospital de caridad (por la red de calles), garita del alcalde de barrio y cárcel del Cabildo junto a los serenos, delito por solar (pobreza, desigualdad, desocupación, oscuridad, baldíos, puerto) con robos, asaltos y contrabando en la gaceta, pozos que se contaminan con los pozos negros, basurales, recolección y basurero; efectos en la lectura, la mortalidad, la salud y la felicidad de cada persona; pestañas del cajón, capas y fichas; las épocas siguientes como datos (ver [sistemas/educacion-salud-seguridad.md](sistemas/educacion-salud-seguridad.md))
 6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real
 8. [x] Vóxel de 0,25 m con capa de detalle de 0,125 m (flora) y monte con nivel de detalle

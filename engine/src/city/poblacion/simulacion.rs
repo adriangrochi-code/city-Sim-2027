@@ -17,13 +17,16 @@ pub struct CiudadSintetica {
     pub precio_pan: f32,
     /// Una epidemia de un mes cada tantos años (crisis de mortalidad; 0 = nunca).
     pub epidemia_cada: i32,
+    /// Escuela, salud, insalubridad y delito iguales en todos los solares (para probar el
+    /// modelo de servicios; `None` = sin edificios, como antes).
+    pub servicios: Option<ServiciosLote>,
 }
 
 impl CiudadSintetica {
     pub fn nueva(semilla: u64) -> CiudadSintetica {
         let mut p = Poblacion::nueva(semilla);
         p.fundar(2);
-        CiudadSintetica { p, lotes: Vec::new(), mes: 2, ordenanzas: Vec::new(), inmigracion: 0.02, precio_pan: 1.0, epidemia_cada: 7 }
+        CiudadSintetica { p, lotes: Vec::new(), mes: 2, ordenanzas: Vec::new(), inmigracion: 0.02, precio_pan: 1.0, epidemia_cada: 7, servicios: None }
     }
 
     fn agregar(&mut self, tipo: ZoneKind, nivel: u8) {
@@ -52,6 +55,8 @@ impl CiudadSintetica {
             contribucion: 6,
             ordenanzas: self.ordenanzas.clone(),
             iglesia: true,
+            servicios: self.servicios.map_or(Vec::new(), |s| vec![s; self.lotes.len()]),
+            con_servicios: self.servicios.is_some(),
         }
     }
 

@@ -89,7 +89,7 @@ impl Category {
         match self {
             Category::Calles => "Plaza, calles rectas, curvas y damero · atajos 1 a 4, Tab cambia el tipo",
             Category::Zonas => "Pintar o quitar zona · atajos 5 y 6, [ y ] cambian el pincel",
-            Category::Servicios => "Aljibes, serenos, bombas de incendio, lazareto, iglesia",
+            Category::Servicios => "Agua, educación, salud, seguridad, saneamiento e iglesia",
             Category::Produccion => "Hornos de ladrillos, atahonas, canteras, saladeros",
             Category::Puerto => "Muelle, muralla, portones y aduana",
             Category::Ordenanzas => "Decisiones del cabildo y presupuesto",
@@ -219,12 +219,15 @@ pub enum Options {
     None,
     RoadKind,
     Brush,
+    /// Pestañas del cajón de Servicios (agua, educación, salud, seguridad, saneamiento).
+    Grupos,
 }
 
 pub fn options_for(cat: Category) -> Options {
     match cat {
         Category::Calles => Options::RoadKind,
         Category::Zonas => Options::Brush,
+        Category::Servicios => Options::Grupos,
         _ => Options::None,
     }
 }
@@ -736,6 +739,14 @@ impl GameUi {
                             let mut b = game.brush;
                             if ui.add(egui::Slider::new(&mut b, 10.0..=150.0).suffix(" m").integer()).on_hover_text("Atajos: [ y ]").changed() {
                                 acts.push(UiAction::Brush(b));
+                            }
+                        }
+                        Options::Grupos => {
+                            ui.add_space(16.0);
+                            for g in crate::city::services::Grupo::PESTAÑAS {
+                                if ui.selectable_label(game.grupo == g, RichText::new(g.nombre()).small()).on_hover_text(format!("Servicios de {}", g.nombre().to_lowercase())).clicked() {
+                                    acts.push(UiAction::Servicio(services::Act::Grupo(g)));
+                                }
                             }
                         }
                         Options::None => {}
@@ -1403,7 +1414,7 @@ mod tests {
         assert_eq!(cards(Category::Calles, &g, false, false)[1].disabled.as_deref(), Some("Sin fondos"));
         assert_eq!(options_for(Category::Calles), Options::RoadKind);
         assert_eq!(options_for(Category::Zonas), Options::Brush);
-        assert_eq!(options_for(Category::Servicios), Options::None);
+        assert_eq!(options_for(Category::Servicios), Options::Grupos);
         assert_eq!(Category::of_tool(Tool::Inspect), Category::Capas);
     }
 

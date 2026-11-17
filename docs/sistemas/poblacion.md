@@ -162,8 +162,8 @@ el costo real sale en el presupuesto según la población):
 | Reparto de solares a familias pobres | Los hogares pobres sin casa reciben en propiedad los ranchos libres | 25 pesos/mes | +8 / −3 / −5 |
 | Contribución progresiva | Pobres exentos; acomodados ×1,5, principales ×2,5 (recargo para el cabildo) | La exención | +8 / −10 / −10 |
 | Pan barato para los pobres | Los hogares pobres o con hambre pagan el pan a precio normal | La diferencia | +10 / −3 / 0 |
-| Hospital de caridad y asistencia a pobres | Menos muertes y mejor salud de pobres y modestos | 20 + 30 por 1.000 hab. | +6 / 0 / 0 |
-| Escuelas de primeras letras | +20 puntos de chance de aprender a leer por año de niñez: más oficios letrados | 15 + 0,25 por niño | +5 / +2 / 0 |
+| Hospital de caridad y asistencia a pobres | Menos muertes y mejor salud de pobres y modestos (en la ciudad del motor: pobres y modestos aprovechan del todo la botica, el médico y el hospital cercanos, ver [educacion-salud-seguridad.md](educacion-salud-seguridad.md)) | 20 + 30 por 1.000 hab. | +6 / 0 / 0 |
+| Escuelas de primeras letras | +20 puntos de chance de aprender a leer por año de niñez: más oficios letrados (en la ciudad del motor: el cabildo paga al maestro y los pobres van gratis a la escuela de su barrio; hacen falta escuelas) | 15 + 0,25 por niño | +5 / +2 / 0 |
 | Préstamos del cabildo | Préstamo barato a pobres y modestos: menos hambre en los meses malos | Intereses y morosidad | +6 / −4 / 0 |
 | Fondo de manumisión | Completa la suma de la carta de libertad a quien juntó más de un tercio | 40 pesos/mes | +3 / −2 / −8 |
 | Libertad de vientres | Nadie nace esclavizado y se prohíbe el tráfico. No se deroga | — | +4 / −4 / −8 |
@@ -273,7 +273,7 @@ Banco de pruebas: `cargo test --release banco_poblacion -- --ignored --nocapture
   opinión) y *Crónica*.
 - Ficha de un solar → botón **Vecinos**: las familias de la casa, su economía del mes
   (desglose), dueña o inquilina, y sus miembros.
-- **Ficha de una persona**: datos, felicidad desglosada en sus once causas con los motivos,
+- **Ficha de una persona**: datos, felicidad desglosada en sus doce causas (la duodécima, «Educación», con las escuelas del barrio) con los motivos,
   personalidad, familia (abuelos, padres, cónyuge, hermanos, hijos, nietos), linaje con sus
   generaciones y descendientes vivos, e historia de vida.
 - La gaceta recibe las noticias notables (llegadas, libertades, casamientos entre familias
@@ -283,9 +283,9 @@ Banco de pruebas: `cargo test --release banco_poblacion -- --ignored --nocapture
 
 - Barrios con nombre y mapa de capas (felicidad, pobreza, hacinamiento por solar).
 - Estancias y chacras propias del jugador: hoy el ganado de los hacendados es abstracto.
-- Cuando existan los agentes móviles: que la rutina de cada persona use `lugar_de_trabajo` y
-  que los servicios (agua, iglesia, escuela, hospital) lleguen por la red en vez de ser
-  globales.
+- Cuando existan los agentes móviles: que la rutina de cada persona use `lugar_de_trabajo`.
+  La escuela, la salud, la insalubridad y el delito ya son por solar (ver
+  [educacion-salud-seguridad.md](educacion-salud-seguridad.md)).
 - Épocas 2–6: activar sus políticas (`FUTURAS`), salarios y precios por época, conventillos.
 - Patronato de los libertos (1825–1840) y otros matices jurídicos (capacidad de las mujeres
   casadas, hijos naturales sin acceso a la educación) como restricciones adicionales.
