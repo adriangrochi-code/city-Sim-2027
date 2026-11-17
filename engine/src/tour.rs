@@ -111,8 +111,11 @@ pub fn landscape_steps() -> Vec<Act> {
 pub fn city_steps() -> Vec<Act> {
     use crate::city::game_demo as d;
     use Act::*;
+    if std::env::var("MOTOR_SOLO_ARQ").is_ok() {
+        return pasos_solo_arquitectura();
+    }
     let c = d::PLAZA;
-    vec![
+    let mut pasos = vec![
         Cam([c.x, c.y, 700.0, 200.0, 45.0]),
         Hour(10.5),
         WaitIdle("terreno virgen"),
@@ -401,6 +404,21 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-desarrollo-fomento", |s, u| ui_desarrollo(s, u, Some(3))),
         UiShot("motor-ui-desarrollo-comercio", |s, u| ui_desarrollo(s, u, Some(4))),
         UiShot("motor-ui-cajon-produccion", ui_produccion),
+        // Arquitectura: la ciudad crecida de cerca y seis calles de muestra de cada época (ver
+        // `city::arquitectura` y docs/sistemas/arquitectura-colonial.md).
+        Game("medir los edificios de los solares", d::medir),
+        Hour(10.0),
+        Cam([c.x + 40.0, c.y - 60.0, 95.0, 215.0, 26.0]),
+        WaitIdle("calles del centro de cerca"),
+        Shot("motor-arq-ciudad-centro"),
+        Cam([c.x - 120.0, c.y - 250.0, 110.0, 160.0, 28.0]),
+        WaitIdle("calles del sur de cerca"),
+        Shot("motor-arq-ciudad-sur"),
+        Cam([c.x + 200.0, c.y + 20.0, 120.0, 250.0, 30.0]),
+        WaitIdle("calles del este de cerca"),
+        Shot("motor-arq-ciudad-este"),
+    ];
+    let mut resto = vec![
         // Guardar y cargar: la ciudad cargada tiene que verse igual que la general.
         Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
         SaveLoad("guardar y cargar la ciudad"),
@@ -416,8 +434,75 @@ pub fn city_steps() -> Vec<Act> {
         MenuShot("motor-menu-cargar", menu_load),
         MenuShot("motor-menu-opciones", menu_options),
         MenuShot("motor-menu-nueva", menu_new),
+    ];
+    pasos.extend(pasos_arquitectura());
+    pasos.append(&mut resto);
+    pasos
+}
+
+/// Calles de muestra de cada época y sus capturas (ver `city::arquitectura`).
+fn pasos_arquitectura() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use Act::*;
+    vec![
+        Game("calles de muestra de cada época", d::arquitectura),
+        Game("medir con las calles de muestra", d::medir),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(1, 24.0, 46.0, 70.0, 32.0)),
+        WaitIdle("ranchos de 1732"),
+        Shot("motor-arq-ranchos-1732"),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(2, 21.0, 40.0, 50.0, 28.0)),
+        WaitIdle("casas de teja de 1760"),
+        Shot("motor-arq-teja-1760"),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(3, 21.0, 40.0, 50.0, 28.0)),
+        WaitIdle("casas de azotea de 1805"),
+        Shot("motor-arq-azotea-1805"),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(3, 0.0, 75.0, -35.0, 50.0)),
+        WaitIdle("azoteas y patios de 1805 desde arriba"),
+        Shot("motor-arq-azotea-1805-patios"),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(4, 21.0, 40.0, 50.0, 28.0)),
+        WaitIdle("casas de altos de 1822"),
+        Shot("motor-arq-altos-1822"),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(0, 21.0, 40.0, 50.0, 28.0)),
+        WaitIdle("comercio y pulperías de 1795"),
+        Shot("motor-arq-comercio-1795"),
+        Hour(10.0),
+        CamFn(d::view_esquina),
+        WaitIdle("una esquina"),
+        Shot("motor-arq-esquina"),
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(5, 20.0, 60.0, 40.0, 32.0)),
+        WaitIdle("quintas de 1812"),
+        Shot("motor-arq-quintas-1812"),
     ]
 }
+
+/// Recorrido corto para mirar la arquitectura (`MOTOR_SOLO_ARQ=1`): funda, traza, zonifica,
+/// crece y saca las calles de muestra.
+fn pasos_solo_arquitectura() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use Act::*;
+    let c = d::PLAZA;
+    let mut v = vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.0),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("crecer 60 meses", d::grow),
+        Game("medir los edificios de los solares", d::medir),
+    ];
+    v.extend(pasos_arquitectura());
+    v
+}
+
 
 /// Menú de pausa sobre la partida (con la interfaz del juego detrás).
 fn menu_pause(s: &mut Session, u: &mut GameUi, m: &mut Menu) {

@@ -86,6 +86,8 @@ mundo de vóxeles. La paleta completa está en `engine/src/palette.rs`.
 
 **Proporción de revoques en la ciudad colonial:** la cal blanca domina (50 %); ocre, rosa
 viejo y celeste (cada uno ~17 %) dan la variedad de fachada sin perder la unidad.
+Desde la variedad de la arquitectura, los colores de cal de las casas siguen los pesos de cada
+época y clase de la guía de fuentes (ver [arquitectura-colonial.md](arquitectura-colonial.md)).
 
 ## 4. Lectura a distancia
 

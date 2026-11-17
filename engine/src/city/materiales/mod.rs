@@ -315,11 +315,16 @@ pub struct Obra {
     /// Materiales que faltaron al levantarlo (bits de [`Material`]).
     #[serde(default)]
     pub faltas: u16,
+    /// Lo que se sabía del solar al levantarla (año, clase y origen del hogar, esquina,
+    /// barrio): de ahí sale su estilo (ver `structures::estilo`). Las partidas viejas no lo
+    /// tienen y se deduce de la semilla.
+    #[serde(default)]
+    pub contexto: crate::structures::estilo::Contexto,
 }
 
 impl Obra {
     pub fn nueva(paredes: Pared, techo: Techo, revoque: bool, rejas: bool) -> Obra {
-        Obra { paredes, techo, revoque, rejas, estado: 1.0, faltas: 0 }
+        Obra { paredes, techo, revoque, rejas, estado: 1.0, faltas: 0, contexto: Default::default() }
     }
 
     pub fn falto(&self, m: Material) -> bool {

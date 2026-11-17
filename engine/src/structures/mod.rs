@@ -12,7 +12,9 @@
 //! detalle más fino (barrotes de las rejas, canales de las tejas, hebras de la paja, juntas de
 //! la sillería) lo dibuja el shader por material.
 
+pub mod casas;
 pub mod colonial;
+pub mod estilo;
 pub mod scenes;
 
 pub(crate) use crate::buildings::design_top_at as top_at;
@@ -43,6 +45,9 @@ pub fn weather(m: Mat, p: IVec3, y: i32, seed: u64) -> Mat {
         CAL_OCRE => if h < damp { OCRE_SUCIA } else { m },
         CAL_ROSA => if h < damp { ROSA_SUCIA } else { m },
         CAL_AZUL => if h < damp { AZUL_SUCIA } else { m },
+        CAL_HUESO => if h < damp { HUESO_SUCIA } else { m },
+        CAL_ALMAGRE => if h < damp { ALMAGRE_SUCIA } else { m },
+        CAL_GRIS => if h < damp { GRIS_SUCIA } else { m },
         TILE => if h < 0.22 { TILE_DARK } else if h > 0.88 { TILE_LIGHT } else { TILE },
         THATCH => if h < 0.3 { THATCH_DARK } else { THATCH },
         ADOBE => if y <= 0 || h < 0.2 { ADOBE_DARK } else { ADOBE },
@@ -58,10 +63,12 @@ pub fn weather(m: Mat, p: IVec3, y: i32, seed: u64) -> Mat {
 }
 
 /// Variante de un edificio del catálogo: los parámetros con que se dibuja distinto de su
-/// forma de siempre. Hoy son los materiales reales de la obra (ver `city::materiales`); está
-/// pensada para sumar después parámetros de estilo (proporciones, fachadas, colores de cal).
-/// Se elige de forma determinista (de la obra y la semilla del solar) y se aplica sobre lo
-/// que dibujó el constructor, con [`aplicar_variante`].
+/// forma de siempre. Son los materiales reales de la obra (ver `city::materiales`) y el
+/// [`estilo::Estilo`] de la casa (tipología, fachada, planta, color y desgaste; ver
+/// `docs/sistemas/arquitectura-colonial.md`). Se elige de forma determinista (de la obra, su
+/// contexto y la semilla del solar). Con estilo, la casa la dibuja [`casas::construir`] con
+/// sus materiales reales; sin estilo, se aplica sobre lo que dibujó el constructor del
+/// catálogo con [`aplicar_variante`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Variante {
     /// Material de las paredes (claro, oscuro); `None` = las del catálogo.
@@ -77,11 +84,14 @@ pub struct Variante {
     pub rejas: bool,
     /// Semilla del solar (desgaste de cada vóxel).
     pub seed: u64,
+    /// Color de la cal para los edificios del catálogo (fondas, talleres): sus revoques de
+    /// cal pasan a este color (con su variante manchada).
+    pub cal: Option<Mat>,
+    /// Estilo de la casa (las tipologías con variedad).
+    pub estilo: Option<estilo::Estilo>,
 }
 
-fn es_cal(m: Mat) -> bool {
-    matches!(m, CAL | CAL_OCRE | CAL_ROSA | CAL_AZUL | CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA)
-}
+use estilo::es_cal;
 
 fn es_pared(m: Mat) -> bool {
     es_cal(m) || matches!(m, ADOBE | ADOBE_DARK | BRICK | BRICK_DARK | ZOCALO)
@@ -113,6 +123,12 @@ pub fn aplicar_variante(e: &mut Edits, v: &Variante) {
             }
         } else if *m == REJA && !v.rejas {
             *m = WINDOW;
+        }
+        if let Some(c) = v.cal {
+            if es_cal(*m) {
+                let manchado = estilo::limpio(*m) != *m;
+                *m = if manchado { estilo::sucio(c) } else { c };
+            }
         }
     }
 }

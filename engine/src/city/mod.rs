@@ -6,6 +6,9 @@
 //! en streaming, que re-malla solo las columnas tocadas.
 
 pub mod agentes;
+pub mod arquitectura;
+#[cfg(test)]
+mod arquitectura_tests;
 pub mod climate;
 pub mod desarrollo;
 pub mod economy;
@@ -113,7 +116,7 @@ fn pulperia_r(t: &TerrainGen, e: &mut Edits, f: &crate::structures::Frame) {
 /// Constructor del catálogo de vóxeles para cada tipo de zona, densidad y nivel. Cada solar
 /// elige un estilo con su semilla, así la cuadra no se ve repetida; la casa de una planta
 /// sigue su techo real si lo tiene (azotea plana o techo a dos aguas; ver `materiales`).
-fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64, techo: Option<materiales::Techo>) -> Builder {
+fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64, techo: Option<materiales::Techo>, ctx: &crate::structures::estilo::Contexto) -> Builder {
     use lots::Density::*;
     let pick = (seed >> 7) % 100;
     let teja = match techo {
@@ -130,8 +133,9 @@ fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64, tec
         (ZoneKind::Residencial, _) => &colonial::casa_altos,
         (ZoneKind::Comercial, 1) if seed % 2 == 0 => &pulperia_l,
         (ZoneKind::Comercial, 1) => &pulperia_r,
-        (ZoneKind::Comercial, 2) if pick < 40 => &colonial::fonda,
+        (ZoneKind::Comercial, 2) if pick < 15 => &colonial::fonda,
         (ZoneKind::Comercial, 2) => &colonial::tienda,
+        (ZoneKind::Comercial, _) if ctx.puerto && pick < 40 => &colonial::deposito,
         (ZoneKind::Comercial, _) if density == Alta || pick < 45 => &colonial::recova,
         (ZoneKind::Comercial, _) => &colonial::almacen,
         (ZoneKind::Industrial, 1) if pick < 45 => &colonial::panaderia,
@@ -148,16 +152,24 @@ fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64, tec
 #[allow(clippy::too_many_arguments)]
 fn build_lot(t: &TerrainGen, c: Vec2, f: Vec2, seed: u64, kind: ZoneKind, density: lots::Density, level: u8, obra: Option<materiales::Obra>) -> voxelize::Built {
     let techo = obra.map(|o| o.techo);
-    let b = builder_for(kind, density, level, seed, techo);
     match obra {
-        Some(o) => {
-            let nom = materiales::ciudad::nominal(kind, density, level, seed, techo);
-            build_rotated(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
-                b(t, e, fr);
-                materiales::ciudad::remapear(e, &o, &nom, seed);
-            })
-        }
-        None => build_rotated(t, c, f, LOT_W, LOT_D, seed, b),
+        // Casas con estilo propio: tipología, fachada, color y desgaste de su época, su
+        // familia y sus materiales (ver `arquitectura`).
+        Some(o) => match arquitectura::estilo_de(kind, density, level, seed, &o) {
+            Some(es) => build_rotated(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
+                crate::structures::casas::construir(t, e, fr, &es);
+            }),
+            None => {
+                let b = builder_for(kind, density, level, seed, techo, &o.contexto);
+                let nom = materiales::ciudad::nominal(kind, density, level, seed, techo);
+                let cal = arquitectura::cal_de_legado(level, seed, &o);
+                build_rotated(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
+                    b(t, e, fr);
+                    materiales::ciudad::remapear_con_cal(e, &o, &nom, seed, cal);
+                })
+            }
+        },
+        None => build_rotated(t, c, f, LOT_W, LOT_D, seed, builder_for(kind, density, level, seed, techo, &Default::default())),
     }
 }
 
@@ -579,7 +591,8 @@ impl City {
                 let Some(p) = self.plan_de_solar(&self.lots.lots[&ch.lot], ch.level - 1) else { continue };
                 plan = p;
             }
-            let obra = self.construir_obra(&plan);
+            let nivel = self.lots.lots[&ch.lot].level;
+            let obra = self.obra_de_solar(ch.lot, nivel, &plan);
             self.lots.lots.get_mut(&ch.lot).unwrap().obra = Some(obra);
             self.revoxelizar(t, ch.lot, e);
         }

@@ -85,7 +85,28 @@ pub const QUINCHA_DARK: Mat = 67;
 /// Mampostería de piedra sin labrar asentada en barro (sin cal para la sillería).
 pub const MAMPOSTERIA: Mat = 68;
 pub const MAMPOSTERIA_DARK: Mat = 69;
-pub const COUNT: usize = 70;
+// Variedad de la arquitectura colonial (ver docs/sistemas/arquitectura-colonial.md): los
+// colores de la guía de fuentes (§4.2), con su variante manchada. La paleta del render se
+// amplió a 96 lugares.
+/// Blanco hueso o crema (`cal_hueso`, #E6DCC4) [E].
+pub const CAL_HUESO: Mat = 70;
+pub const HUESO_SUCIA: Mat = 71;
+/// Almagre: rojo colonial de tierra (`almagre`, #A8553C) [E].
+pub const CAL_ALMAGRE: Mat = 72;
+pub const ALMAGRE_SUCIA: Mat = 73;
+/// Gris perla: cal con negro de humo (`gris_cal`, #CFCBC2) [E].
+pub const CAL_GRIS: Mat = 74;
+pub const GRIS_SUCIA: Mat = 75;
+/// Zócalos pintados: almagre oscuro (#8E4A35) y ocre oscuro (#9C7A44) [E].
+pub const ZOCALO_ALMAGRE: Mat = 76;
+pub const ZOCALO_OCRE: Mat = 77;
+/// Carpinterías pintadas: marrón rojizo (#6B3A2A), gris azulado (#4F5D66) y ocre (#8A6A3A) [E].
+pub const CARP_ROJIZA: Mat = 78;
+pub const CARP_GRIS: Mat = 79;
+pub const CARP_OCRE: Mat = 80;
+/// Teja vieja con líquenes (#6F6A5A) [E].
+pub const TILE_LIQUEN: Mat = 81;
+pub const COUNT: usize = 82;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -159,6 +180,18 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [112, 90, 62],   // barro con paja húmedo
     [132, 124, 110], // mampostería de piedra
     [106, 100, 90],  // mampostería oscura
+    [230, 220, 196], // cal hueso
+    [206, 194, 168], // cal hueso manchada
+    [176, 96, 70],   // almagre (un poco más claro que el pigmento: la cal lo aclara)
+    [148, 82, 62],   // almagre manchado
+    [207, 203, 194], // gris perla
+    [180, 176, 166], // gris perla manchado
+    [142, 74, 53],   // zócalo de almagre
+    [156, 122, 68],  // zócalo ocre oscuro
+    [107, 58, 42],   // carpintería marrón rojiza
+    [79, 93, 102],   // carpintería gris azulada
+    [138, 106, 58],  // carpintería ocre
+    [128, 86, 62],   // teja vieja con líquenes
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)

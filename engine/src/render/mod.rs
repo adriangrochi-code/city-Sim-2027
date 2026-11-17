@@ -28,7 +28,8 @@ const INITIAL_ORDER: u32 = 14;
 /// Cuadros que la GPU puede tener en vuelo: un bloque liberado se reutiliza después de esto.
 const FRAMES_IN_FLIGHT: u64 = 2;
 /// Paleta de colores de material en la GPU (vec4 por material).
-const PALETTE_SLOTS: usize = 80;
+const PALETTE_SLOTS: usize = 96;
+const _: () = assert!(crate::palette::COUNT <= PALETTE_SLOTS, "la paleta no entra en la GPU");
 /// Los pases de sombra solo dibujan los niveles finos: los de vóxel de hasta 4 m.
 const SHADOW_MAX_LOD: u32 = {
     let mut l = 0;

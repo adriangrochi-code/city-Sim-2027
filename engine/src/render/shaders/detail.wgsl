@@ -17,7 +17,7 @@ struct Globals {
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_sampler: sampler_comparison;
-@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 80>;
+@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 96>;
 
 const MICRO: f32 = 0.125;
 

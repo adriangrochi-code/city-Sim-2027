@@ -87,7 +87,7 @@ struct VOut {
     @location(5) smooth_n: vec3<f32>,
 };
 
-@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 80>;
+@group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 96>;
 
 // Curvatura de la Tierra (radio 6371 km): lo lejano baja d²/2R respecto de la cámara. A 10 km
 // son 8 m; a 24 km, 45 m: el horizonte se curva y el río se pierde detrás de él.
@@ -197,6 +197,10 @@ const M_QUINCHA: u32 = 66u;
 const M_QUINCHA_DARK: u32 = 67u;
 const M_MAMPOSTERIA: u32 = 68u;
 const M_MAMPOSTERIA_DARK: u32 = 69u;
+const M_SHUTTER: u32 = 16u;
+const M_CARP_ROJIZA: u32 = 78u;
+const M_CARP_OCRE: u32 = 80u;
+const M_TILE_LIQUEN: u32 = 81u;
 
 // Materiales del terreno (deben coincidir con palette.rs).
 fn is_terrain(m: u32) -> bool {
@@ -208,7 +212,7 @@ fn is_terrain(m: u32) -> bool {
 // vóxeles del mundo. Sus bordes y su tinte van por vóxel de diseño, no por vóxel del mundo.
 const DESIGN_VOXEL: f32 = 0.5;
 fn is_built(m: u32) -> bool {
-    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u) || (m >= 64u && m <= 69u);
+    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u) || (m >= 64u && m <= 81u);
 }
 
 // Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
@@ -294,7 +298,15 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         let h = fract(along(v.world, n) * 2.0);
         let frame = 1.0 - step(0.12, h) * step(h, 0.88);
         albedo = mix(albedo, albedo * 2.2, frame * near * 0.5);
-    } else if (mat == M_TILE || mat == M_TILE_DARK || mat == M_TILE_LIGHT) {
+    } else if (mat == M_SHUTTER || (mat >= M_CARP_ROJIZA && mat <= M_CARP_OCRE)) {
+        // Carpintería pintada (puertas y postigos): tableros con el marco claro y la junta
+        // entre las dos hojas cada 0,5 m.
+        let h = fract(along(v.world, n) * 2.0);
+        let ty = fract(v.world.y * 1.4);
+        let rail = 1.0 - step(0.1, ty) * step(ty, 0.9);
+        let stile = 1.0 - step(0.08, h) * step(h, 0.92);
+        albedo *= mix(1.0, 1.0 + 0.18 * max(rail, stile) - 0.25 * (1.0 - step(0.03, h)), near);
+    } else if (mat == M_TILE || mat == M_TILE_DARK || mat == M_TILE_LIGHT || mat == M_TILE_LIQUEN) {
         // Tejas: canales cada 25 cm y filas de 25 cm, en tresbolillo.
         let a = along(v.world, n) * 4.0;
         let row = select(floor(v.world.y * 4.0), floor(v.world.z * 4.0), n.y > 0.5);

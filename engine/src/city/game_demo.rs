@@ -888,7 +888,8 @@ pub fn materiales(s: &mut Session) -> String {
         }
         let l = &c.lots.lots[&id];
         let Some(plan) = c.plan_de_solar(l, l.level) else { continue };
-        let o = c.construir_obra(&plan);
+        let nivel = c.lots.lots[&id].level;
+        let o = c.obra_de_solar(id, nivel, &plan);
         c.lots.lots.get_mut(&id).unwrap().obra = Some(o);
         out.push(format!("{nombre}: {}", o.nombre().to_lowercase()));
     }
@@ -937,4 +938,178 @@ pub fn devolver_ladrillos(s: &mut Session) -> String {
         }
         None => "nada que devolver".into(),
     }
+}
+
+// --- Arquitectura: calles de muestra de cada época (ver `city::arquitectura`) ---------------
+
+/// Calles de muestra: (nombre, centro de la hilera, frente, solares).
+pub type MuestraArq = (&'static str, Vec2, Vec2, Vec<u32>);
+pub static MUESTRAS_ARQ: std::sync::Mutex<Vec<MuestraArq>> = std::sync::Mutex::new(Vec::new());
+
+/// Hileras de solares contiguos (cada 12 m) con el mismo frente, de al menos `n` solares,
+/// ordenadas por distancia a la plaza.
+fn hileras(c: &super::City, n: usize) -> Vec<Vec<u32>> {
+    let plaza = c.lots.plaza_center.unwrap_or(PLAZA);
+    let mut vistos = std::collections::HashSet::new();
+    let mut out: Vec<(f32, Vec<u32>)> = Vec::new();
+    let mut ids: Vec<u32> = c.lots.lots.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        if vistos.contains(&id) {
+            continue;
+        }
+        let l = &c.lots.lots[&id];
+        let side = Vec2::new(-l.f.y, l.f.x);
+        let mut fila: Vec<(f32, u32)> = c.lots.lots.values().filter(|o| !vistos.contains(&o.id) && o.f.dot(l.f) > 0.995 && (o.c - l.c).dot(l.f).abs() < 1.0 && (o.c - l.c).dot(side).abs() < 200.0).map(|o| ((o.c - l.c).dot(side), o.id)).collect();
+        fila.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut run: Vec<(f32, u32)> = Vec::new();
+        let mut flush = |run: &mut Vec<(f32, u32)>| {
+            if run.len() >= n {
+                let m = run.iter().map(|x| c.lots.lots[&x.1].c).sum::<Vec2>() / run.len() as f32;
+                out.push((m.distance(plaza), run.iter().map(|x| x.1).collect()));
+            }
+            run.clear();
+        };
+        for x in fila {
+            vistos.insert(x.1);
+            if run.last().is_some_and(|p| x.0 - p.0 > 13.0) {
+                flush(&mut run);
+            }
+            run.push(x);
+        }
+        flush(&mut run);
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.into_iter().map(|x| x.1).collect()
+}
+
+/// Mide el dibujo de todos los edificios de los solares: cuántos, cuántos vóxeles y cuánto
+/// tarda (en un hilo).
+pub fn medir_edificios(c: &super::City, t: &crate::terrain::TerrainGen) -> (usize, usize, std::time::Duration) {
+    let t0 = Instant::now();
+    let (mut n, mut v) = (0, 0);
+    for l in c.lots.lots.values().filter(|l| l.level > 0) {
+        let Some((k, d)) = super::lots::zone_of(l.zone) else { continue };
+        let b = super::build_lot(t, l.c, l.f, l.seed, k, d, l.level, l.obra);
+        n += 1;
+        v += b.voxels.len();
+    }
+    (n, v, t0.elapsed())
+}
+
+/// Medida de los edificios de los solares (para comparar antes y después).
+pub fn medir(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let c = &s.game.as_ref().unwrap().city;
+    let (n, v, d) = medir_edificios(c, &t);
+    format!("{n} edificios de solares: {v} vóxeles, {:.0} ms en un hilo ({:.0} vóxeles y {:.2} ms por edificio)", d.as_secs_f64() * 1000.0, v as f64 / n.max(1) as f64, d.as_secs_f64() * 1000.0 / n.max(1) as f64)
+}
+
+/// Seis calles de muestra con casas de distintas épocas, clases y familias: ranchos de 1732
+/// en las orillas, casas de teja de 1760, azoteas de 1805, altos de 1822, comercio y
+/// pulperías de 1795 y quintas de 1812 extramuros. Cada una con sus materiales reales.
+pub fn arquitectura(s: &mut Session) -> String {
+    use super::lots::{zone_code, Density, ZoneKind};
+    use super::materiales::{Obra, Pared, Techo};
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    type Muestra = (&'static str, ZoneKind, Density, u8, u16, u8, [(Pared, Techo, bool, bool); 3]);
+    let muestras: [Muestra; 6] = [
+        ("comercio y pulperías de 1795", ZoneKind::Comercial, Density::Media, 2, 1795, 1, [(Pared::Ladrillo, Techo::Azotea, true, true), (Pared::Piedra, Techo::Teja, true, true), (Pared::Ladrillo, Techo::Teja, true, true)]),
+        ("ranchos de 1732 en las orillas", ZoneKind::Residencial, Density::Baja, 1, 1732, 3, [(Pared::Adobe, Techo::Paja, false, false), (Pared::Barro, Techo::Cuero, false, false), (Pared::Barro, Techo::Paja, false, false)]),
+        ("casas de teja de 1760", ZoneKind::Residencial, Density::Media, 2, 1760, 1, [(Pared::Piedra, Techo::Teja, true, true), (Pared::Ladrillo, Techo::Teja, true, true), (Pared::Adobe, Techo::Teja, true, false)]),
+        ("casas de azotea de 1805", ZoneKind::Residencial, Density::Media, 2, 1805, 1, [(Pared::Ladrillo, Techo::Azotea, true, true), (Pared::Ladrillo, Techo::Azotea, true, true), (Pared::Piedra, Techo::Teja, true, true)]),
+        ("casas de altos de 1822", ZoneKind::Residencial, Density::Media, 3, 1822, 0, [(Pared::Piedra, Techo::Azotea, true, true), (Pared::Ladrillo, Techo::Azotea, true, true), (Pared::Ladrillo, Techo::Azotea, true, true)]),
+        ("quintas de 1812 extramuros", ZoneKind::Residencial, Density::Baja, 2, 1812, 3, [(Pared::Ladrillo, Techo::Teja, true, true), (Pared::Piedra, Techo::Azotea, true, true), (Pared::Adobe, Techo::Teja, true, false)]),
+    ];
+    let mut filas = hileras(c, 6);
+    // Para las capturas, las hileras con la fachada al sol de la mañana (ver
+    // `render::lighting`: a las 10 el sol viene de (0,5; −0,42) en el plano).
+    let sol = Vec2::new(0.5, -0.42).normalize();
+    let al_sol: Vec<Vec<u32>> = filas.iter().filter(|f| c.lots.lots[&f[0]].f.dot(sol) > 0.2).cloned().collect();
+    if al_sol.len() >= 6 {
+        filas = al_sol;
+    }
+    if filas.len() < muestras.len() {
+        return format!("faltan hileras de solares ({} de {})", filas.len(), muestras.len());
+    }
+    // Cada muestra en su hilera: las del centro para los altos y el comercio, las de afuera
+    // para ranchos y quintas.
+    let orden = [1, filas.len() - 1, filas.len() / 2, 2, 0, filas.len() - 2];
+    let mut usadas = std::collections::HashSet::new();
+    let mut e = crate::buildings::Edits::default();
+    let mut lista = Vec::new();
+    let mut nombres = std::collections::BTreeMap::<String, usize>::new();
+    for (k, (nombre, kind, dens, nivel, anio, lugar, mats)) in muestras.into_iter().enumerate() {
+        let mut i = orden[k].min(filas.len() - 1);
+        if kind == ZoneKind::Comercial {
+            // El comercio, en la hilera con más esquinas (las pulperías van en la esquina).
+            let esquinas = |f: &Vec<u32>| f.iter().take(8).filter(|id| c.esquina_de(&c.lots.lots[id]) > 0).count();
+            if let Some(j) = (0..filas.len()).filter(|j| !usadas.contains(j)).max_by_key(|&j| (esquinas(&filas[j]), usize::MAX - j)) {
+                i = j;
+            }
+        }
+        while usadas.contains(&i) {
+            i = (i + 1) % filas.len();
+        }
+        usadas.insert(i);
+        let ids: Vec<u32> = filas[i].iter().take(8).copied().collect();
+        for (j, &id) in ids.iter().enumerate() {
+            let seed = c.lots.lots[&id].seed;
+            let (p, te, rev, hierro) = mats[[0, 1, 0, 2, 1, 0, 2, 1][j % 8]];
+            {
+                let l = c.lots.lots.get_mut(&id).unwrap();
+                l.zone = zone_code(kind, dens);
+                l.level = nivel;
+            }
+            let mut o = Obra::nueva(p, te, rev, hierro);
+            o.contexto = c.contexto_solar(id, nivel);
+            o.contexto.anio = anio;
+            o.contexto.lugar = lugar;
+            o.contexto.clase = match nivel {
+                1 => 0,
+                2 => [1, 1, 2, 0, 1, 2, 1, 3][j % 8],
+                _ => [2, 3, 2, 3, 2, 2, 3, 2][j % 8],
+            };
+            let origen = super::arquitectura::origen_probable(anio, seed ^ j as u64);
+            o.contexto.tradicion = super::arquitectura::tradicion_de(origen).indice();
+            c.elegir_giro(id, nivel, &mut o);
+            c.lots.lots.get_mut(&id).unwrap().obra = Some(o);
+            if let Some(linea) = c.lineas_estilo(&c.lots.lots[&id]).into_iter().next() {
+                let tipo = linea.split(',').next().unwrap_or("").split(" con ").next().unwrap_or("").to_string();
+                *nombres.entry(tipo).or_default() += 1;
+            }
+            c.revoxelizar(&t, id, &mut e);
+        }
+        let centro = ids.iter().map(|id| c.lots.lots[id].c).sum::<Vec2>() / ids.len() as f32;
+        lista.push((nombre, centro, c.lots.lots[&ids[0]].f, ids));
+    }
+    let esquinas = lista.iter().flat_map(|m| m.3.iter()).filter(|id| c.lots.lots[id].obra.is_some_and(|o| o.contexto.esquina > 0)).count();
+    *MUESTRAS_ARQ.lock().unwrap() = lista;
+    let tipos = nombres.iter().map(|(k, v)| format!("{k} ×{v}")).collect::<Vec<_>>().join(", ");
+    let r = apply(s, Ok(e));
+    format!("tipos: {tipos} · {esquinas} esquinas · {r}")
+}
+
+/// Cámara sobre la esquina de la calle de comercio (la pulpería), en diagonal a las dos calles.
+pub fn view_esquina(s: &Session) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let m = MUESTRAS_ARQ.lock().unwrap();
+    let todos = [0usize, 3, 2, 4, 5, 1];
+    let l = todos.iter().filter_map(|&k| m.get(k)).flat_map(|x| x.3.iter()).filter_map(|id| c.lots.lots.get(id)).find(|l| l.obra.is_some_and(|o| o.contexto.esquina > 0))?;
+    let esq = l.obra?.contexto.esquina;
+    let u = Vec2::new(-l.f.y, l.f.x) * if esq == 1 { -1.0 } else { 1.0 };
+    let p = l.c + l.f * (super::lots::D * 0.5) + u * (super::lots::W * 0.5);
+    let mira = (l.f + u).normalize();
+    Some([p.x, p.y, 34.0, mira.x.atan2(mira.y).to_degrees(), 26.0])
+}
+
+/// Cámara sobre la calle de muestra `k`, mirando las fachadas en diagonal (`hacia` m desde el
+/// centro de los solares hacia la calle: 24 es el eje de la calle).
+pub fn view_arquitectura(k: usize, hacia: f32, lejos: f32, giro: f32, pitch: f32) -> Option<[f32; 5]> {
+    let m = MUESTRAS_ARQ.lock().unwrap();
+    let (_, c, f, _) = m.get(k)?;
+    let p = *c + *f * hacia;
+    Some([p.x, p.y, lejos, f.x.atan2(f.y).to_degrees() + giro, pitch])
 }

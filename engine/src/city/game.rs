@@ -582,6 +582,8 @@ impl Game {
                 if let Some(o) = self.city.obra_de(l) {
                     i.lines.extend(self.city.lineas_obra(&o));
                 }
+                // Cómo es la casa: tipología, año y el origen de la familia que la levantó.
+                i.lines.extend(self.city.lineas_estilo(l));
                 i.lines.push(format!("Techo: {} · riesgo de fuego {} %", super::services::fires::roof_of(l).name(), (self.city.fire_risk(l) * 100.0) as i32));
                 if self.city.services.fires.burning.contains_key(&l.id) {
                     i.lines.push("¡Está ardiendo!".into());

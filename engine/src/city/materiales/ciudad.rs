@@ -350,15 +350,25 @@ pub fn variante(real: &Obra, nominal: &Obra, seed: u64) -> Option<Variante> {
         Techo::Paja => (THATCH, THATCH_DARK),
         Techo::Cuero => (HIDE, HIDE),
     });
-    Some(Variante { paredes, revoque: rev && !matches!(real.paredes, Pared::Piedra), ladrillo_visto: real.paredes == Pared::Ladrillo && rev, techo, rejas: !sin_rejas, seed })
+    Some(Variante { paredes, revoque: rev && !matches!(real.paredes, Pared::Piedra), ladrillo_visto: real.paredes == Pared::Ladrillo && rev, techo, rejas: !sin_rejas, seed, cal: None, estilo: None })
 }
 
 /// Lleva el dibujo del catálogo (hecho con los materiales `nominal`) a los materiales reales
 /// de la obra (ver [`variante`] y `structures::aplicar_variante`).
 pub fn remapear(e: &mut Edits, real: &Obra, nominal: &Obra, seed: u64) {
-    if let Some(v) = variante(real, nominal, seed) {
-        aplicar_variante(e, &v);
+    remapear_con_cal(e, real, nominal, seed, None);
+}
+
+/// Como [`remapear`], y además pasa los revoques de cal del dibujo al color `cal` (el de la
+/// época y la familia; ver `city::arquitectura`).
+pub fn remapear_con_cal(e: &mut Edits, real: &Obra, nominal: &Obra, seed: u64, cal: Option<Mat>) {
+    let v = variante(real, nominal, seed);
+    if v.is_none() && cal.is_none() {
+        return;
     }
+    let mut v = v.unwrap_or(Variante { paredes: None, revoque: true, ladrillo_visto: false, techo: None, rejas: true, seed, cal: None, estilo: None });
+    v.cal = cal;
+    aplicar_variante(e, &v);
 }
 
 // --- La ciudad -------------------------------------------------------------------------------
@@ -404,7 +414,7 @@ impl City {
     /// Plan de lo que se construye en un solar a ese nivel.
     pub fn plan_de_solar(&self, l: &Lot, level: u8) -> Option<Plan> {
         let (k, d) = zone_of(l.zone)?;
-        Some(plan_solar(k, d, level, l.seed, self.sin_paja_en(l.c)))
+        Some(self.plan_con_preferencias(l, level, plan_solar(k, d, level, l.seed, self.sin_paja_en(l.c))))
     }
 
     /// Elige los materiales con lo que hay, los saca del depósito y anota la demanda: así se
@@ -494,7 +504,8 @@ impl City {
                 self.lots.lots.get_mut(&id).unwrap().obra.as_mut().unwrap().estado = 0.05;
                 continue;
             }
-            let o = self.construir_obra(&plan);
+            let nivel = self.lots.lots[&id].level;
+            let o = self.obra_de_solar(id, nivel, &plan);
             self.lots.lots.get_mut(&id).unwrap().obra = Some(o);
             self.revoxelizar(t, id, e);
             levantadas += 1;

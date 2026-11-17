@@ -127,8 +127,10 @@ El catálogo dibuja cada edificio con sus materiales de siempre (el *nominal*: c
 teja o azotea; el rancho de adobe y paja). Si la obra real es otra, se arma una **`Variante`**
 (`structures::Variante`: paredes, revoque, ladrillo visto, techo, rejas y la semilla del solar,
 elegida de forma determinista) y `structures::aplicar_variante` cambia los vóxeles por material.
-La `Variante` está pensada para sumarle después parámetros de estilo (proporciones, fachadas,
-colores de cal) sin tocar los materiales:
+La `Variante` lleva además el estilo de cada casa (tipología, fachada, color y desgaste; ver
+[arquitectura-colonial.md](arquitectura-colonial.md)): las casas con estilo se dibujan directamente
+con sus materiales reales (la piedra con cal, revocada en el 80 % de las casas y en sillería a la
+vista en el resto); los edificios del catálogo siguen con esta tabla:
 
 | Obra real | Paredes | Techo |
 |---|---|---|
