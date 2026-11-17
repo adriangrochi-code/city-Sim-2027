@@ -10,6 +10,7 @@
 
 pub mod icons;
 pub mod paint;
+pub mod poblacion;
 pub mod theme;
 
 use crate::city::game::fmt_thousands;
@@ -244,7 +245,7 @@ pub fn stats(game: &Game, hour: f32, balance: Option<i64>) -> TopStats {
             Some(b) => format!("{}/mes", fmt_thousands(b)),
             None => "—/mes".into(),
         },
-        population: fmt_thousands(pop as i64),
+        population: fmt_thousands(game.city.habitantes() as i64),
         waiting: fmt_thousands(game.city.pool as i64),
     }
 }
@@ -279,6 +280,7 @@ pub fn chips(game: &Game) -> Vec<(Icon, String, String)> {
         (Icon::Vecinos, v0, t0),
         (Icon::Comercio, v1, t1),
         (Icon::Hacienda, v2, t2),
+        poblacion::chip(game),
     ]
 }
 
@@ -453,6 +455,8 @@ pub enum UiAction {
     ToggleBudget,
     /// Cambia un impuesto (índice en `Tax::ALL`) en tantos puntos.
     Tax(usize, i32),
+    /// Abre un panel de detalle (por ejemplo, los vecinos de una casa).
+    Abrir(Detail),
 }
 
 /// Estado propio de la interfaz entre cuadros.
@@ -560,10 +564,23 @@ impl GameUi {
         if let Some(info) = game.inspect_info() {
             inspect_panel(ctx, &info, &mut acts);
         }
+        // Paneles pedidos desde la ficha (los vecinos de una casa).
+        acts.retain(|a| match a {
+            UiAction::Abrir(d) => {
+                self.detail = Some(*d);
+                self.budget = false;
+                false
+            }
+            _ => true,
+        });
         self.gazette(ctx);
         if let Some(d) = self.detail {
             let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
-            if detail_panel(ctx, game, d, reserved) {
+            if matches!(d, Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_)) {
+                if let Some(nav) = poblacion::panel(ctx, game, d, reserved, &mut acts) {
+                    self.detail = nav;
+                }
+            } else if detail_panel(ctx, game, d, reserved) {
                 self.detail = None;
             }
         }
@@ -873,6 +890,11 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, acts: &mut Vec<UiAction>) 
                 };
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
+                    if let Some(l) = info.lot.filter(|_| info.vecinos > 0) {
+                        if ui.button(RichText::new("Vecinos").small()).on_hover_text("Quiénes viven en esta casa: familias, economía e historias").clicked() {
+                            acts.push(UiAction::Abrir(Detail::Hogares(l)));
+                        }
+                    }
                     for (label, tip, tool) in actions {
                         if ui.button(RichText::new(*label).small()).on_hover_text(*tip).clicked() {
                             acts.push(UiAction::Tool(*tool));
@@ -897,11 +919,17 @@ pub enum Detail {
     Clima,
     Recurso(Res),
     Opinion(usize),
+    /// Panel de la población (pestaña: resumen, desigualdad, felicidad, crónica).
+    Poblacion(u8),
+    /// Los hogares de una casa (id del solar).
+    Hogares(u32),
+    /// La ficha de una persona.
+    Persona(u32),
 }
 
 /// A qué panel lleva cada ficha de `chips()` (mismo orden).
-pub fn chip_details() -> [Detail; 7] {
-    [Detail::Clima, Detail::Recurso(Res::Ladrillos), Detail::Recurso(Res::Piedra), Detail::Recurso(Res::Pan), Detail::Opinion(0), Detail::Opinion(1), Detail::Opinion(2)]
+pub fn chip_details() -> [Detail; 8] {
+    [Detail::Clima, Detail::Recurso(Res::Ladrillos), Detail::Recurso(Res::Piedra), Detail::Recurso(Res::Pan), Detail::Opinion(0), Detail::Opinion(1), Detail::Opinion(2), Detail::Poblacion(0)]
 }
 
 /// Gráfico de barras simple (los últimos meses, el más reciente a la derecha). `marks` dibuja
@@ -953,6 +981,8 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                 Detail::Clima => (Icon::Agua, "Clima, río y campo".to_string()),
                 Detail::Recurso(r) => (match r { Res::Pan => Icon::Pan, Res::Piedra => Icon::Piedra, _ => Icon::Ladrillo }, r.name().to_string()),
                 Detail::Opinion(i) => ([Icon::Vecinos, Icon::Comercio, Icon::Hacienda][i], format!("Opinión de los {}", Sector::ALL[i].name().to_lowercase())),
+                // Los de la población se dibujan en `poblacion::panel`.
+                Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) => (Icon::Familia, "Población".to_string()),
             };
             ui.horizontal(|ui| {
                 icons::show(ui, icon, 22.0, theme::INK);
@@ -1021,6 +1051,11 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                                 kv(ui, &format!("{} al {} %", t.name(), e.tax(t)), format!("{:+.0}", x), if x > 0.0 { theme::GOOD } else { theme::BAD });
                             }
                         }
+                        if c.poblacion.fundada {
+                            let a = c.poblacion.animo_sectores()[i];
+                            let x = ((a - 0.55) * 40.0).clamp(-15.0, 15.0);
+                            kv(ui, &format!("Cómo viven (felicidad {} %)", (a * 100.0).round() as i32), format!("{x:+.0}"), if x >= 0.0 { theme::GOOD } else { theme::BAD });
+                        }
                         match i {
                             0 => {
                                 let pan = -(e.price(Res::Pan) - 1.0) * 25.0;
@@ -1042,6 +1077,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                     let h: Vec<f32> = e.history.iter().rev().take(12).rev().map(|h| h.opinion[i]).collect();
                     bars(ui, &h, Some(&vec![50.0; h.len()]), theme::PRESSED, "Opinión (raya: 50)");
                 }
+                Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) => {}
                 Detail::Clima => {
                     let m = (c.month % 12) as usize;
                     let w = &c.climate.last;
@@ -1229,7 +1265,7 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             UiAction::Hour(d) => hour_delta += d,
             UiAction::CloseInspect => game.inspected = None,
             UiAction::ToggleList => list.open = !list.open,
-            UiAction::ToggleBudget => {}
+            UiAction::ToggleBudget | UiAction::Abrir(_) => {}
             UiAction::Tax(i, d) => {
                 if let Some(t) = Tax::ALL.get(*i) {
                     let e = &mut game.city.economy;
@@ -1328,7 +1364,7 @@ mod tests {
         assert_eq!(stats(&g, 9.5, Some(-1500)).balance, "-1.500/mes");
         assert_eq!(stats(&g, 9.5, Some(320)).balance, "+320/mes");
         let ch = chips(&g);
-        assert_eq!(ch.len(), 7);
+        assert_eq!(ch.len(), 8);
         assert!(ch[0].2.contains("INUMET") && ch[0].2.contains("Trigo"), "{}", ch[0].2);
         assert!(ch[0].1.starts_with("21 °C"), "marzo, con la normal del INUMET: {}", ch[0].1);
         assert!(ch[0].2.starts_with("Otoño de marzo"), "{}", ch[0].2);

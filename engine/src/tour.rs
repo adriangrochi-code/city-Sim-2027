@@ -158,6 +158,16 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-ficha", ui_inspect),
         UiShot("motor-ui-gaceta", ui_gazette),
         UiShot("motor-ui-panel", ui_panel),
+        // La población: cuarenta años de historia y sus paneles.
+        Game("cuarenta años de historia", d::historia),
+        WaitIdle("ciudad con historia"),
+        UiShot("motor-ui-poblacion", |s, u| ui_pob(s, u, ui::Detail::Poblacion(0))),
+        UiShot("motor-ui-poblacion-desigualdad", |s, u| ui_pob(s, u, ui::Detail::Poblacion(1))),
+        UiShot("motor-ui-poblacion-felicidad", |s, u| ui_pob(s, u, ui::Detail::Poblacion(2))),
+        UiShot("motor-ui-poblacion-cronica", |s, u| ui_pob(s, u, ui::Detail::Poblacion(3))),
+        UiShot("motor-ui-vecinos", ui_vecinos),
+        UiShot("motor-ui-persona", ui_persona),
+        UiShot("motor-ui-persona-liberta", ui_persona_liberta),
         // Guardar y cargar: la ciudad cargada tiene que verse igual que la general.
         Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
         SaveLoad("guardar y cargar la ciudad"),
@@ -248,6 +258,49 @@ fn ui_detail(s: &mut Session, u: &mut GameUi, d: ui::Detail) {
     u.open = None;
     u.budget = false;
     u.detail = Some(d);
+}
+
+/// Un panel de la población (sin el listado de ordenanzas de la captura anterior).
+fn ui_pob(s: &mut Session, u: &mut GameUi, d: ui::Detail) {
+    ui_detail(s, u, d);
+    u.list.open = false;
+    s.game.as_mut().unwrap().inspected = None;
+}
+
+/// Los vecinos de la casa con más familias, con su ficha de solar abierta.
+fn ui_vecinos(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    u.open = None;
+    u.budget = false;
+    u.list.open = false;
+    let p = &g.city.poblacion;
+    let lote = g.city.lots.lots.values().filter(|l| l.level > 0).max_by_key(|l| (p.hogares_de_lote(l.id).count(), p.habitantes_de_lote(l.id).count(), std::cmp::Reverse(l.id))).map(|l| (l.id, l.c));
+    if let Some((id, c)) = lote {
+        g.inspected = Some(c);
+        u.detail = Some(ui::Detail::Hogares(id));
+    }
+}
+
+/// Ficha de la persona viva con el linaje más largo (y más historia).
+fn ui_persona(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.inspected = None;
+    u.open = None;
+    let p = &g.city.poblacion;
+    let id = p.vivos().filter(|x| x.edad(p.mes) >= 18).max_by_key(|x| (p.linaje(x.id).len(), x.historial.len(), std::cmp::Reverse(x.id))).map(|x| x.id);
+    u.detail = id.map(ui::Detail::Persona);
+}
+
+/// Ficha de una persona que obtuvo la libertad (o, si no hay, de alguien esclavizado).
+fn ui_persona_liberta(s: &mut Session, u: &mut GameUi) {
+    use crate::city::poblacion::Condicion;
+    let g = s.game.as_mut().unwrap();
+    g.inspected = None;
+    u.open = None;
+    let p = &g.city.poblacion;
+    let id = p.vivos().filter(|x| x.condicion == Condicion::Liberta).max_by_key(|x| (x.historial.len(), std::cmp::Reverse(x.id))).or_else(|| p.vivos().find(|x| x.condicion == Condicion::Esclavizada)).map(|x| x.id);
+    u.detail = id.map(ui::Detail::Persona);
 }
 
 /// Cajón de zonas: residencial, comercial e industrial, densidad y medidor de demanda.
@@ -538,7 +591,7 @@ impl Tour {
                     let u = self.tour_ui(r);
                     let summary = |s: &Session| {
                         let c = &s.game.as_ref().unwrap().city;
-                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes)
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, serde_json::to_string(&c.poblacion).unwrap_or_default())
                     };
                     let before = summary(s);
                     let t0 = Instant::now();

@@ -10,6 +10,7 @@ pub mod economy;
 pub mod game;
 pub mod game_demo;
 pub mod lots;
+pub mod poblacion;
 pub mod roads;
 pub mod save;
 pub mod voxelize;
@@ -56,6 +57,10 @@ pub struct City {
     pub climate: climate::Climate,
     /// Nivel del río: mareas, sudestadas, pampero y crecientes.
     pub water: water::WaterLevel,
+    /// Los habitantes uno por uno: familias, linajes, economía de los hogares y felicidad.
+    pub poblacion: poblacion::Poblacion,
+    /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
+    mejoras: Vec<(u32, u8)>,
     rng: Rng,
     pending_flood: Option<Flood>,
     month_acc: f32,
@@ -64,7 +69,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), poblacion: poblacion::Poblacion::nueva(1726), mejoras: Vec::new(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -188,6 +193,80 @@ impl City {
         self.lots.population()
     }
 
+    /// Habitantes de verdad (personas de la población, incluidas la guarnición, las
+    /// cuadrillas y quienes no tienen casa). Antes de fundar, lo que caben en las casas.
+    pub fn habitantes(&self) -> i32 {
+        if self.poblacion.fundada { self.poblacion.habitantes() as i32 } else { self.population() }
+    }
+
+    /// Los solares tal como los ve la población.
+    pub fn lotes_info(&self) -> Vec<poblacion::LoteInfo> {
+        self.lots
+            .lots
+            .values()
+            .map(|l| poblacion::LoteInfo {
+                id: l.id,
+                tipo: l.kind(),
+                nivel: l.level,
+                capacidad: l.residents(),
+                empleos: match l.kind() {
+                    Some(ZoneKind::Comercial) => lots::JOBS_C[l.level as usize],
+                    Some(ZoneKind::Industrial) => lots::JOBS_I[l.level as usize],
+                    _ => 0,
+                },
+                valor: self.lots.land_value(l),
+                distancia: self.lots.plaza_center.map_or(0.0, |p| l.c.distance(p)),
+            })
+            .collect()
+    }
+
+    /// Lo que la ciudad le cuenta a la población este mes (también para la ficha de cada
+    /// persona en la interfaz).
+    pub fn entorno_poblacion(&self, llegadas: u32, agua: f32, epidemia: bool, sequia: bool) -> poblacion::Entorno {
+        poblacion::Entorno {
+            mes: self.month as i32,
+            lotes: self.lotes_info(),
+            precio_pan: self.economy.price(economy::Res::Pan),
+            precio_carne: self.economy.price(economy::Res::Carne),
+            agua,
+            epidemia,
+            sequia,
+            llegadas,
+            contribucion: self.economy.tax(economy::Tax::Contribucion),
+            ordenanzas: self.economy.active.clone(),
+            iglesia: self.plaza.is_some(),
+        }
+    }
+
+    /// El entorno de la población como está ahora (sin llegadas), para la interfaz.
+    pub fn entorno_actual(&self) -> poblacion::Entorno {
+        let agua = (0.4 + self.climate.soil / climate::SUELO_MAX * 0.4).min(0.8);
+        self.entorno_poblacion(0, agua, false, self.climate.last.drought)
+    }
+
+    /// Mejoras de casas pagadas por sus dueños: se construyen si el solar lo permite (calle,
+    /// valor del suelo, densidad, antigüedad); la falta de pobladores no las frena.
+    fn aplicar_mejoras(&mut self, t: &TerrainGen, e: &mut Edits) {
+        let pedidas = std::mem::take(&mut self.mejoras);
+        let mut hechas = Vec::new();
+        for (id, nivel) in pedidas {
+            let Some(l) = self.lots.lots.get(&id) else { continue };
+            if l.level + 1 != nivel || !lots::growth_blockers(&self.lots, l, &self.net, i32::MAX, self.demand()).is_empty() {
+                continue;
+            }
+            let l = self.lots.lots.get_mut(&id).unwrap();
+            l.level = nivel;
+            l.age = 0;
+            hechas.push(LevelChange { lot: id, level: nivel });
+            self.poblacion.mejora_hecha(id, nivel);
+        }
+        if !hechas.is_empty() {
+            // Las fotos de la población, al día con lo que pagaron los dueños.
+            self.poblacion.stats = self.poblacion.estadisticas();
+        }
+        self.apply_levels(t, &hechas, e);
+    }
+
     /// Trabajadores: algo menos de la mitad de los habitantes (el resto, niños y ancianos).
     pub fn workers(&self) -> i32 {
         (self.population() as f32 * 0.45) as i32
@@ -308,6 +387,7 @@ impl City {
         }
         self.after_roads(t, &new, &mut e);
         self.pool = 40;
+        self.poblacion.fundar(self.month as i32);
         Ok(e)
     }
 
@@ -427,6 +507,7 @@ impl City {
         while self.month_acc >= MONTH_SECONDS {
             self.month_acc -= MONTH_SECONDS;
             news.extend(self.month_tick());
+            self.aplicar_mejoras(t, e);
         }
         // El río: horas del reloj del día (24 h cada 8 minutos, como el ciclo de día y noche).
         let was = self.water.wind;
@@ -513,6 +594,7 @@ impl City {
     /// las casas de material aguantan. Devuelve el aviso para la gaceta.
     fn flood(&mut self, t: &TerrainGen, f: Flood, e: &mut Edits) -> Option<String> {
         let mut lost = Vec::new();
+        let mut mojados = Vec::new();
         let mut wet = 0;
         for l in self.lots.lots.values() {
             if l.level == 0 {
@@ -528,11 +610,13 @@ impl City {
             };
             if under {
                 wet += 1;
+                mojados.push(l.id);
                 if l.level == 1 {
                     lost.push(l.id);
                 }
             }
         }
+        let ahogados = self.poblacion.choque_inundacion(&mojados, &lost);
         for id in &lost {
             let lot = self.lots.lots.get_mut(id).unwrap();
             for &v in &lot.voxels {
@@ -545,9 +629,10 @@ impl City {
         if wet == 0 {
             return None;
         }
+        let muertos = if ahogados > 0 { format!(" · {ahogados} muertos") } else { String::new() };
         Some(match f {
-            Flood::Rio(level) => format!("La sudestada subió el río {:.1} m: {} solares bajo el agua, {} ranchos perdidos", level, wet, lost.len()),
-            Flood::Arroyos => format!("Crecieron los arroyos: {} solares inundados en los bajos, {} ranchos perdidos", wet, lost.len()),
+            Flood::Rio(level) => format!("La sudestada subió el río {:.1} m: {} solares bajo el agua, {} ranchos perdidos{muertos}", level, wet, lost.len()),
+            Flood::Arroyos => format!("Crecieron los arroyos: {} solares inundados en los bajos, {} ranchos perdidos{muertos}", wet, lost.len()),
         })
     }
 
@@ -559,14 +644,15 @@ impl City {
         let (jc, ji) = self.lots.jobs();
         let (jobs, workers) = ((jc + ji) as f32, self.workers() as f32);
         let work = if workers > 20.0 && jobs < workers * 0.6 { 0.75 } else if jobs > workers { 1.2 } else { 1.0 };
-        let factor = self.economy.arrivals_factor() * work;
+        // La gente que ya vive en la ciudad cuenta cómo le va: su felicidad atrae o espanta.
+        let animo = if self.poblacion.fundada { (0.75 + 0.5 * self.poblacion.stats.felicidad).clamp(0.8, 1.15) } else { 1.0 };
+        let factor = self.economy.arrivals_factor() * work * animo;
         let mut arrivals = ((4.0 + pop as f32 * 0.03) * factor) as i32;
         if self.month % 4 == 0 {
             let ship = ((20 + self.rng.range(0, 25)) as f32 * self.economy.ship_factor()) as i32 + (pop as f32 * 0.02) as i32;
             arrivals += ship;
             news.push(format!("Llega un barco con {ship} pobladores"));
         }
-        self.pool = (self.pool + arrivals).min(600);
         // Clima del mes: cosechas, pasturas, sequía y el caudal de los ríos.
         let (weather, cnews) = self.climate.month_tick(self.month % 12);
         news.extend(cnews);
@@ -577,7 +663,23 @@ impl City {
         if weather.deluge {
             self.pending_flood = Some(Flood::Arroyos);
         }
-        let input = self.month_input();
+        let mut input = self.month_input();
+        // La población: llegan las familias, nacen, mueren, se casan, trabajan y buscan casa.
+        if self.poblacion.fundada {
+            // Sin casas no viene más gente: con muchos sin techo, llegan cada vez menos.
+            let sin_techo = (1.0 - (self.pool as f32 - 100.0).max(0.0) / 500.0).max(0.1);
+            let llegan = (arrivals.max(0) as f32 * sin_techo) as u32;
+            let ent = self.entorno_poblacion(llegan, input.water_ratio, input.epidemic, weather.drought);
+            let inf = self.poblacion.mes(&ent);
+            // Los que esperan casa son la gente sin casa (y la que sobra en casas hacinadas).
+            self.pool = inf.sin_casa.min(600);
+            self.mejoras = inf.mejoras;
+            input.animo = Some(inf.animo);
+            input.social = inf.lineas;
+            news.extend(inf.noticias);
+        } else {
+            self.pool = (self.pool + arrivals).min(600);
+        }
         let report = self.economy.month(&input);
         self.money += report.balance();
         news.extend(report.news);

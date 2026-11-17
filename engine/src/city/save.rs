@@ -131,6 +131,10 @@ pub struct CityData {
     pub clima: Option<(Vec<f32>, u64)>,
     #[serde(default)]
     pub rio: Option<(Vec<f32>, u64)>,
+    /// Los habitantes (personas, hogares, linajes, crónica). Las partidas anteriores a la
+    /// población la generan al cargar a partir de la fundación y de las casas.
+    #[serde(default)]
+    pub poblacion: Option<super::poblacion::Poblacion>,
 }
 
 impl CityData {
@@ -173,6 +177,7 @@ impl CityData {
             economia,
             clima: Some(c.climate.to_state()),
             rio: Some(c.water.to_state()),
+            poblacion: c.poblacion.fundada.then(|| c.poblacion.clone()),
         }
     }
 
@@ -200,7 +205,7 @@ impl CityData {
         economy.last = MonthReport { lines: ed.ultimo_mes.iter().map(|(c, a)| Line { concept: c.clone(), amount: *a }).collect(), ..Default::default() };
         economy.last_subsidy = ed.ultimo_subsidio;
         economy.rng = Rng::from_state(ed.azar);
-        Ok(City {
+        let mut city = City {
             net,
             lots,
             money: self.dinero,
@@ -214,7 +219,23 @@ impl CityData {
             rng: Rng::from_state(self.azar),
             month_acc: self.acumulado_mes,
             growth_acc: self.acumulado_crecimiento,
-        })
+            poblacion: super::poblacion::Poblacion::nueva(1726),
+            mejoras: Vec::new(),
+        };
+        city.poblacion = match &self.poblacion {
+            Some(p) => {
+                let mut p = p.clone();
+                p.reconstruir();
+                p
+            }
+            None if city.plaza.is_some() => super::poblacion::Poblacion::desde_partida_vieja(1726 ^ self.azar, self.mes as i32, city.population()),
+            None => super::poblacion::Poblacion::nueva(1726),
+        };
+        if self.poblacion.is_none() {
+            city.poblacion.conocer_lotes(&city.lotes_info());
+            city.poblacion.stats = city.poblacion.estadisticas();
+        }
+        Ok(city)
     }
 }
 
@@ -270,6 +291,9 @@ mod tests {
         assert_eq!(loaded.water.to_state(), city.water.to_state(), "río");
         assert_eq!(loaded.economy.drought_months, city.economy.drought_months);
         assert_eq!(loaded.economy.posito, city.economy.posito);
+        assert!(city.poblacion.habitantes() > 100, "la ciudad tiene habitantes: {}", city.poblacion.habitantes());
+        assert!(loaded.poblacion == city.poblacion, "la población cargada es IGUAL");
+        assert_eq!(loaded.poblacion.stats, city.poblacion.stats);
         for (a, b) in loaded.economy.stocks.iter().zip(&city.economy.stocks) {
             assert_eq!((a.amount, a.price, a.capacity), (b.amount, b.price, b.capacity), "existencias");
         }
@@ -285,10 +309,26 @@ mod tests {
         assert_eq!((loaded.money, loaded.pool, loaded.population(), loaded.month), (city.money, city.pool, city.population(), city.month));
         let lv = |c: &City| c.lots.lots.values().map(|l| (l.level, l.age)).collect::<Vec<_>>();
         assert_eq!(lv(&loaded), lv(&city));
+        assert!(loaded.poblacion == city.poblacion, "la población sigue IGUAL un año después");
+        assert_eq!(loaded.economy.opinion, city.economy.opinion);
         // Las calles cargadas se pueden seguir editando (índices reconstruidos).
         let p = Vec2::new(13500.0, 16300.0) + Vec2::new(BLOCK * 0.5, -BLOCK * 0.5);
         assert!(loaded.net.nearest_edge(p, 2.0).is_some());
         assert!(loaded.demolish_road(&t, p + Vec2::new(0.0, -20.0)).is_ok());
+    }
+
+    #[test]
+    fn una_partida_de_antes_de_la_poblacion_la_genera() {
+        let t = TerrainGen::new(1726);
+        let city = sample_city(&t);
+        let mut d = CityData::from_city(&city);
+        d.poblacion = None;
+        let json = serde_json::to_string(&d).unwrap().replace(",\"poblacion\":null", "");
+        let back: CityData = serde_json::from_str(&json).unwrap();
+        let mut c = back.to_city().unwrap();
+        assert!(c.poblacion.fundada && c.poblacion.habitantes() as i32 >= city.population());
+        c.fast_forward(&t, 6);
+        assert!(c.poblacion.habitantes() > 0);
     }
 
     #[test]

@@ -164,6 +164,23 @@ pub enum Ordinance {
     SinPaja,
     Limpieza,
     FarolesVecinos,
+    // --- Políticas sociales (efectos en `poblacion`) ---
+    RepartoSolares,
+    ContribucionProgresiva,
+    PanDeLosPobres,
+    HospitalCaridad,
+    EscuelasPrimerasLetras,
+    PrestamosCabildo,
+    FondoManumision,
+    LibertadVientres,
+    Abolicion,
+}
+
+impl Ordinance {
+    /// Las leyes de libertad no se derogan.
+    pub fn irrevocable(self) -> bool {
+        matches!(self, Ordinance::LibertadVientres | Ordinance::Abolicion)
+    }
 }
 
 pub struct OrdInfo {
@@ -176,7 +193,7 @@ pub struct OrdInfo {
     pub monthly: i64,
 }
 
-pub const ORDINANCES: [OrdInfo; 9] = [
+pub const ORDINANCES: &[OrdInfo] = &[
     OrdInfo { id: Ordinance::PanFijo, name: "Precio fijo del pan", desc: "El pan no pasa de 1,3 aunque falte; la ciudad paga la diferencia.", opinion: [15, -10, 0], monthly: 0 },
     OrdInfo { id: Ordinance::Posito, name: "Pósito de granos", desc: "La ciudad compra el trigo que sobra y lo reparte en la escasez.", opinion: [5, -5, 5], monthly: 40 },
     OrdInfo { id: Ordinance::NoExportar, name: "Prohibir exportar en la escasez", desc: "Si falta comida, la carne y el trigo no se embarcan.", opinion: [10, -10, -15], monthly: 0 },
@@ -186,6 +203,16 @@ pub const ORDINANCES: [OrdInfo; 9] = [
     OrdInfo { id: Ordinance::SinPaja, name: "Prohibido techar con paja cerca de la plaza", desc: "Ranchos a menos de 400 m de la plaza: 70 % menos incendios.", opinion: [-10, 5, 0], monthly: 0 },
     OrdInfo { id: Ordinance::Limpieza, name: "Limpieza de calles y basurales", desc: "Las epidemias se contagian un 40 % menos. 20 pesos por mes cada 1.000 habitantes.", opinion: [5, 0, 0], monthly: 0 },
     OrdInfo { id: Ordinance::FarolesVecinos, name: "Faroles a cargo de los vecinos", desc: "El sebo de los faroles lo pagan los vecinos, no la ciudad.", opinion: [-8, 0, 0], monthly: 0 },
+    // Políticas sociales: el costo real depende de la población (sale en el presupuesto).
+    OrdInfo { id: Ordinance::RepartoSolares, name: "Reparto de solares a familias pobres", desc: "Las familias pobres sin casa reciben en propiedad los ranchos libres. 25 pesos por mes de mensura y escrituras.", opinion: [8, -3, -5], monthly: 25 },
+    OrdInfo { id: Ordinance::ContribucionProgresiva, name: "Contribución progresiva", desc: "Los pobres no pagan contribución; los acomodados pagan 1,5 veces y los principales 2,5 veces.", opinion: [8, -10, -10], monthly: 0 },
+    OrdInfo { id: Ordinance::PanDeLosPobres, name: "Pan barato para los pobres", desc: "Los hogares pobres compran el pan al precio normal; la ciudad paga la diferencia cuando está caro.", opinion: [10, -3, 0], monthly: 0 },
+    OrdInfo { id: Ordinance::HospitalCaridad, name: "Hospital de caridad y asistencia a pobres", desc: "Menos muertes y mejor salud de pobres y modestos. 20 pesos más 30 por cada 1.000 habitantes.", opinion: [6, 0, 0], monthly: 20 },
+    OrdInfo { id: Ordinance::EscuelasPrimerasLetras, name: "Escuelas de primeras letras", desc: "Más niños aprenden a leer y escribir: más oficios letrados y movilidad. 15 pesos más un cuarto por niño.", opinion: [5, 2, 0], monthly: 15 },
+    OrdInfo { id: Ordinance::PrestamosCabildo, name: "Préstamos del cabildo", desc: "El cabildo presta barato a pobres y modestos en los meses malos; pierde parte de lo prestado.", opinion: [6, -4, 0], monthly: 10 },
+    OrdInfo { id: Ordinance::FondoManumision, name: "Fondo de manumisión", desc: "El cabildo completa la suma de la carta de libertad a quienes ya juntaron buena parte. 40 pesos por mes.", opinion: [3, -2, -8], monthly: 40 },
+    OrdInfo { id: Ordinance::LibertadVientres, name: "Libertad de vientres", desc: "Quien nace en la ciudad nace libre y se prohíbe el tráfico de personas. No se puede derogar.", opinion: [4, -4, -8], monthly: 0 },
+    OrdInfo { id: Ordinance::Abolicion, name: "Abolición de la esclavitud", desc: "Todas las personas esclavizadas recuperan la libertad. No se puede derogar.", opinion: [5, -5, -12], monthly: 0 },
 ];
 
 pub fn ord_info(o: Ordinance) -> &'static OrdInfo {
@@ -230,6 +257,12 @@ pub struct MonthInput {
     pub world_hides: f32,
     /// Flujos cortados por un conflicto lejano (no llegan barcos de ultramar).
     pub blockade: bool,
+    /// Felicidad media (0 a 1) de vecinos, comerciantes y hacendados según la población
+    /// (`poblacion`): se suma a las causas de la opinión, no la reemplaza.
+    pub animo: Option<[f32; 3]>,
+    /// Líneas del presupuesto que vienen de la población (políticas sociales, venta de
+    /// solares, alquileres del cabildo).
+    pub social: Vec<(String, i64)>,
 }
 
 /// Una línea del presupuesto (positiva = ingreso).
@@ -356,6 +389,9 @@ impl Economy {
     pub fn toggle(&mut self, o: Ordinance, money: &mut i64) -> Result<String, String> {
         if *money < TOGGLE_COST {
             return Err(format!("Cambiar una ordenanza cuesta {TOGGLE_COST} pesos"));
+        }
+        if o.irrevocable() && self.is_on(o) {
+            return Err("Esa ley no se deroga: la libertad no tiene vuelta atrás".into());
         }
         *money -= TOGGLE_COST;
         let name = ord_info(o).name.to_lowercase();
@@ -609,6 +645,9 @@ impl Economy {
         if self.is_on(Ordinance::Limpieza) {
             rep.add("Limpieza de calles", -(20.0 * pop / 1000.0) as i64);
         }
+        for (c, a) in &inp.social {
+            rep.add(c.clone(), *a);
+        }
 
         // Opinión: se mueve de a poco hacia su objetivo.
         let mut target = [55.0f32; 3];
@@ -635,6 +674,12 @@ impl Economy {
             target[1] -= 10.0;
         }
         target[2] += (inp.world_hides - 1.0) * 20.0;
+        // Cómo viven de verdad las personas de cada sector (felicidad de la población).
+        if let Some(a) = inp.animo {
+            for k in 0..3 {
+                target[k] += ((a[k] - 0.55) * 40.0).clamp(-15.0, 15.0);
+            }
+        }
         if self.in_drought() {
             target[2] -= 10.0;
         }

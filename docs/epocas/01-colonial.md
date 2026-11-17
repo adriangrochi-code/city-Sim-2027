@@ -361,9 +361,11 @@ Un recorte mínimo para validar lo esencial de esta época:
 
 1. **¿Parcela inicial libre o fija?** ¿El jugador elige la parcela inicial entre varias de la
    costa, o cada mapa trae la península de inicio ya definida?
-2. **Población indígena y esclavitud**: formaron parte de la historia real de la región. ¿Cómo
-   tratarlas con respeto: ausencia, mención histórica en la crónica, o representación cuidadosa?
-   Es un tema sensible que conviene decidir pronto.
+2. ~~**Población indígena y esclavitud**~~ **Decidido: representación cuidadosa.** Las personas
+   africanas y afrodescendientes (esclavizadas y libres) y las indígenas existen como personas
+   con nombre, familia e historia; la desigualdad legal es una restricción sobre sus vidas, nunca
+   una mercancía (no se compran ni venden personas); pueden obtener la libertad, formar familia
+   y ascender. Detalle en [sistemas/poblacion.md](../sistemas/poblacion.md), sección 5.
 3. **¿Cuánto control rural?** ¿El jugador zonifica chacras y estancias, o el campo crece solo
    según la demanda del puerto?
 4. **El fuerte y la ciudadela sin guerras**: ¿su papel es solo administrativo y de prestigio, o
