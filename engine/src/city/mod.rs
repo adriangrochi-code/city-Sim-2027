@@ -5,6 +5,7 @@
 //! Cada acción devuelve las ediciones de vóxeles que produce; la sesión las aplica al mundo
 //! en streaming, que re-malla solo las columnas tocadas.
 
+pub mod agentes;
 pub mod climate;
 pub mod economy;
 pub mod game;
@@ -56,6 +57,8 @@ pub struct City {
     pub climate: climate::Climate,
     /// Nivel del río: mareas, sudestadas, pampero y crecientes.
     pub water: water::WaterLevel,
+    /// Vecinos y vehículos en la calle (ver `agentes`).
+    pub agentes: agentes::Agentes,
     rng: Rng,
     pending_flood: Option<Flood>,
     month_acc: f32,
@@ -64,7 +67,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -122,7 +125,7 @@ fn clear_voxels(e: &mut Edits, lot: &Lot) {
 }
 
 /// Centro de la iglesia matriz: del lado de atrás de la plaza, cruzando la calle.
-fn church_center(c: Vec2, f: Vec2) -> Vec2 {
+pub(crate) fn church_center(c: Vec2, f: Vec2) -> Vec2 {
     c - f * (BLOCK * 0.5 + RoadKind::Stone.width() * 0.5 + 0.6 + 21.0)
 }
 
@@ -449,6 +452,8 @@ impl City {
             self.pool -= used;
             self.apply_levels(t, &changes, e);
         }
+        // Vecinos y vehículos.
+        self.agentes.tick(t, &self.net, &self.lots, self.plaza, dt);
         news
     }
 
@@ -581,6 +586,9 @@ impl City {
         let report = self.economy.month(&input);
         self.money += report.balance();
         news.extend(report.news);
+        // El tránsito: si los viajes tardan mucho más de lo previsto, los vecinos se quejan.
+        let o = &mut self.economy.opinion[0];
+        *o = (*o + self.agentes.efecto_opinion()).clamp(0.0, 100.0);
         self.lots.age_lots();
         news
     }

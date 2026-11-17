@@ -207,6 +207,12 @@ pub struct Renderer {
     detail_static: Vec<crate::trees::Micro>,
     detail_buf: std::cell::RefCell<Option<(wgpu::Buffer, u32)>>,
     detail_dirty: std::cell::Cell<bool>,
+    /// Vecinos y vehículos: una instancia por caja (`city::agentes::dibujo::Caja`), rehecho
+    /// en cada cuadro.
+    agent_pipe: wgpu::RenderPipeline,
+    agent_buf: Option<wgpu::Buffer>,
+    agent_count: u32,
+    agent_key: u64,
     water: wgpu::Buffer,
     /// Agua de los arroyos (cintas sobre el cauce), si el mapa las tiene.
     streams: Option<wgpu::Buffer>,
@@ -600,6 +606,28 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
+        let agent_mod = shader("agentes", include_str!("shaders/agentes.wgsl"));
+        let agent_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("agentes"),
+            layout: Some(&main_layout),
+            vertex: wgpu::VertexState {
+                module: &agent_mod,
+                entry_point: "vs_main",
+                compilation_options: Default::default(),
+                // Una instancia por caja (32 bytes): base, giro, tamaño y color.
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<crate::city::agentes::dibujo::Caja>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Float32x3, 3 => Unorm8x4],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState { module: &agent_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(format.into())] }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(reverse_depth(true, wgpu::CompareFunction::Greater)),
+            multisample: ms,
+            multiview: None,
+            cache: None,
+        });
         let overlay_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("resaltado"),
             layout: Some(&simple_layout),
@@ -732,6 +760,10 @@ impl Renderer {
             detail_static: Vec::new(),
             detail_buf: std::cell::RefCell::new(None),
             detail_dirty: std::cell::Cell::new(false),
+            agent_pipe,
+            agent_buf: None,
+            agent_count: 0,
+            agent_key: 0,
             water,
             origins,
             shadow_vox_bg,
@@ -908,6 +940,33 @@ impl Renderer {
         }
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("flora"), contents: bytemuck::cast_slice(&all), usage: wgpu::BufferUsages::VERTEX });
         *self.detail_buf.borrow_mut() = Some((buf, n as u32));
+    }
+
+    /// Cajas de los vecinos y vehículos de este cuadro (vacío: no se dibuja ninguno).
+    pub fn set_agents(&mut self, cajas: &[crate::city::agentes::dibujo::Caja]) {
+        let bytes: &[u8] = bytemuck::cast_slice(cajas);
+        let mut h = crate::fxhash::FxHasher::default();
+        std::hash::Hasher::write(&mut h, bytes);
+        let key = std::hash::Hasher::finish(&h);
+        if key == self.agent_key && cajas.len() as u32 == self.agent_count {
+            return;
+        }
+        self.agent_key = key;
+        self.agent_count = cajas.len() as u32;
+        self.scene_version += 1;
+        if cajas.is_empty() {
+            return;
+        }
+        if self.agent_buf.as_ref().is_none_or(|b| b.size() < bytes.len() as u64) {
+            let size = (bytes.len() as u64).next_power_of_two().max(64 * 1024);
+            self.agent_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("agentes"), size, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
+        }
+        self.queue.write_buffer(self.agent_buf.as_ref().unwrap(), 0, bytes);
+    }
+
+    /// Cajas de agentes del último cuadro.
+    pub fn agent_count(&self) -> u32 {
+        self.agent_count
     }
 
     /// Piezas de flora baja cargadas.
@@ -1308,6 +1367,12 @@ impl Renderer {
             pass.set_bind_group(0, &self.main_bg, &[]);
             pass.set_vertex_buffer(0, buf.slice(..));
             pass.draw(0..30, 0..*n);
+        }
+        if let (Some(buf), true) = (&self.agent_buf, self.agent_count > 0) {
+            pass.set_pipeline(&self.agent_pipe);
+            pass.set_bind_group(0, &self.main_bg, &[]);
+            pass.set_vertex_buffer(0, buf.slice(..));
+            pass.draw(0..30, 0..self.agent_count);
         }
         pass.set_pipeline(&self.water_pipe);
         pass.set_bind_group(0, &self.shadow_bg, &[]);

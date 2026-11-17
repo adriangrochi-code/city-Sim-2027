@@ -162,7 +162,7 @@ pub fn water_spans(t: &TerrainGen, pts: &[Vec2]) -> Vec<(f32, f32)> {
 
 /// Altura del tablero de un puente (índice de vóxel): por encima de las dos orillas y al
 /// menos 2,5 m sobre el agua.
-fn deck_top(t: &TerrainGen, edge: &Edge, span: (f32, f32)) -> i32 {
+pub(crate) fn deck_top(t: &TerrainGen, edge: &Edge, span: (f32, f32)) -> i32 {
     let (pa, _) = edge.point(span.0);
     let (pb, _) = edge.point(span.1);
     let banks = road_height(t, pa).max(road_height(t, pb));

@@ -608,7 +608,13 @@ impl GameUi {
                 ui.label(RichText::new(&st.balance).color(bal_col)).on_hover_text("Balance del último mes cerrado (detalle en Ordenanzas → Presupuesto)");
                 ui.add_space(10.0);
                 icons::show(ui, Icon::Vecinos, 18.0, theme::INK);
-                ui.label(&st.population).on_hover_text(format!("Población · etapa: {}", st.stage));
+                // Clic en la población: el panel de vecinos en la calle (tránsito).
+                let en_calle: u32 = game.city.agentes.en_la_calle().iter().sum();
+                let pop = ui.add(egui::Label::new(&st.population).sense(Sense::click())).on_hover_text(format!("Población · etapa: {} · {en_calle} en la calle\n(clic: vecinos y tránsito)", st.stage));
+                if pop.clicked() {
+                    self.detail = if self.detail == Some(Detail::Transito) { None } else { Some(Detail::Transito) };
+                    self.budget = false;
+                }
                 ui.add_space(6.0);
                 icons::show(ui, Icon::Aduana, 18.0, theme::INK_SOFT);
                 ui.label(&st.waiting).on_hover_text("Pobladores que esperan casa");
@@ -897,6 +903,8 @@ pub enum Detail {
     Clima,
     Recurso(Res),
     Opinion(usize),
+    /// Vecinos en la calle, viajes y demoras (se abre con un clic en la población).
+    Transito,
 }
 
 /// A qué panel lleva cada ficha de `chips()` (mismo orden).
@@ -953,6 +961,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                 Detail::Clima => (Icon::Agua, "Clima, río y campo".to_string()),
                 Detail::Recurso(r) => (match r { Res::Pan => Icon::Pan, Res::Piedra => Icon::Piedra, _ => Icon::Ladrillo }, r.name().to_string()),
                 Detail::Opinion(i) => ([Icon::Vecinos, Icon::Comercio, Icon::Hacienda][i], format!("Opinión de los {}", Sector::ALL[i].name().to_lowercase())),
+                Detail::Transito => (Icon::Vecinos, "Vecinos y tránsito".to_string()),
             };
             ui.horizontal(|ui| {
                 icons::show(ui, icon, 22.0, theme::INK);
@@ -1041,6 +1050,16 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                     section(ui, "Últimos meses");
                     let h: Vec<f32> = e.history.iter().rev().take(12).rev().map(|h| h.opinion[i]).collect();
                     bars(ui, &h, Some(&vec![50.0; h.len()]), theme::PRESSED, "Opinión (raya: 50)");
+                }
+                Detail::Transito => {
+                    let a = &c.agentes;
+                    ui.label(RichText::new(format!("{}, {}", capitalize(a.dia_de_semana()), stats(game, a.e.hora, None).hour)).strong());
+                    egui::Grid::new("tr").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                        for (k, v, malo) in crate::city::agentes::resumen(a) {
+                            kv(ui, &k, v, if malo { theme::BAD } else { theme::INK });
+                        }
+                    });
+                    ui.label(RichText::new("Si los viajes en carreta o a caballo tardan mucho más de lo previsto, los vecinos se quejan. Inspeccioná una calle para ver su tránsito.").small().color(theme::INK_SOFT));
                 }
                 Detail::Clima => {
                     let m = (c.month % 12) as usize;

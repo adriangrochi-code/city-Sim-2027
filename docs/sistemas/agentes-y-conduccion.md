@@ -1,7 +1,7 @@
 # Agentes y conducción realista
 
 > Documento de sistema. Complementa al [GDD](../GDD.md) (secciones 4.3 y 4.6).
-> Estado: **primera versión implementada en el prototipo 1** (época colonial).
+> Estado: **primera versión implementada en el prototipo 1** (época colonial) y **portada al motor** (ver «En el motor»).
 
 ## Objetivo
 
@@ -106,3 +106,82 @@ Comportamientos transversales previstos:
   recalculen la ruta en el momento.
 - **Simulación por niveles de detalle:** lejos de la cámara, los viajes se resuelven de forma
   agregada con los mismos tiempos medidos, para escalar a ciudades enormes.
+
+## En el motor
+
+Porte del prototipo a `engine/src/city/agentes/` (Rust), con la misma semántica:
+
+| Archivo | Qué hace |
+|---|---|
+| `agentes/mod.rs` | Vecinos, agenda del día, viajes, pasos de la simulación, cruces, llegadas, estadísticas y consultas para la interfaz |
+| `agentes/idm.rs` | Tipos de agente (`Tipo`: a pie, jinete, carreta, carro) con sus parámetros, y el IDM puro (`aceleracion`, `paso`) |
+| `agentes/ruta.rs` | A* sobre la red de calles, tiempos medidos por carril (`Tiempos`) y caché de rutas |
+| `agentes/dibujo.rs` | Alturas de cada tramo (calzada o tablero del puente), modelos de cajas y la lista de instancias |
+| `render/shaders/agentes.wgsl` | Una instancia por caja, girada; luz, sombra recibida, niebla y curvatura como la flora baja |
+
+**Vecinos.** Cada casa habitada tiene tantos vecinos como habitantes según su nivel y densidad
+(`Lot::residents`). Sus atributos (nombre, origen, oficio, rol, a pie o a caballo, temperamento,
+horario) salen de la semilla del solar en una sola función, `habitante_de_lote`: cuando llegue
+el módulo de demografía, se reemplaza esa función por las personas de los hogares del solar (cada
+vecino y cada agente ya tienen un campo `persona`), y `Agentes::asignar_trabajo` deja fijar el
+trabajo desde afuera. Trabajo: un comercio o taller de la ciudad; el 15 % son peones del campo
+(salen por el extremo de calle más alejado de la plaza) y el 10 % trabajan en la orilla del
+puerto (la calle más cercana al agua, hasta que exista el muelle).
+
+**Agenda.** La hora es la del reloj del juego (la sesión la pasa en cada cuadro; el día cambia a
+medianoche, y el día 0 es lunes). Cada día se arma la agenda: trabajo de lunes a sábado con su
+horario y una variación diaria, mercado de la plaza al mediodía para algunos, misa en la iglesia
+matriz los domingos (60 %), carretas que traen cueros y trigo del campo (4 + 1 cada 200
+habitantes, hasta 30; vuelven al campo más tarde) y carros de reparto a las tiendas. Los
+vecinos que llegan a mitad del día se suman a lo que queda de la agenda.
+
+**Rutas.** A* con heurística admisible; a pie, por largo; en vehículo, por el tiempo medido de
+cada carril (media móvil, nunca menos que el tiempo libre) con la percepción personal de ±15 %
+(8 variantes, según la semilla de ruta del vecino). Se busca desde los dos extremos del tramo
+de salida hacia los dos del de llegada y se queda la mejor. Las rutas entre nodos se guardan en
+caché (se vacía al cambiar la red y cada día). Los puentes son tramos como cualquier otro. Si un
+viaje tarda más de 1,5 veces lo previsto, el vecino cambia su semilla de ruta (aprende).
+
+**Movimiento.** Paso fijo de 0,25 s simulados, con los agentes 10 veces más rápidos que el
+tiempo real (como en el prototipo; a velocidad 1 son 40 pasos por segundo, hasta 48 por
+llamada). Los vehículos de un mismo carril se ordenan y cada uno sigue al de adelante (o al
+último del carril siguiente) con el IDM; el avance nunca supera el hueco, así que no se
+superponen. Ceden el paso en los cruces de tres o más calles por orden de llegada, solo si la
+calle de salida tiene lugar, con la salvaguarda de un minuto; aflojan en curvas (aceleración
+lateral 1,2 m/s²), antes de doblar y en caminos de tierra. La gente a pie va por la vereda y no
+sigue a nadie. Tope: 3000 agentes en la calle.
+
+**Nivel de detalle.** Los agentes en tramos a más de 900 m del centro de la vista avanzan un
+paso de cada cuatro con el paso cuadruplicado. El costo está dominado por ordenar los carriles,
+así que la ganancia es chica: con 3000 agentes, un paso cuesta 0,2 ms (≈ 1 % de un núcleo a
+velocidad 1); con la vista encima, 0,4 ms (se guardan las posiciones para interpolar el dibujo).
+
+**Determinismo y partidas.** Azar propio, agentes en orden de id y colas ordenadas: con la misma
+partida y las mismas horas, la simulación da lo mismo (prueba
+`un_dia_de_la_ciudad_sin_choques_y_determinista`, que además guarda y carga a mitad del día y
+sigue igual). Se guarda todo el estado (`agentes::Estado`, en `CityData::vecinos`): vecinos,
+agentes en camino, tiempos medidos, agenda y estadísticas. Las partidas viejas regeneran los
+vecinos desde los solares. Lo único que no se guarda es la caché (rutas, alturas, lugares), que
+se rehace sola.
+
+**Dibujo.** Modelos de cajas (persona de 0,5 × 1,75 m; jinete sobre su caballo; carreta con techo
+de cuero, ruedas grandes, yunta de bueyes y el boyero al costado; carro con carga y caballo),
+32 bytes por caja, subidos cada cuadro (solo si cambiaron), con la posición interpolada entre los
+dos últimos pasos. Solo los que están a menos de 600 m del centro de la vista, hasta 2500 (los
+más cercanos). La altura sale del perfil del tramo, con la misma cuenta que la voxelización de
+la calzada (y el tablero en los puentes), tomada en el medio del vehículo.
+
+**Interfaz.** Clic en la población de la barra superior: panel «Vecinos y tránsito» (en la calle
+por tipo, viajes de hoy y de ayer, viaje medio, demorados, los que no pudieron salir por calles
+sin conexión, demora del mes y carretas llegadas al mercado). La ficha de una calle muestra
+quién la está usando y el tiempo de paso medido en cada sentido frente al libre; inspeccionar
+justo sobre un agente muestra su ficha (nombre, oficio, a dónde va, estado, velocidad, minutos
+de viaje).
+
+**Efecto en la ciudad.** Al cerrar cada mes, si los viajes en vehículo tardaron en promedio más
+de 1,3 veces lo previsto, la opinión de los vecinos baja (hasta 6 puntos).
+
+**Pendiente:** adelantamiento de jinetes, peatones que cruzan en las esquinas, clima (barro y
+lluvia), seguir a un agente con la cámara, selección con el ratón de agentes en movimiento,
+servicios del prototipo (aguateros, serenos, aduana del portón, arreos), y el nivel de detalle
+agregado para ciudades muy grandes.
