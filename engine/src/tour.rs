@@ -36,6 +36,10 @@ pub enum Act {
     MenuShot(&'static str, fn(&mut Session, &mut GameUi, &mut Menu)),
     /// Guarda la partida, la vuelve a cargar (mundo regenerado desde el archivo) y compara.
     SaveLoad(&'static str),
+    /// Mide el cuadro con y sin los vecinos dibujados.
+    MedirVecinos(&'static str),
+    /// Cámara calculada con el estado de la sesión (por ejemplo, la calle con más gente).
+    CamFn(fn(&Session) -> Option<[f32; 5]>),
 }
 
 /// Interfaz para las capturas sin pantalla: contexto de egui, pintor y estado del juego.
@@ -133,6 +137,21 @@ pub fn city_steps() -> Vec<Act> {
         WaitIdle("ciudad crecida"),
         Game("un mes al ritmo del juego", d::month_realtime),
         WaitIdle("re-mallado de un mes"),
+        // Vecinos y vehículos: la mañana de un día hábil.
+        Game("unir los pedazos del damero", d::unir_calles),
+        Game("vecinos y vehículos", d::vecinos),
+        Hour(7.5),
+        CamFn(|s| d::calle_concurrida(s, 38.0, 30.0)),
+        WaitIdle("vecinos de cerca"),
+        Shot("motor-vecinos-cerca"),
+        CamFn(|s| d::calle_concurrida(s, 110.0, 38.0)),
+        WaitIdle("vecinos en las calles"),
+        Shot("motor-vecinos-calles"),
+        MedirVecinos("dibujo con y sin vecinos"),
+        CamFn(|_| crate::city::game_demo::BRIDGE_AT.lock().unwrap().map(|p| [p.x, p.y, 34.0, 50.0, 24.0])),
+        WaitIdle("vecinos en el puente"),
+        Shot("motor-vecinos-puente"),
+        Hour(10.5),
         Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
         WaitIdle("vista general"),
         Shot("motor-ciudad-general"),
@@ -155,6 +174,8 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-detalle-pan", |s, u| ui_detail(s, u, ui::Detail::Recurso(crate::city::economy::Res::Pan))),
         UiShot("motor-ui-detalle-clima", |s, u| ui_detail(s, u, ui::Detail::Clima)),
         UiShot("motor-ui-detalle-vecinos", |s, u| ui_detail(s, u, ui::Detail::Opinion(0))),
+        UiShot("motor-ui-transito", |s, u| ui_detail(s, u, ui::Detail::Transito)),
+        UiShot("motor-ui-ficha-calle", ui_inspect_calle),
         UiShot("motor-ui-ficha", ui_inspect),
         UiShot("motor-ui-gaceta", ui_gazette),
         UiShot("motor-ui-panel", ui_panel),
@@ -275,6 +296,21 @@ fn ui_inspect(s: &mut Session, u: &mut GameUi) {
     });
     g.inspected = pick.or(cands.first().copied());
     g.hover = g.inspected;
+}
+
+/// Ficha de la calle con más gente ahora (tránsito y tiempo de paso medido).
+fn ui_inspect_calle(s: &mut Session, u: &mut GameUi) {
+    u.open = None;
+    u.detail = None;
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    let c = &g.city;
+    let tramo = c.net.edges.keys().copied().max_by_key(|&e| c.agentes.info_tramo(&c.net, e).map_or(0, |i| i.por_tipo.iter().sum::<u32>()));
+    if let Some(e) = tramo {
+        let ed = &c.net.edges[&e];
+        g.inspected = Some(ed.point(ed.len() * 0.5).0);
+        g.hover = g.inspected;
+    }
 }
 
 /// Un aviso de la gaceta y una calle recta empezada que no se puede trazar (cruza el río).
@@ -458,6 +494,18 @@ impl Tour {
                     s.update(0.0);
                     self.next();
                 }
+                Act::CamFn(f) => {
+                    if let Some(c) = f(s) {
+                        s.cam.target.x = c[0];
+                        s.cam.target.z = c[1];
+                        s.cam.target.y = s.terrain.height(c[0], c[1]).max(0.0);
+                        s.cam.distance = c[2];
+                        s.cam.yaw = c[3];
+                        s.cam.pitch = c[4];
+                        s.update(0.0);
+                    }
+                    self.next();
+                }
                 Act::Bridge => {
                     if let Some(p) = *crate::city::game_demo::BRIDGE_AT.lock().unwrap() {
                         s.cam.target.x = p.x;
@@ -563,6 +611,34 @@ impl Tour {
                     if let Err(e) = res {
                         self.report.push(format!("{label}: error {e}"));
                     }
+                    println!("{line}");
+                    self.report.push(line);
+                    self.next();
+                }
+                Act::MedirVecinos(label) => {
+                    let (w, h, cam, hour) = (self.width, self.height, s.cam, s.hour);
+                    let medir = |r: &mut Renderer| {
+                        r.bench_frame(&cam, hour, w, h);
+                        (0..9).map(|_| r.bench_frame(&cam, hour, w, h).total_ms).fold(f64::INFINITY, f64::min)
+                    };
+                    let cajas = r.agent_count();
+                    let con = medir(r);
+                    r.set_agents(&[]);
+                    let sin = medir(r);
+                    // Multitud de prueba: 2500 agentes (el tope de dibujo) alrededor de la vista.
+                    let gente = crate::city::agentes::dibujo::multitud(&s.terrain, glam::Vec2::new(cam.target.x, cam.target.z), crate::city::agentes::dibujo::MAX_DIBUJADOS);
+                    let t0 = Instant::now();
+                    r.set_agents(&gente);
+                    let subir = t0.elapsed();
+                    let mucha = medir(r);
+                    r.set_agents(&[]);
+                    let sin2 = medir(r);
+                    let line = format!(
+                        "{label}: {cajas} cajas · cuadro (mínimo de 9) con vecinos {con:.1} ms, sin vecinos {sin:.1} ms · con {} agentes de prueba ({} cajas, {} KB, subidas en {subir:.2?}) {mucha:.1} ms · sin vecinos otra vez {sin2:.1} ms",
+                        crate::city::agentes::dibujo::MAX_DIBUJADOS,
+                        gente.len(),
+                        gente.len() * std::mem::size_of::<crate::city::agentes::dibujo::Caja>() / 1024
+                    );
                     println!("{line}");
                     self.report.push(line);
                     self.next();

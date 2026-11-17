@@ -150,6 +150,9 @@ impl Session {
             let hover = self.hit.map(|h| Vec2::new(h.point.x, h.point.z));
             let g = self.game.as_mut().unwrap();
             g.hover = hover;
+            // Los vecinos siguen el reloj del día; cerca de la vista se simulan con detalle.
+            g.city.agentes.set_hora(self.hour);
+            g.city.agentes.foco = Some(Vec2::new(self.cam.target.x, self.cam.target.z));
             let mut batch = Edits::default();
             if let Some(h) = hover {
                 if let Some(e) = g.paint_at(h) {
@@ -190,6 +193,15 @@ impl Session {
                 r.moon = 0.5;
                 r.wind = (70.0, 4.0);
             }
+        }
+        // Vecinos y vehículos cerca de la vista (posiciones interpoladas).
+        match &self.game {
+            Some(g) => {
+                let mut cajas = Vec::new();
+                g.city.agentes.cajas(&g.city.net, Vec2::new(self.cam.target.x, self.cam.target.z), &mut cajas);
+                r.set_agents(&cajas);
+            }
+            None => r.set_agents(&[]),
         }
         let ops = self.streamer.poll(vertex_budget);
         let n = ops.len();

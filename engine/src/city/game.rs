@@ -287,9 +287,15 @@ impl Game {
             }
             return Some(i);
         }
+        // Un vecino, jinete o carreta justo ahí (a menos de 2,5 m).
+        if let Some((title, lines)) = self.city.agentes.cerca_de(&self.city.net, p, 2.5).and_then(|id| self.city.agentes.describir(id)) {
+            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Terrain });
+        }
         if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
             let ed = &self.city.net.edges[&e.edge];
-            return Some(Inspect { title: ed.kind.name().into(), lines: vec![format!("Largo del tramo: {} m", ed.len() as i32)], why: vec![], kind: InspectKind::Road });
+            let mut lines = vec![format!("Largo del tramo: {} m", ed.len() as i32)];
+            lines.extend(super::agentes::lineas_de_tramo(&self.city.agentes, &self.city.net, e.edge));
+            return Some(Inspect { title: ed.kind.name().into(), lines, why: vec![], kind: InspectKind::Road });
         }
         Some(Inspect { title: "Terreno".into(), lines: vec![format!("Posición: {:.0}, {:.0}", p.x, p.y)], why: vec![], kind: InspectKind::Terrain })
     }

@@ -131,6 +131,9 @@ pub struct CityData {
     pub clima: Option<(Vec<f32>, u64)>,
     #[serde(default)]
     pub rio: Option<(Vec<f32>, u64)>,
+    /// Vecinos y vehículos (las partidas viejas los generan de nuevo desde los solares).
+    #[serde(default)]
+    pub vecinos: Option<super::agentes::Estado>,
 }
 
 impl CityData {
@@ -173,6 +176,7 @@ impl CityData {
             economia,
             clima: Some(c.climate.to_state()),
             rio: Some(c.water.to_state()),
+            vecinos: Some(c.agentes.e.clone()),
         }
     }
 
@@ -210,6 +214,7 @@ impl CityData {
             economy,
             climate: self.clima.as_ref().map(|(v, a)| super::climate::Climate::from_state(v, *a)).unwrap_or_default(),
             water: self.rio.as_ref().map(|(v, a)| super::water::WaterLevel::from_state(v, *a)).unwrap_or_default(),
+            agentes: self.vecinos.clone().map(super::agentes::Agentes::from_estado).unwrap_or_default(),
             pending_flood: None,
             rng: Rng::from_state(self.azar),
             month_acc: self.acumulado_mes,

@@ -184,3 +184,129 @@ pub fn month_realtime(s: &mut Session) -> String {
     }
     format!("{changed} edificios nuevos o mejorados · {voxels} vóxeles · {cols} columnas · paso de 0,5 s: medio {:.1} ms, peor {worst:.1} ms", total / 20.0)
 }
+
+/// Cámara sobre la calle con más vecinos ahora (para las capturas): a `dist` m, mirando a lo
+/// largo de la calle.
+pub fn calle_concurrida(s: &Session, dist: f32, pitch: f32) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let mut cuenta: std::collections::BTreeMap<u32, u32> = Default::default();
+    for a in &c.agentes.e.agentes {
+        if a.patas.len() > 1 || a.proposito != super::agentes::Proposito::Paseo {
+            *cuenta.entry(a.pata().tramo).or_default() += 1;
+        }
+    }
+    let (&e, _) = cuenta.iter().max_by_key(|x| (*x.1, std::cmp::Reverse(*x.0)))?;
+    // El centro de los que van por esa calle.
+    let ps: Vec<Vec2> = c.agentes.e.agentes.iter().filter(|a| a.pata().tramo == e).map(|a| super::agentes::pose(&c.net, a).0).collect();
+    let m = ps.iter().copied().sum::<Vec2>() / ps.len() as f32;
+    let ed = &c.net.edges[&e];
+    let tan = ed.point(ed.len() * 0.5).1;
+    let yaw = tan.x.atan2(tan.y).to_degrees() + 160.0;
+    Some([m.x, m.y, dist, yaw, pitch])
+}
+
+/// En el terreno real el damero queda en pedazos (cuadras demasiado empinadas): caminos de
+/// tierra unen cada pedazo cercano con el de la plaza, así los vecinos pueden ir y venir.
+pub fn unir_calles(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let mut e = crate::buildings::Edits::default();
+    let mut hechos = 0;
+    for _ in 0..12 {
+        let net = &g.city.net;
+        let Some((&centro, _)) = net.nodes.iter().min_by(|x, y| x.1.distance(PLAZA).total_cmp(&y.1.distance(PLAZA))) else { break };
+        let comp = super::agentes::componente(net, centro);
+        // Pares (nodo de afuera, nodo de la plaza) del más corto al más largo.
+        let mut pares: Vec<(f32, Vec2, Vec2)> = Vec::new();
+        for (n, &p) in &net.nodes {
+            if comp.contains(n) || p.distance(PLAZA) > 800.0 {
+                continue;
+            }
+            for m in &comp {
+                let q = net.nodes[m];
+                pares.push((p.distance(q), p, q));
+            }
+        }
+        pares.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut ok = false;
+        for &(_, p, q) in pares.iter().take(40) {
+            if let Ok(x) = g.city.build_road(&t, &roads::line(p, q), RoadKind::Dirt) {
+                e.extend(x);
+                hechos += 1;
+                ok = true;
+                break;
+            }
+        }
+        if !ok {
+            break;
+        }
+    }
+    let n = s.apply_edits(&e);
+    format!("{hechos} caminos de tierra · {n} columnas a re-mallar")
+}
+
+/// Vecinos y vehículos: un día hábil que empieza a las 5:30 corre hasta las 7:30 a 30
+/// cuadros por segundo, como en la ventana; además, una carreta, un jinete y gente a pie
+/// cruzan el puente de la demostración. Mide el costo de la simulación.
+pub fn vecinos(s: &mut Session) -> String {
+    use super::agentes::{Proposito, Tipo};
+    let hasta = 7.5;
+    let t = s.terrain.clone();
+    let foco = Vec2::new(s.cam.target.x, s.cam.target.z);
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    c.agentes.e.dia += 1;
+    c.agentes.foco = Some(foco);
+    let dt = 1.0 / 30.0;
+    let h0 = 5.5;
+    let cuadros = ((hasta - h0) / super::HOURS_PER_SECOND / dt) as usize;
+    let (mut peor, mut total) = (0f64, 0f64);
+    let mut max_calle = 0;
+    for k in 0..cuadros {
+        c.agentes.set_hora(h0 + k as f32 * dt * super::HOURS_PER_SECOND);
+        let t0 = Instant::now();
+        c.agentes.tick(&t, &c.net, &c.lots, c.plaza, dt);
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        peor = peor.max(ms);
+        total += ms;
+        max_calle = max_calle.max(c.agentes.e.agentes.len());
+    }
+    // El puente (sobre un arroyo, del otro lado: no está unido a la ciudad).
+    let mut en_puente = 0;
+    let bridge = *BRIDGE_AT.lock().unwrap();
+    if let Some(n) = bridge.and_then(|mid| c.net.nearest_edge(mid, 10.0)) {
+        let pts = c.net.edges[&n.edge].pts.clone();
+        let (a, b) = (pts[0], *pts.last().unwrap());
+        let viajes = [(Tipo::Carreta, a, b), (Tipo::Jinete, b, a), (Tipo::APie, a, b), (Tipo::APie, b, a), (Tipo::APie, a, b)];
+        for (k, (tipo, desde, hasta)) in viajes.into_iter().enumerate() {
+            if c.agentes.lanzar(&c.net, tipo, desde, hasta, None, Proposito::Paseo, k as u32, 1, (k as u8, k as u8)) {
+                en_puente += 1;
+            }
+        }
+        // Hasta que la carreta llega al medio del puente.
+        let carreta = c.agentes.e.agentes.iter().find(|a| a.tipo == Tipo::Carreta && a.proposito == Proposito::Paseo).map(|a| a.id);
+        let mid = bridge.unwrap();
+        for _ in 0..6000 {
+            c.agentes.tick(&t, &c.net, &c.lots, c.plaza, dt);
+            if carreta.and_then(|id| c.agentes.posicion(&c.net, id)).is_none_or(|p| p.distance(mid) < 4.0) {
+                break;
+            }
+        }
+    }
+    let st = c.agentes.e.stats;
+    let n = c.agentes.en_la_calle();
+    format!(
+        "{} vecinos · {} en la calle a las {:.1} h ({} a pie, {} jinetes, {} carretas, {} carros; máximo {max_calle}) · {} viajes terminados, {} sin salir ({} sin calle cerca) · {en_puente} cruzando el puente · simulación por cuadro: media {:.3} ms, peor {peor:.2} ms ({cuadros} cuadros)",
+        c.agentes.e.vecinos.len(),
+        c.agentes.e.agentes.len(),
+        c.agentes.e.hora,
+        n[0],
+        n[1],
+        n[2],
+        n[3],
+        st.viajes_hoy,
+        st.omitidos_hoy,
+        st.sin_calle_hoy,
+        total / cuadros.max(1) as f64
+    )
+}
