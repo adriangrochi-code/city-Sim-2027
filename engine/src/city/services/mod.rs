@@ -69,6 +69,8 @@ pub enum Kind {
     Molino,
     Astillero,
     Imprenta,
+    // --- Materiales (ver `recursos::materiales`) ---
+    Calera,
 }
 
 /// Grupos de servicios (pestañas del cajón de Servicios y capas de datos).
@@ -130,7 +132,7 @@ pub struct Info {
     pub plazas: i32,
 }
 
-pub const CATALOG: [Info; 24] = [
+pub const CATALOG: [Info; 25] = [
     Info { kind: Kind::Pozo, name: "Pozo de balde", key: "pozo", desc: "Agua de pozo para unas 60 personas cercanas. Calidad regular; los talleres cercanos la ensucian.", cost: 400, ladrillos: 0.0, piedra: 20.0, upkeep: 4, cap: 60, quality: 0.7, radius: 110.0, fire_reach: 140.0, size: (5.0, 5.0), frame: (10, 10), builder: colonial::pozo, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aljibe, name: "Aljibe público", key: "aljibe", desc: "Junta el agua de lluvia de los techos en una cisterna. Buena agua para unas 160 personas; en la sequía rinde menos.", cost: 1500, ladrillos: 60.0, piedra: 20.0, upkeep: 12, cap: 160, quality: 1.0, radius: 170.0, fire_reach: 180.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::aljibe_publico, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aguadores, name: "Puesto de aguadores", key: "aguadores", desc: "Los aguadores llenan sus pipas en un arroyo o manantial y las reparten en carro por las calles: llegan lejos, pero solo a donde llega la calle.", cost: 2500, ladrillos: 30.0, piedra: 0.0, upkeep: 30, cap: 360, quality: 0.9, radius: 1100.0, fire_reach: 450.0, size: (14.0, 18.0), frame: (28, 36), builder: colonial::puesto_aguadores, grupo: Grupo::Agua, plazas: 0 },
@@ -138,8 +140,8 @@ pub const CATALOG: [Info; 24] = [
     Info { kind: Kind::Lazareto, name: "Lazareto", key: "lazareto", desc: "Cuarentena para los barcos con fiebre a bordo: la enfermedad no entra a la ciudad. Lejos de la plaza y junto a la costa.", cost: 3000, ladrillos: 150.0, piedra: 50.0, upkeep: 25, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (30.0, 24.0), frame: (60, 48), builder: colonial::lazareto, grupo: Grupo::Salud, plazas: 0 },
     Info { kind: Kind::Chacra, name: "Chacra", key: "chacra", desc: "Trigo y maíz en el ejido para el pan de la ciudad. La cosecha depende del año: la sequía y las heladas la achican.", cost: 800, ladrillos: 0.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (60.0, 80.0), frame: (120, 160), builder: colonial::chacra, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Estancia, name: "Estancia", key: "estancia", desc: "Ganado en el campo, lejos de la ciudad: carne, cueros y sebo. Las pasturas siguen al clima.", cost: 3000, ladrillos: 0.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (50.0, 45.0), frame: (100, 90), builder: colonial::estancia, grupo: Grupo::Otros, plazas: 0 },
-    Info { kind: Kind::Horno, name: "Horno de ladrillos", key: "horno", desc: "Cuece ladrillos con barro de un arroyo o de la costa. Las casas de azotea, las obras y la iglesia los necesitan. Echa humo: lejos de la plaza.", cost: 2000, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 24.0), frame: (48, 48), builder: colonial::horno_ladrillos, grupo: Grupo::Otros, plazas: 0 },
-    Info { kind: Kind::Cantera, name: "Cantera de piedra", key: "cantera", desc: "Saca piedra para empedrar, para los cimientos de la iglesia y para la muralla. Ruidosa: lejos de la plaza.", cost: 1800, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (28.0, 22.0), frame: (56, 44), builder: colonial::cantera, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Horno, name: "Horno de ladrillos", key: "horno", desc: "Cuece ladrillos con el barro del sitio: la arcilla roja de los limos da buenos ladrillos; la gris de los bajos, menos ladrillos y tejas. Las casas de azotea, las obras y la iglesia los necesitan. Echa humo: lejos de la plaza.", cost: 2000, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 24.0), frame: (48, 48), builder: colonial::horno_ladrillos, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Cantera, name: "Cantera", key: "cantera", desc: "Saca lo que hay en el sitio: granito (piedra, adoquines y sillería), gneis (piedra de mampostería), balasto o canto rodado (pedregullo), arena o tosca. La piedra va a los cimientos, la iglesia y la muralla. Ruidosa: lejos de la plaza.", cost: 1800, ladrillos: 0.0, piedra: 0.0, upkeep: 10, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (28.0, 22.0), frame: (56, 44), builder: colonial::cantera, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Aduana, name: "Aduana", key: "aduana", desc: "Revisa lo que entra y sale por el muelle y cobra los derechos: sin aduana, buena parte del comercio se va por el contrabando.", cost: 4000, ladrillos: 200.0, piedra: 80.0, upkeep: 30, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (24.0, 20.0), frame: (48, 40), builder: colonial::aduana, grupo: Grupo::Otros, plazas: 0 },
     // Educación: la escuela del cabildo (gratis para los pobres si el cabildo paga al maestro) y
     // las aulas del convento. Alumnos de 6 a 12 años; alcance a pie.
@@ -162,6 +164,7 @@ pub const CATALOG: [Info; 24] = [
     Info { kind: Kind::Saladero, name: "Saladero", key: "saladero", desc: "Faena ganado y sala la carne al sol para hacer tasajo, que se exporta, y deja cueros y sebo. Mucho capital, pocos peones por lo que produce. Huele mal: lejos de la plaza, junto a un arroyo o la costa.", cost: 6000, ladrillos: 150.0, piedra: 20.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (60.0, 45.0), frame: (120, 90), builder: colonial::saladero, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Molino, name: "Molino de viento", key: "molino", desc: "Muele el trigo de las chacras con el viento, y da más harina y más barata que las atahonas, con cuatro molineros.", cost: 2500, ladrillos: 40.0, piedra: 30.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::molino, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Astillero, name: "Carpintería de ribera", key: "astillero", desc: "Gradas, carpinteros y calafates que carenan los barcos de paso (un servicio que pagan de afuera) y arman lanchas. Va sobre la costa.", cost: 6000, ladrillos: 60.0, piedra: 40.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (35.0, 25.0), frame: (70, 50), builder: colonial::astillero, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Calera, name: "Horno de cal", key: "calera", desc: "Quema caliza (o conchilla, que rinde menos) con leña y da cal viva para morteros y revoques. Sin piedra de cal en el sitio no se puede: alrededor de Montevideo no hay caliza y la cal se trae por barco. Echa humo: lejos de la plaza.", cost: 1600, ladrillos: 40.0, piedra: 20.0, upkeep: 8, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (20.0, 20.0), frame: (40, 40), builder: colonial::horno_ladrillos, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Imprenta, name: "Imprenta", key: "imprenta", desc: "Prensa de madera, tipos y papel para bandos, almanaques, cartillas y una gaceta con los precios corrientes. Una por ciudad, cerca de la plaza.", cost: 3000, ladrillos: 50.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 14.0), frame: (20, 28), builder: colonial::imprenta, grupo: Grupo::Otros, plazas: 0 },
 ];
 
@@ -241,8 +244,10 @@ pub enum Layer {
     Piedra,
     /// Arcilla para hornos de ladrillos.
     Arcilla,
-    /// Arena (playas, médanos, arenales).
+    /// Arena, canto rodado y balasto.
     Arena,
+    /// Caliza, conchilla, tosca y turba (la calera).
+    Cal,
     /// Olor, ruido, humo y agua sucia de la industria; el arroyo sucio aguas abajo.
     Molestias,
     /// Valor del suelo de cada solar.
@@ -252,17 +257,25 @@ pub enum Layer {
 impl Layer {
     /// Capas que se dibujan sobre el terreno (además de los solares).
     pub fn es_de_terreno(self) -> bool {
-        matches!(self, Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena | Layer::Molestias)
+        matches!(self, Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena | Layer::Cal | Layer::Molestias)
     }
-    /// El uso del suelo de una capa de recursos.
+    /// El uso del suelo de una capa de tierra (cultivo o pasturas).
     pub fn uso(self) -> Option<super::recursos::Uso> {
         use super::recursos::Uso;
         Some(match self {
             Layer::Cultivo => Uso::Cultivo,
             Layer::Pasturas => Uso::Pastoreo,
-            Layer::Piedra => Uso::Piedra,
-            Layer::Arcilla => Uso::Arcilla,
-            Layer::Arena => Uso::Arena,
+            _ => return None,
+        })
+    }
+    /// El grupo de materiales de una capa de materiales.
+    pub fn grupo_mat(self) -> Option<super::recursos::materiales::GrupoMat> {
+        use super::recursos::materiales::GrupoMat;
+        Some(match self {
+            Layer::Piedra => GrupoMat::Piedra,
+            Layer::Arcilla => GrupoMat::Arcilla,
+            Layer::Arena => GrupoMat::Aridos,
+            Layer::Cal => GrupoMat::CalYOtros,
             _ => return None,
         })
     }
@@ -563,13 +576,17 @@ impl City {
             Kind::Cantera if far(300.0) => return Some("La cantera es ruidosa: a más de 300 m de la plaza".into()),
             Kind::Horno if far(250.0) => return Some("El horno echa humo: a más de 250 m de la plaza".into()),
             Kind::Horno if t.arroyo_distance(c.x, c.y) > 300.0 && !near_coast(t, c, 300.0) => return Some("El horno necesita barro: un arroyo o la costa a menos de 300 m".into()),
-            Kind::Horno | Kind::Cantera => {
+            Kind::Calera if far(250.0) => return Some("El horno de cal echa humo: a más de 250 m de la plaza".into()),
+            Kind::Horno | Kind::Cantera | Kind::Calera => {
                 let r = super::recursos::Recursos::de(t).en_area(c, f, inf.size.0, inf.size.1);
                 if k == Kind::Horno && r.arcilla < super::recursos::MINIMO_MATERIAL {
                     return Some("Acá no hay arcilla para ladrillos: busca limos o los bajos junto a un arroyo (capa «Arcilla»)".into());
                 }
-                if k == Kind::Cantera && r.piedra < super::recursos::MINIMO_MATERIAL {
-                    return Some("Acá no hay piedra: la cantera va sobre el basamento (capa «Piedra»)".into());
+                if k == Kind::Cantera && super::recursos::materiales::ley_cantera(&r) < super::recursos::MINIMO_MATERIAL {
+                    return Some("Acá no hay nada que sacar: la cantera va sobre la roca, el balasto, la arena o la tosca (capas «Piedra» y «Arena y grava»)".into());
+                }
+                if k == Kind::Calera && super::recursos::materiales::fuente_de_cal(&r).is_none() {
+                    return Some("Acá no hay caliza ni conchilla para quemar (capa «Cal, tosca y turba»): la cal se trae por barco".into());
                 }
             }
             Kind::Aguadores if t.arroyo_distance(c.x, c.y) > 400.0 && !near_coast(t, c, 250.0) => return Some("Los aguadores necesitan un arroyo a menos de 400 m o la costa a 250 m".into()),
@@ -748,8 +765,12 @@ impl City {
         inp.production[Res::Carne as usize] += ESTANCIA_CARNE * herd * n(Kind::Estancia);
         inp.production[Res::Cueros as usize] += ESTANCIA_CUEROS * herd * n(Kind::Estancia);
         inp.production[Res::Sebo as usize] += ESTANCIA_SEBO * herd * n(Kind::Estancia);
-        inp.production[Res::Ladrillos as usize] += HORNO_LADRILLOS * self.climate.brick_factor() * n(Kind::Horno);
-        inp.production[Res::Piedra as usize] += CANTERA_PIEDRA * n(Kind::Cantera);
+        // Hornos y canteras: lo que va a la ciudad depende del material del sitio (la arcilla
+        // gris da menos ladrillos y tejas; el granito y el gneis, piedra; la arena, nada de
+        // piedra). Lo demás (adoquines, sillería, arena, tejas, cal) va al comercio.
+        let base = |k: Kind| s.of_kind(k).map(|b| if b.rinde < 0.0 { 1.0 } else { b.rinde } * self.suelo.sitios.get(&b.id).map_or(1.0, |p| p.base)).sum::<f32>();
+        inp.production[Res::Ladrillos as usize] += HORNO_LADRILLOS * self.climate.brick_factor() * base(Kind::Horno);
+        inp.production[Res::Piedra as usize] += CANTERA_PIEDRA * base(Kind::Cantera);
         inp.upkeep_services += s.upkeep();
         inp.lamps += s.lamps.len() as i32;
         let pop = self.population();
@@ -850,18 +871,34 @@ impl City {
                 let k = self.climate.livestock_factor() * b.rinde.max(0.0);
                 out.push(format!("Por mes: {} de carne, {} cueros, {} de sebo", (ESTANCIA_CARNE * k) as i32, (ESTANCIA_CUEROS * k) as i32, (ESTANCIA_SEBO * k) as i32))
             }
-            Kind::Horno => out.push(format!("Ladrillos por mes: {}", (HORNO_LADRILLOS * self.climate.brick_factor() * b.rinde.max(0.0)) as i32)),
-            Kind::Cantera => out.push(format!("Piedra por mes: {}", (CANTERA_PIEDRA * b.rinde.max(0.0)) as i32)),
+            Kind::Horno | Kind::Cantera | Kind::Calera => {
+                let sitio = self.suelo.sitios.get(&id).copied();
+                let base = sitio.map_or(1.0, |p| p.base) * b.rinde.max(0.0);
+                if let Some(p) = sitio {
+                    out.push(format!("Saca: {} (ley {})", p.texto(), super::recursos::calidad(p.ley)));
+                }
+                match b.kind {
+                    Kind::Horno => out.push(format!("Ladrillos por mes: {}", (HORNO_LADRILLOS * self.climate.brick_factor() * base) as i32)),
+                    Kind::Cantera => out.push(format!("Piedra por mes: {}", (CANTERA_PIEDRA * base) as i32)),
+                    _ => {}
+                }
+                for (e, q) in sitio.map_or([].to_vec(), |p| p.extras.to_vec()) {
+                    if q > 0.0 {
+                        out.push(format!("Para vender: {} {} por mes", (q * b.rinde.max(0.0)).round() as i32, super::recursos::materiales::extra_nombre(e)));
+                    }
+                }
+            }
             Kind::Aduana => out.push("Contrabando: baja de 35 % a 5 %".into()),
             k if super::desarrollo::es_de_desarrollo(k) => self.desarrollo_lines(id, &mut out),
             _ => self.barrio_lines(id, &mut out),
         }
-        if matches!(b.kind, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera) && b.rinde >= 0.0 {
+        if matches!(b.kind, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera | Kind::Calera) && b.rinde >= 0.0 {
             let que = match b.kind {
                 Kind::Chacra => "tierra para cultivo",
                 Kind::Estancia => "pasturas",
                 Kind::Horno => "arcilla",
-                _ => "piedra",
+                Kind::Calera => "caliza o conchilla",
+                _ => "ley del material",
             };
             out.push(format!("Sitio: rinde {} % de lo normal ({})", (b.rinde * 100.0).round() as i32, que));
         }

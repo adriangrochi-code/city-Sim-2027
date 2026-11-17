@@ -1356,9 +1356,10 @@ def leer_u8(ruta):
 
 def solo_recursos(args):
     """Paso de recursos del suelo sobre los archivos ya generados (alturas, biomas, arroyos,
-    costa y rocosidad) más la caché: calidad de la tierra, geología y minerales. Agrega la
+    costa y rocosidad) más la caché: calidad de la tierra, geología y materiales. Agrega la
     entrada «recursos» y sus fuentes a meta.json."""
     import recursos_suelo
+    import recursos_uruguay
     sal = args.salida
     h = leer_u16(os.path.join(sal, "altura.bin"))
     h_o = leer_u16(os.path.join(sal, "contexto.bin"))
@@ -1382,9 +1383,11 @@ def solo_recursos(args):
     fuentes += [
         {"capa": "CONEAT/ConsultaConeat (PROD_SUE por grupo)", "servicio": "ArcGIS REST " + recursos_suelo.URL_CONSULTA, "uso": "recursos: productividad.bin"},
         {"capa": "TEMATICOS/IntConeat 11 y 12 (aptitud cultivos de verano de secano)", "servicio": "ArcGIS REST " + recursos_suelo.URL_APT_CULTIVO, "uso": "recursos: suelos.json"},
-        {"capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2)", "servicio": "ArcGIS REST " + recursos_suelo.URL_GEOLOGIA, "uso": "recursos: geologia.bin, minerales.bin"},
-        {"capa": "Dinamige_GeoS/CatastroMineroGeoS (4, 5)", "servicio": "ArcGIS REST " + recursos_suelo.URL_MINERIA.format(capa="{4,5}"), "uso": "recursos: minerales.bin (sitios explotados)"},
-        {"capa": ", ".join(recursos_suelo.CAPAS_MINERA_IDE), "servicio": "WFS " + IDE_WFS.split("?")[0], "uso": "recursos: minerales.bin (canteras abandonadas)"},
+        {"capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2)", "servicio": "ArcGIS REST " + recursos_suelo.URL_GEOLOGIA, "uso": "recursos: geologia.bin, materiales.bin"},
+        {"capa": "Dinamige_ConsMin/Consulta_Minera_2026 (2, 3, 4, 5: títulos con su sustancia)", "servicio": "ArcGIS REST " + recursos_uruguay.URL_CONSULTA_MINERA.format(capa="{2,3,4,5}"), "uso": "recursos: materiales.bin (sitios explotados, con el material), assets/datos/uruguay/titulos_mineros.json"},
+        {"capa": ", ".join(recursos_suelo.CAPAS_MINERA_IDE), "servicio": "WFS " + IDE_WFS.split("?")[0], "uso": "recursos: materiales.bin (canteras abandonadas)"},
+        {"capa": "Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS (2), todo el país", "servicio": "ArcGIS REST " + recursos_uruguay.URL_GEOLOGIA, "uso": "recursos: assets/datos/uruguay/geologia_pais.bin"},
+        {"capa": "Dinamige_GeoS/GeologiaGeoS (0, regiones mineras)", "servicio": "ArcGIS REST " + recursos_uruguay.URL_REGIONES, "uso": "recursos: assets/datos/uruguay/pais.json"},
     ]
     meta["fuentes"] = fuentes
     extra = (" Productividad y aptitud de los suelos: CONEAT (MGAP-RENARE), servicios ArcGIS de dgrn.mgap.gub.uy."
@@ -1393,6 +1396,9 @@ def solo_recursos(args):
         meta["atribucion"] = meta.get("atribucion", "").replace(" Ver docs/sistemas/mapa-real.md.", "") + extra + " Ver docs/sistemas/mapa-real.md."
     guardar_json(ruta, meta, compacto=False)
     print(json.dumps(resumen, ensure_ascii=False, indent=2))
+    # El mismo catastro y la carta del país, para el mapa futuro del Uruguay.
+    print("Recursos del país (assets/datos/uruguay)…", flush=True)
+    recursos_uruguay.construir(args.cache)
 
 
 def main():
@@ -1407,7 +1413,7 @@ def main():
                          "(por omisión con la hidrografía de la IDE); 'no' deja los bosque*.bin como están")
     ap.add_argument("--salida", default=os.path.join(os.path.dirname(__file__), "..", "..", "assets", "mapas", "montevideo"))
     ap.add_argument("--solo-recursos", action="store_true",
-                    help="solo el paso de recursos del suelo (productividad CONEAT, geología, minerales) sobre "
+                    help="solo el paso de recursos del suelo (productividad CONEAT, geología, materiales) sobre "
                          "los archivos ya generados en --salida; ver docs/sistemas/recursos-del-suelo.md")
     args = ap.parse_args()
     if args.solo_recursos:
@@ -1563,7 +1569,7 @@ def main():
         }
     guardar_json(os.path.join(args.salida, "meta.json"), meta, compacto=False)
     if args.fuente == "ide" and hidro and rocas is not None:
-        print("Recursos del suelo (productividad, geología, minerales)…", flush=True)
+        print("Recursos del suelo (productividad, geología, materiales)…", flush=True)
         solo_recursos(args)
     # Vista previa: relieve sombreado con agua, biomas oficiales y arroyos.
     gris = np.clip(h / 80.0, 0, 1)

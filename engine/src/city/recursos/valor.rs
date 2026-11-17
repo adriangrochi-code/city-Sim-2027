@@ -16,7 +16,8 @@
 //! dos meses sea el mismo antes y después de cargar.
 
 use super::molestias::{perfil_de_lote, perfil_de_servicio, perfil_por_nombre, Campo, Cuencas, Fuente, Molestia};
-use super::{rinde, Recursos, RecursosLote};
+use super::{produccion_sitio, rinde, Recursos, RecursosLote};
+use super::materiales::ProduccionSitio;
 use crate::city::lots::{Lot, ValorLote, ZoneKind};
 use crate::city::roads::RoadKind;
 use crate::city::City;
@@ -44,6 +45,8 @@ pub struct SueloCiudad {
     /// Aptitud media del campo alrededor de la plaza (cultivo, pastoreo) y la plaza con que se
     /// calculó.
     pub entorno: Option<(Vec2, f32, f32)>,
+    /// Lo que saca cada cantera, horno y calera (por id de edificio): su material y productos.
+    pub sitios: BTreeMap<u32, ProduccionSitio>,
     cuencas: Option<(usize, Arc<Cuencas>)>,
 }
 
@@ -148,6 +151,17 @@ impl City {
             if b.rinde < 0.0 {
                 let i = b.info();
                 b.rinde = rinde(b.kind, &rec.en_area(b.c, b.f, i.size.0, i.size.1));
+            }
+        }
+        // Material y productos de las canteras, hornos y caleras (una vez por edificio).
+        let edificios = &self.services.buildings;
+        self.suelo.sitios.retain(|id, _| edificios.contains_key(id));
+        for b in edificios.values() {
+            if !self.suelo.sitios.contains_key(&b.id) {
+                let i = b.info();
+                if let Some(p) = produccion_sitio(b.kind, &rec.en_area(b.c, b.f, i.size.0, i.size.1)) {
+                    self.suelo.sitios.insert(b.id, p);
+                }
             }
         }
         // El campo alrededor de la plaza.

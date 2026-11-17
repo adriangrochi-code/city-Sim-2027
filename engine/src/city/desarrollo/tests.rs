@@ -271,3 +271,24 @@ fn guardar_y_cargar_el_desarrollo() {
     let back: CityData = serde_json::from_str(&json).unwrap();
     assert_eq!(back.to_city().unwrap().desarrollo, Desarrollo::default());
 }
+
+#[test]
+fn las_partidas_con_menos_productos_cargan_y_se_completan() {
+    // Antes de los materiales (adoquines, sillería, arena, tejas, cal) había 8 productos.
+    let mut d = Desarrollo::default();
+    d.mes(&ctx());
+    let mut v: serde_json::Value = serde_json::to_value(&d).unwrap();
+    for campo in ["precios", "cantidades"] {
+        let a = v[campo].as_array_mut().unwrap();
+        a.truncate(8);
+    }
+    for f in v["historia"].as_array_mut().unwrap() {
+        f["exportado"].as_array_mut().unwrap().truncate(8);
+        f["precios"].as_array_mut().unwrap().truncate(8);
+    }
+    let back: Desarrollo = serde_json::from_value(v).unwrap();
+    assert_eq!(back.precios[Prod::Cal.i()], 1.0);
+    assert_eq!(back.cantidades[Prod::Cal.i()], 0.0);
+    assert_eq!(back.precios[..8], d.precios[..8]);
+    assert_eq!(back.historia.back().unwrap().precios[Prod::Tejas.i()], 1.0);
+}

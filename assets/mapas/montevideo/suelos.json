@@ -251,119 +251,199 @@
       "unidad": "Migmatitas y Granitos Autoctonos de Suarez",
       "periodo": "Riacico",
       "descripcion": "Migmatitas heterogeneas (metatexitas) con estructuras dyktioniticas y estromaticas compuestas por oligoclasa con frecuentes antipertitas y mirmequitas, microclina, cuarzo, biotita, epidoto, apatito y esfeno. Los granitos autoctonos son biotiticos, equigranulares de grano fino a medio compuestos por cuarzo, microclina xenomorfa, plagioclasa, biotita, epidoto y muscovita. Se asocian anfibolitas con recortes graniticos en estructuras ‘pinch and swell’.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "granito": 0.5,
+        "gneis": 0.35,
+        "balasto": 0.35
+      }
     },
     {
       "codigo": 4,
       "unidad": "Ortogneises",
       "periodo": "Riacico",
       "descripcion": "Ortogneisses de grano fino a medio compuestos por oligoclasa, cuarzo, biotita, epidoto, alanita, muscovita, apatito y microclina.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "gneis": 0.75,
+        "balasto": 0.3
+      }
     },
     {
       "codigo": 5,
       "unidad": "Formacion Montevideo",
       "periodo": "Riacico",
       "descripcion": "Gneises oligoclasicos, anfibolitas, esquistos micaceos y cuarcitas micaceas. Esquistos micaceos con estaurolita y granate, gneises granatiferos, cuarcitas, granulitas y metalavas acidas y basicas.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "gneis": 0.8,
+        "balasto": 0.3
+      }
     },
     {
       "codigo": 11,
       "unidad": "Granitos Transamazonicos Indiferenciados",
       "periodo": "Riacico",
       "descripcion": "Granitos calcoalcalinos de grano medio a porfiroide, generalmente hornblendo-biotiticos; leucogranitos de grano medio a grueso; granodioritas hornblendo-biotiticas; granitos anatecticos y granitos orientados.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "granito": 0.75,
+        "balasto": 0.45
+      }
     },
     {
       "codigo": 12,
       "unidad": "Granitoides Tardipostectonicos Transamazonicos",
       "periodo": "Riacico",
       "descripcion": "Leucogranitos de grano medio a grueso, isoxenomorficos a biotita y/o hornblenda. Granitos de grano grueso a porfiroides biotiticos y/o a dos micas. Granitos de grano fino a biotita. Granodioritas de textura granuda, hornblendo-biotiticas. Microgranodioritas biotiticas. Dioritas de grano medio a grueso. 1. Isla Mala, 2. Ao. de la Virgen, 3. Tia Josefa, 4. Co. San Jose, 5. Mahoma, 6. Mal Abrigo, 7. Cufre, 8. Pichinango, 9. Ao. Navarro, 10. Ao. Colla, 11. Cda. Algarin, 12. Ao. de las Conchas, 13. Ptas. del Ao. San Juan, 14. Rio San Salvador, 15. Ao. Miguelete, 16. Ao. Marincho, 17. Ao. Malo, 18. Carpinteria, 19. Ao. Grande, 20. Ao. Minero, 21. Rossel y Rius, 22. Paso Cames, 23. Ojosmin, 24. Sosa Diaz, 25. Empalme Olmos, 26. Soca.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "granito": 0.8,
+        "balasto": 0.45
+      }
     },
     {
       "codigo": 13,
       "unidad": "Zonas de Cizalla Transamazonicas",
       "periodo": "Estaterico",
       "descripcion": "Zonas de cizalla asociadas al ciclo Transamazonico. Litologicamente corresponden a cataclasitas  y milonitas. 1.Cuchilla Cabo de Hornos, 2. Cufre – Tabarez, 3. Ecilda Paulier, 4. Hornos – Riachuelo, 5. San Gabriel.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "gneis": 0.6,
+        "granito": 0.15,
+        "balasto": 0.3
+      }
     },
     {
       "codigo": 41,
       "unidad": "Granitos Anorogenicos  - Granito de La Paz",
       "periodo": "Ediacarico",
       "descripcion": "Presenta dos facies principales. La facies porfiritica (predominante) corresponde a un granito con megablastos de microclina pertitica zonados de hasta 4 cm que incluyen a los demas minerales intensamente, albita, dos generaciones de cuarzo, escasa ortoclasa conformando texturas tipo Rapakivi,  biotita, anfibol, circon, apatito y opacos.  La facies eqigranular es de grano medio y esta constituido por ortosa y microclina pertitica, cuarzo en dos generaciones, albita, biotita, epidoto, calcita, opacos y anfibol. Ocurren ademas enclaves maficos biotiticos, enclaves micrograniticos, asi como una importante actividad filoniana basica y acida recortando el macizo.",
-      "clase": "roca"
+      "clase": "roca",
+      "materiales": {
+        "granito": 0.85,
+        "balasto": 0.8
+      }
     },
     {
       "codigo": 60,
       "unidad": "Formacion Migues",
       "periodo": "Cretacico Cretacico Inferior",
       "descripcion": "Areniscas finas a medias, arcillosas y/o calcareas, estratificadas, de colores rojizos. Lutitas negras y pardas e intercalaciones de niveles conglomeradicos polimicticos. Sedimentacion continental de fosa tectonica.",
-      "clase": "arenisca"
+      "clase": "arenisca",
+      "materiales": {
+        "arena": 0.45,
+        "balasto": 0.35,
+        "canto_rodado": 0.25,
+        "arcilla_roja": 0.2
+      }
     },
     {
       "codigo": 63,
       "unidad": "Formacion Mercedes",
       "periodo": "Cretacico Cretacico Superior",
       "descripcion": "Areniscas medias a conglomeradicas, mal seleccionadas, arcillosas, con estratos  silicificados, de estratificacion cruzada, de colores blanco y rosado. Presenta intercalaciones de conglomerados, lutitas y calizas. Sedimentacion continental fluvio torrencial.",
-      "clase": "arenisca"
+      "clase": "arenisca",
+      "materiales": {
+        "arena": 0.45,
+        "balasto": 0.45,
+        "canto_rodado": 0.35,
+        "arcilla_roja": 0.15
+      }
     },
     {
       "codigo": 65,
       "unidad": "Formacion Fray Bentos",
       "periodo": "Paleogeno Oligoceno",
       "descripcion": "Areniscas  muy finas y loess, con porcentaje variable de arena fina, a veces muy arcillosas, masivas, de color naranja. En la base desarrolla niveles lodoliticos, fangoliticos y brechoides. Sedimentacion continental peridesertica.",
-      "clase": "loess"
+      "clase": "loess",
+      "materiales": {
+        "arcilla_roja": 0.55,
+        "tosca": 0.6
+      }
     },
     {
       "codigo": 69,
       "unidad": "Formacion Raigon",
       "periodo": "Neogeno Plioceno",
       "descripcion": "Areniscas finas a conglomeradicas, mal seleccionadas, con estratificacion cruzada y paralela, de color blanco amarillento. Presenta intercalaciones de arcillas verdes. Sedimentacion fluvial a fluvio-deltaica.",
-      "clase": "arenisca"
+      "clase": "arenisca",
+      "materiales": {
+        "arena": 0.55,
+        "balasto": 0.4,
+        "canto_rodado": 0.35,
+        "arcilla_gris": 0.2
+      }
     },
     {
       "codigo": 70,
       "unidad": "Formacion Libertad",
       "periodo": "Cuaternario Pleistoceno",
       "descripcion": "Lodolitas, loees y fangolitas con porcentaje variable de arenas y arcillas, de color pardo a pardo rojizo. Sedimentacion continental peridesertica.",
-      "clase": "loess"
+      "clase": "loess",
+      "materiales": {
+        "arcilla_roja": 0.75,
+        "tosca": 0.5
+      }
     },
     {
       "codigo": 73,
       "unidad": "Formacion Chuy",
       "periodo": "Cuaternario Pleistoceno",
       "descripcion": "Sedimentos arenosos, arcillo-arenosos finos a medios de color blanco amarillento a rojizo. Sedimentacion marina.",
-      "clase": "arena"
+      "clase": "arena",
+      "materiales": {
+        "arena": 0.8,
+        "arcilla_gris": 0.15
+      }
     },
     {
       "codigo": 74,
       "unidad": "Formacion Dolores",
       "periodo": "Cuaternario Pleistoceno",
       "descripcion": "Lodolitas y areniscas arcillosas muy finas, de colores pardos. Sedimentacion continental, relacionada  a fenomenos eolicos y de coluviacion, con formacion de flujos de barro, que se redepositan en las zonas topograficamente mas bajas.",
-      "clase": "loess"
+      "clase": "loess",
+      "materiales": {
+        "arcilla_roja": 0.7,
+        "tosca": 0.3,
+        "arcilla_gris": 0.15
+      }
     },
     {
       "codigo": 75,
       "unidad": "Formacion Villa Soriano",
       "periodo": "Cuaternario Holoceno",
       "descripcion": "Sedimentos arenosos a gravillosos, con lechos intercalados de cantos, arcillas y limos de color gris. Sedimentacion mixta.",
-      "clase": "aluvion"
+      "clase": "aluvion",
+      "materiales": {
+        "arena": 0.45,
+        "arcilla_gris": 0.45,
+        "canto_rodado": 0.25,
+        "conchilla": 0.35
+      }
     },
     {
       "codigo": 76,
       "unidad": "Arenas litorales y fluviales",
       "periodo": "Cuaternario Holoceno",
       "descripcion": "Arenas fluviales, costeras y eolicas. Sedimentacion mixta con predominancia continental.",
-      "clase": "arena"
+      "clase": "arena",
+      "materiales": {
+        "arena": 0.85
+      }
     },
     {
       "codigo": 77,
       "unidad": "Actual",
       "periodo": "Cuaternario Holoceno",
       "descripcion": "Sedimentos limo-arcillosos, arenosos a veces conglomeradicos (aluviones y coluviones), depositos de turbas.",
-      "clase": "aluvion"
+      "clase": "aluvion",
+      "materiales": {
+        "arcilla_gris": 0.55,
+        "arena": 0.3,
+        "canto_rodado": 0.2,
+        "turba": 0.15
+      }
     }
   ],
   "fuentes": {
@@ -371,31 +451,67 @@
     "aptitud_cultivo": "https://dgrn.mgap.gub.uy/arcgis/rest/services/TEMATICOS/IntConeat/MapServer/11/query + https://dgrn.mgap.gub.uy/arcgis/rest/services/TEMATICOS/IntConeat/MapServer/12/query",
     "geologia": "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query",
     "mineria": [
-      "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/CatastroMineroGeoS/MapServer/4/query",
-      "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/CatastroMineroGeoS/MapServer/5/query",
+      "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_ConsMin/Consulta_Minera_2026/MapServer/{2,3,4,5}/query",
       "WFS https://mapas.ide.uy/geoserver-vectorial/wfs hidrografia:actividad_minera_abandonada_a",
       "WFS https://mapas.ide.uy/geoserver-vectorial/wfs hidrografia_urbana:actividad_minera_abandonada_a"
-    ]
+    ],
+    "materiales": "pesos por unidad geológica (GEO_MAT en tools/mapa_real/recursos_suelo.py) y catálogo assets/datos/recursos_uruguay.json"
   },
   "resumen": {
     "archivos": {
       "suelos": "suelos.bin / suelos_contexto.bin: uint8, índice del grupo en suelos.json (bits 0-6) + 128 si es estimación; 0 = agua",
       "productividad": "productividad.bin / productividad_contexto.bin: uint8, índice de productividad CONEAT (media nacional 100); 0 en el agua",
       "geologia": "geologia.bin / geologia_contexto.bin: uint8, índice de la unidad en suelos.json (geologia); 0 = sin dato",
-      "minerales": "minerales.bin (grilla de 40 m, 601 × 601) / minerales_contexto.bin (grilla de contexto): 4 bytes por muestra: piedra, arcilla, arena, canto rodado; 0..255 = 0..1"
+      "materiales": "materiales.bin (grilla de 40 m, 601 × 601) / materiales_contexto.bin (grilla de 200 m desde -25000 m, 371 × 371): 11 bytes por muestra, en el orden de «materiales»; 0..255 = ley 0..1"
     },
-    "minerales_paso_m": 40.0,
-    "minerales_muestras": 601,
+    "materiales": [
+      "granito",
+      "gneis",
+      "balasto",
+      "canto_rodado",
+      "arena",
+      "arcilla_roja",
+      "arcilla_gris",
+      "tosca",
+      "conchilla",
+      "caliza",
+      "turba"
+    ],
+    "materiales_paso_m": 40.0,
+    "materiales_muestras": 601,
+    "materiales_contexto_paso_m": 200.0,
+    "materiales_contexto_muestras": 371,
     "fuente_ip": "servicio",
     "fuente_aptitud_cultivo": "servicio",
     "fraccion_estimada": 0.012,
     "ip_medio_tierra": 146.0,
-    "celdas_con_mineria": 2923,
-    "media_minerales": {
-      "piedra": 0.168,
-      "arcilla": 0.509,
-      "arena": 0.088,
-      "canto_rodado": 0.064
+    "celdas_con_mineria": 3209,
+    "titulos_mineros_en_la_ventana": 181,
+    "media_materiales": {
+      "granito": 0.033,
+      "gneis": 0.138,
+      "balasto": 0.059,
+      "canto_rodado": 0.062,
+      "arena": 0.053,
+      "arcilla_roja": 0.515,
+      "arcilla_gris": 0.099,
+      "tosca": 0.316,
+      "conchilla": 0.006,
+      "caliza": 0.0,
+      "turba": 0.013
+    },
+    "fraccion_con_material": {
+      "granito": 0.041,
+      "gneis": 0.148,
+      "balasto": 0.199,
+      "canto_rodado": 0.175,
+      "arena": 0.112,
+      "arcilla_roja": 0.74,
+      "arcilla_gris": 0.238,
+      "tosca": 0.665,
+      "conchilla": 0.018,
+      "caliza": 0.0,
+      "turba": 0.021
     }
   }
 }

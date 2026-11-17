@@ -186,17 +186,15 @@ const PRODUCTIVIDAD_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevid
 /// Unidad geológica (DINAMIGE): índice en `suelos.json`.
 const GEOLOGIA_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/geologia.bin");
 const GEOLOGIA_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/geologia_contexto.bin");
-/// Materiales (piedra, arcilla, arena, canto rodado), 4 bytes por muestra; el mapa en una
-/// grilla de 40 m, el entorno en la de contexto.
-const MINERALES_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/minerales.bin");
-const MINERALES_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/minerales_contexto.bin");
+/// Materiales con tipo (granito, gneis, balasto, canto rodado, arena, arcilla roja, arcilla gris,
+/// tosca, conchilla, caliza, turba: el orden de `city::recursos::Material`), [`NMAT`] bytes por
+/// muestra (ley 0..255); el mapa en una grilla de 40 m, el entorno en una de 200 m.
+const MATERIALES_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/materiales.bin");
+const MATERIALES_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/materiales_contexto.bin");
+/// Canales de `materiales.bin`.
+pub const NMAT: usize = 11;
 /// Tabla de grupos CONEAT y unidades geológicas (la lee `city::recursos`).
 pub const SUELOS_JSON: &str = include_str!("../../assets/mapas/montevideo/suelos.json");
-/// Canales de `minerales.bin`.
-pub const MINERAL_PIEDRA: usize = 0;
-pub const MINERAL_ARCILLA: usize = 1;
-pub const MINERAL_ARENA: usize = 2;
-pub const MINERAL_GRAVA: usize = 3;
 
 /// Códigos de `biomas.bin`.
 pub const BIO_NADA: u8 = 0;
@@ -252,10 +250,10 @@ impl Grid {
         assert_eq!(bytes.len(), n * n, "raster incompleto");
         Grid { v: bytes.iter().map(|&b| b as f32).collect(), n, step, from }
     }
-    /// Cuatro canales intercalados de un byte (0..255 → 0..1).
-    fn channels_u8(bytes: &[u8], n: usize, step: f32, from: f32) -> [Grid; 4] {
-        assert_eq!(bytes.len(), n * n * 4, "raster de minerales incompleto");
-        std::array::from_fn(|k| Grid { v: bytes.chunks_exact(4).map(|c| c[k] as f32 / 255.0).collect(), n, step, from })
+    /// `K` canales intercalados de un byte (0..255 → 0..1).
+    fn channels_u8<const K: usize>(bytes: &[u8], n: usize, step: f32, from: f32) -> [Grid; K] {
+        assert_eq!(bytes.len(), n * n * K, "raster de materiales incompleto");
+        std::array::from_fn(|k| Grid { v: bytes.chunks_exact(K).map(|c| c[k] as f32 / 255.0).collect(), n, step, from })
     }
     #[inline]
     fn at(&self, i: i32, j: i32) -> f32 {
@@ -385,15 +383,15 @@ struct RealMap {
     rock_main: Grid,
     rock_ctx: Grid,
     /// Recursos del suelo: productividad CONEAT (IP), grupo CONEAT y geología (bytes crudos,
-    /// muestra más cercana) y los cuatro materiales (0..1).
+    /// muestra más cercana) y la ley de cada material (0..1).
     prod_main: Grid,
     prod_ctx: Grid,
     suelo_main: &'static [u8],
     suelo_ctx: &'static [u8],
     geo_main: &'static [u8],
     geo_ctx: &'static [u8],
-    mineral_main: [Grid; 4],
-    mineral_ctx: [Grid; 4],
+    material_main: [Grid; NMAT],
+    material_ctx: [Grid; NMAT],
     /// Distancia de cada celda de agua a la tierra (m).
     land_main: Grid,
     land_ctx: Grid,
@@ -708,8 +706,8 @@ impl TerrainGen {
             suelo_ctx: SUELOS_CTX_BIN,
             geo_main: GEOLOGIA_BIN,
             geo_ctx: GEOLOGIA_CTX_BIN,
-            mineral_main: Grid::channels_u8(MINERALES_BIN, (main_n - 1) / 2 + 1, main_step * 2.0, 0.0),
-            mineral_ctx: Grid::channels_u8(MINERALES_CTX_BIN, ctx_n, ctx_step, ctx_from),
+            material_main: Grid::channels_u8(MATERIALES_BIN, (main_n - 1) / 2 + 1, main_step * 2.0, 0.0),
+            material_ctx: Grid::channels_u8(MATERIALES_CTX_BIN, (ctx_n - 1) / 2 + 1, ctx_step * 2.0, ctx_from),
             land_main,
             land_ctx,
             coast_r_main,
@@ -932,10 +930,11 @@ impl TerrainGen {
         }
     }
 
-    /// Material del suelo (canal `MINERAL_*`, 0..1). `None` en el mapa ficticio.
-    pub fn mineral(&self, canal: usize, x: f32, z: f32) -> Option<f32> {
+    /// Ley de un material del suelo (canal de `materiales.bin`, ver `city::recursos::Material`;
+    /// 0..1). `None` en el mapa ficticio.
+    pub fn material(&self, canal: usize, x: f32, z: f32) -> Option<f32> {
         let r = self.real.as_ref()?;
-        Some(self.blend(&r.mineral_main[canal], &r.mineral_ctx[canal], x, z))
+        Some(self.blend(&r.material_main[canal], &r.material_ctx[canal], x, z))
     }
 
     /// Byte crudo de un raster (muestra más cercana): el del mapa adentro, el del entorno afuera.

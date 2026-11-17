@@ -49,6 +49,7 @@ fn icon_of(k: Kind) -> Icon {
         Kind::Molino => Icon::Atahona,
         Kind::Astillero => Icon::Puerto,
         Kind::Imprenta => Icon::Escuela,
+        Kind::Calera => Icon::Produccion,
     }
 }
 
@@ -233,6 +234,7 @@ pub fn cards(cat: Category, game: &Game) -> Option<Vec<Card>> {
             place_card(game, Kind::Estancia),
             place_card(game, Kind::Horno),
             place_card(game, Kind::Cantera),
+            place_card(game, Kind::Calera),
             place_card(game, Kind::Saladero),
             place_card(game, Kind::Molino),
             place_card(game, Kind::Astillero),
@@ -279,9 +281,10 @@ pub fn cards(cat: Category, game: &Game) -> Option<Vec<Card>> {
             layer_card(game, Layer::Molestias, Icon::Saladero, "Molestias", "Olor, ruido, humo y agua sucia de talleres, curtiembres, hornos, canteras y el basurero, con su alcance; el agua sucia baja por el arroyo"),
             layer_card(game, Layer::Cultivo, Icon::Quintas, "Tierra para cultivo", "Dónde rinde una chacra de trigo, maíz o huerta: índice de productividad CONEAT, aptitud para cultivos de verano, pendiente y bañados (de pardo a verde oscuro)"),
             layer_card(game, Layer::Pasturas, Icon::Hacienda, "Pasturas", "Dónde rinde una estancia: productividad y aptitud CONEAT, roca a la vista, arenales y bañados"),
-            layer_card(game, Layer::Piedra, Icon::Cantera, "Piedra", "Piedra para canteras: el basamento cristalino (carta geológica de DINAMIGE), los afloramientos CONEAT, las puntas de la costa y las canteras conocidas"),
-            layer_card(game, Layer::Arcilla, Icon::Ladrillo, "Arcilla", "Barro para ladrillos: limos y lodolitas (formaciones Libertad y Dolores) y los bajos junto a los arroyos"),
-            layer_card(game, Layer::Arena, Icon::Piedra, "Arena", "Arena de playas, médanos y arenales, y la de los arroyos anchos"),
+            layer_card(game, Layer::Piedra, Icon::Cantera, "Piedra", "Piedra para canteras, por tipo: granito (rosado: sillería y adoquines; Granito de La Paz y granitos del norte) y gneis (gris: mampostería; la Ciudad Vieja, la costa y el Cerro). Del basamento de la carta geológica de DINAMIGE, los afloramientos CONEAT, las puntas de la costa y las canteras del catastro minero"),
+            layer_card(game, Layer::Arcilla, Icon::Ladrillo, "Arcilla", "Barro, por tipo: arcilla roja de los limos (formaciones Libertad y Dolores: ladrillos) y arcilla gris de los bajos y bañados (tejas y loza)"),
+            layer_card(game, Layer::Arena, Icon::Piedra, "Arena y grava", "Arena de playas, médanos y arenales (amarillo), canto rodado de los lechos (azul) y balasto del granito alterado y las areniscas (pardo)"),
+            layer_card(game, Layer::Cal, Icon::Produccion, "Cal, tosca y turba", "Piedra de cal para la calera: caliza (no hay alrededor de Montevideo: la cal se trae por barco) y conchilla de la Formación Villa Soriano (estimada); tosca de los limos para caminos y turba de los bañados"),
         ],
         _ => return None,
     })

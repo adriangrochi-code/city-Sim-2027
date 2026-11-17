@@ -81,7 +81,10 @@ fn una_cantera_sin_piedra_no_rinde_y_un_horno_sin_barro_tampoco() {
     let sin = RecursosLote { piedra: 0.05, arcilla: 0.02, ..Default::default() };
     assert_eq!(rinde(Kind::Cantera, &sin), 0.0);
     assert_eq!(rinde(Kind::Horno, &sin), 0.0);
-    let con = RecursosLote { piedra: 0.8, arcilla: 0.7, cultivo: 0.6, pastoreo: 0.6, ..Default::default() };
+    let mut con = RecursosLote { cultivo: 0.6, pastoreo: 0.6, ..Default::default() };
+    con.mat[Material::Gneis.i()] = 0.8;
+    con.mat[Material::ArcillaRoja.i()] = 0.7;
+    con.derivar();
     assert!(rinde(Kind::Cantera, &con) > 1.0 && rinde(Kind::Horno, &con) > 0.9);
     assert!(rinde(Kind::Chacra, &con) > rinde(Kind::Chacra, &RecursosLote { cultivo: 0.1, ..con }));
     assert_eq!(rinde_por_clave(Some("piedra"), &sin), 0.0);
@@ -104,9 +107,284 @@ fn una_cantera_sin_piedra_no_rinde_y_un_horno_sin_barro_tampoco() {
             }
         }
     }
+    // Sobre los limos no hay piedra: lo que saca una cantera ahí es tosca (para caminos), que
+    // casi no da piedra.
     let p = sin_piedra.expect("hay campo sin piedra");
-    let msg = city.service_problem(t, Kind::Cantera, p, Vec2::NEG_Y).unwrap_or_default();
-    assert!(msg.contains("piedra") || msg.contains("calle"), "{msg}");
+    let r = rec.en_area(p, Vec2::NEG_Y, 28.0, 22.0);
+    let prod = materiales::producto_cantera(&r);
+    assert!(matches!(prod.material, Some(Material::Tosca) | None), "{prod:?}");
+    assert!(prod.base < 0.5);
+    // Y donde no hay nada que sacar (el bañado, la playa sin médano), no se puede.
+    let nada = RecursosLote::default();
+    assert!(materiales::producto_cantera(&nada).material.is_none());
+    let _ = city.service_problem(t, Kind::Cantera, p, Vec2::NEG_Y);
+}
+
+// --- Materiales con tipo y catálogo ------------------------------------------------------------
+
+/// Muestras de tierra del mapa real y su entorno al norte (cada 300 m) con su geología (el
+/// Granito de La Paz queda al norte del mapa jugable).
+fn muestras(t: &TerrainGen) -> Vec<(Vec2, RecursosLote, String)> {
+    let rec = Recursos::de(t);
+    let mut v = Vec::new();
+    for j in 0..100 {
+        for i in 0..100 {
+            let p = Vec2::new(150.0 + i as f32 * 300.0 - 3000.0, 150.0 + j as f32 * 300.0 - 6000.0);
+            if t.height(p.x, p.y) < 1.0 || t.is_water(p.x, p.y) {
+                continue;
+            }
+            let geo = rec.suelo(p).map(|s| s.geologia).unwrap_or_default();
+            v.push((p, rec.en_punto(p), geo));
+        }
+    }
+    v
+}
+
+#[test]
+fn cada_material_esta_donde_dice_la_geologia() {
+    let t = real();
+    let rec = Recursos::de(t);
+    let v = muestras(t);
+    let media = |f: &dyn Fn(&str) -> bool, m: Material| {
+        let xs: Vec<f32> = v.iter().filter(|x| f(&x.2)).map(|x| x.1.mat[m.i()]).collect();
+        assert!(xs.len() > 5, "pocas muestras para {m:?}");
+        xs.iter().sum::<f32>() / xs.len() as f32
+    };
+    // El Cerro y la costa: gneis de la Formación Montevideo (la piedra de la Ciudad Vieja).
+    let cerro = rec.en_area(crate::terrain::CERRO_REAL + Vec2::new(150.0, 150.0), Vec2::NEG_Y, 28.0, 22.0);
+    assert!(cerro.mat[Material::Gneis.i()] >= MINIMO_MATERIAL && cerro.mat[Material::Gneis.i()] >= cerro.mat[Material::Granito.i()], "{:?}", cerro.mat);
+    let montevideo = |g: &str| g.contains("Formación Montevideo");
+    assert!(media(&montevideo, Material::Gneis) > 0.5);
+    assert!(media(&montevideo, Material::Granito) < 0.15);
+    // El Granito de La Paz: granito (y el balasto de su alteración).
+    let la_paz = |g: &str| g.contains("La Paz");
+    assert!(media(&la_paz, Material::Granito) > 0.6, "granito en La Paz {}", media(&la_paz, Material::Granito));
+    assert!(media(&la_paz, Material::Balasto) > 0.4);
+    assert!(media(&la_paz, Material::Gneis) < media(&la_paz, Material::Granito));
+    // Los limos de la Formación Libertad: arcilla roja y tosca, nada de piedra.
+    let libertad = |g: &str| g.contains("Libertad");
+    assert!(media(&libertad, Material::ArcillaRoja) > 0.5, "arcilla roja {}", media(&libertad, Material::ArcillaRoja));
+    assert!(media(&libertad, Material::Tosca) > 0.3);
+    assert!(media(&libertad, Material::Granito) + media(&libertad, Material::Gneis) < 0.1);
+    // Playas y médanos: arena.
+    let playas: Vec<f32> = v.iter().filter(|x| t.official_biome(x.0.x, x.0.y) == BIO_PLAYA).map(|x| x.1.mat[Material::Arena.i()]).collect();
+    assert!(!playas.is_empty() && playas.iter().sum::<f32>() / playas.len() as f32 > 0.8);
+    // Arenas litorales y fluviales (médanos de Carrasco y del oeste): arena.
+    let arenas = |g: &str| g.contains("Arenas litorales");
+    assert!(media(&arenas, Material::Arena) > 0.6);
+    // No hay caliza en el mapa ni en su entorno.
+    assert!(v.iter().all(|x| x.1.mat[Material::Caliza.i()] == 0.0));
+    for p in [Vec2::new(-20000.0, 5000.0), Vec2::new(40000.0, -15000.0), Vec2::new(30000.0, 20000.0)] {
+        assert_eq!(t.material(Material::Caliza.i(), p.x, p.y), Some(0.0));
+    }
+    // Los grupos de siempre salen de los materiales.
+    for (_, r, _) in v.iter().take(400) {
+        assert_eq!(r.piedra, r.mat[Material::Granito.i()].max(r.mat[Material::Gneis.i()]));
+        assert!(r.mat.iter().all(|x| (0.0..=1.0).contains(x)));
+    }
+}
+
+#[test]
+fn la_cantera_saca_segun_el_material_y_el_horno_segun_el_barro() {
+    let con = |m: Material, x: f32| {
+        let mut r = RecursosLote::default();
+        r.mat[m.i()] = x;
+        r.derivar();
+        r
+    };
+    use materiales::{producto_cantera, producto_horno, Extra};
+    let g = producto_cantera(&con(Material::Granito, 0.8));
+    assert_eq!(g.material, Some(Material::Granito));
+    assert!(g.base >= 1.0 && g.extras.iter().any(|e| e.0 == Extra::Adoquines && e.1 > 0.0) && g.extras.iter().any(|e| e.0 == Extra::Silleria && e.1 > 0.0));
+    let n = producto_cantera(&con(Material::Gneis, 0.8));
+    assert_eq!(n.material, Some(Material::Gneis));
+    assert!(n.base >= 1.0 && !n.extras.iter().any(|e| e.0 == Extra::Adoquines && e.1 > 0.0), "el gneis no da adoquines");
+    let a = producto_cantera(&con(Material::Arena, 0.9));
+    assert_eq!(a.base, 0.0);
+    assert!(a.extras.iter().any(|e| e.0 == Extra::Arena && e.1 > 0.0));
+    let b = producto_cantera(&con(Material::Balasto, 0.7));
+    assert!(b.base > 0.0 && b.base < 1.0);
+    assert!(rinde(Kind::Cantera, &con(Material::Arena, 0.9)) > 1.0);
+    // El horno: la arcilla roja da ladrillos; la gris, menos ladrillos y tejas.
+    let roja = producto_horno(&con(Material::ArcillaRoja, 0.7));
+    let gris = producto_horno(&con(Material::ArcillaGris, 0.7));
+    assert!(roja.base > gris.base);
+    assert!(gris.extras.iter().any(|e| e.0 == Extra::Tejas && e.1 > 0.0));
+    assert!(!roja.extras.iter().any(|e| e.0 == Extra::Tejas && e.1 > 0.0));
+    // En el mapa real, una cantera en el Cerro saca gneis y en La Paz granito.
+    let t = real();
+    let rec = Recursos::de(t);
+    let cerro = producto_cantera(&rec.en_area(crate::terrain::CERRO_REAL + Vec2::new(150.0, 150.0), Vec2::NEG_Y, 28.0, 22.0));
+    assert_eq!(cerro.material, Some(Material::Gneis));
+    let v = muestras(t);
+    let la_paz = v.iter().filter(|x| x.2.contains("La Paz")).map(|x| producto_cantera(&x.1)).filter(|p| p.material.is_some()).collect::<Vec<_>>();
+    // En La Paz se saca el granito sano y, sobre todo, el alterado: el balasto del pedregullo
+    // de Montevideo (memoria de la carta geológica).
+    let granito = la_paz.iter().filter(|p| p.material == Some(Material::Granito)).count();
+    let balasto = la_paz.iter().filter(|p| p.material == Some(Material::Balasto)).count();
+    assert!((granito + balasto) * 10 > la_paz.len() * 9 && granito > 0 && balasto > 0, "La Paz: {granito} granito, {balasto} balasto de {}", la_paz.len());
+}
+
+#[test]
+fn la_calera_necesita_caliza_o_conchilla_y_si_no_la_cal_se_importa() {
+    use crate::city::desarrollo::{Contexto, Desarrollo, Prod};
+    use materiales::fuente_de_cal;
+    // Sin caliza ni conchilla no hay piedra de cal; con conchilla sí (rinde menos que la caliza).
+    let mut r = RecursosLote::default();
+    assert!(fuente_de_cal(&r).is_none());
+    assert_eq!(rinde(Kind::Calera, &r), 0.0);
+    r.mat[Material::Conchilla.i()] = 0.5;
+    assert_eq!(fuente_de_cal(&r).map(|x| x.0), Some(Material::Conchilla));
+    let con_conchilla = rinde(Kind::Calera, &r);
+    r.mat[Material::Caliza.i()] = 0.5;
+    assert_eq!(fuente_de_cal(&r).map(|x| x.0), Some(Material::Caliza));
+    assert!(rinde(Kind::Calera, &r) > con_conchilla && con_conchilla > 0.0);
+    // En el mapa real, sobre los limos no se puede: no hay caliza.
+    let t = real();
+    let rec = Recursos::de(t);
+    let mut city = City { money: 1_000_000, ..Default::default() };
+    city.plaza = Some((crate::terrain::FOUNDING_REAL, 0.0));
+    city.lots.plaza_center = Some(crate::terrain::FOUNDING_REAL);
+    let p = muestras(t).into_iter().find(|x| x.2.contains("Libertad") && x.0.distance(crate::terrain::FOUNDING_REAL) > 2000.0 && fuente_de_cal(&rec.en_area(x.0, Vec2::NEG_Y, 20.0, 20.0)).is_none()).unwrap().0;
+    let msg = city.service_problem(t, Kind::Calera, p, Vec2::NEG_Y).unwrap_or_default();
+    assert!(msg.contains("caliza") || msg.contains("calle"), "{msg}");
+    // La cal que piden las obras y no dan las caleras se trae por barco y cuesta.
+    let ctx = |demanda: f32, local: f32| {
+        let mut c = Contexto { mes: 10, muelle: true, desocupados: 0, habitantes: 0, cal_demanda: demanda, ..Default::default() };
+        c.prod_sitios[Prod::Cal.i()] = local;
+        c
+    };
+    let mut d = Desarrollo::default();
+    let sin_obras = d.mes(&ctx(0.0, 0.0));
+    let imp0 = d.historia.back().unwrap().importado;
+    let mut d = Desarrollo::default();
+    let con_obras = d.mes(&ctx(100.0, 0.0));
+    let imp1 = d.historia.back().unwrap().importado;
+    assert_eq!(sin_obras.cal_importada, 0.0);
+    assert!((con_obras.cal_importada - 100.0).abs() < 1e-3);
+    assert!(imp1 > imp0 + 80.0, "la cal importada pesa en las importaciones: {imp0} → {imp1}");
+    // Con una calera que alcanza, no se importa y el cabildo vende la cal.
+    let mut d = Desarrollo::default();
+    let propia = d.mes(&ctx(100.0, 120.0));
+    assert_eq!(propia.cal_importada, 0.0);
+    assert!(propia.lineas.iter().any(|l| l.0.contains("caleras") && l.1 > 0), "{:?}", propia.lineas);
+}
+
+#[test]
+fn el_catalogo_carga_y_cada_entrada_tiene_fuente() {
+    let c = materiales::catalogo();
+    assert!(c.recursos.len() >= 40, "{} recursos", c.recursos.len());
+    let estados = ["MEDIDO", "DOCUMENTADO", "ESTIMADO"];
+    for e in &c.recursos {
+        assert!(!e.fuentes.is_empty(), "{} sin fuente", e.id);
+        for f in &e.fuentes {
+            assert!(c.fuentes.contains_key(f), "{}: fuente {f} desconocida", e.id);
+        }
+        assert!(estados.contains(&e.estado.as_str()), "{}: estado {}", e.id, e.estado);
+        assert!(c.categorias.contains_key(&e.categoria), "{}: categoría {}", e.id, e.categoria);
+        for h in &e.historia {
+            assert!(c.fuentes.contains_key(&h.fuente) && estados.contains(&h.estado.as_str()), "{}: {}", e.id, h.texto);
+        }
+        for p in &e.productos {
+            assert!(c.productos.iter().any(|x| &x.id == p), "{}: producto {p}", e.id);
+        }
+        // Lo MEDIDO cita un servicio o una estadística oficial.
+        if e.estado == "MEDIDO" {
+            assert!(e.fuentes.iter().any(|f| matches!(c.fuentes[f].tipo.as_str(), "servicio" | "estadistica")), "{}", e.id);
+        }
+    }
+    for p in &c.productos {
+        assert!(c.fuentes.contains_key(&p.fuente), "{}", p.id);
+        for i in &p.insumos {
+            assert!(materiales::entrada(i).is_some() || c.productos.iter().any(|x| &x.id == i), "{}: insumo {i}", p.id);
+        }
+    }
+    // Cada material del mapa tiene su entrada, y lo que dice de Montevideo coincide.
+    for m in Material::TODOS {
+        let e = m.entrada();
+        assert_eq!(e.en_montevideo.material.as_deref(), Some(m.id()), "{m:?}");
+    }
+    assert!(!Material::Caliza.entrada().en_montevideo.hay);
+    assert_eq!(Material::Granito.construccion(), Some("piedra"));
+    assert_eq!(Material::ArcillaRoja.construccion(), Some("ladrillo"));
+    assert_eq!(Material::ArcillaGris.construccion(), Some("teja"));
+    assert_eq!(Material::Arena.construccion(), Some("arena"));
+    assert_eq!(Material::Tosca.construccion(), None);
+    // La cal sale de la caliza (que no hay en Montevideo) y de la conchilla; el mármol no.
+    assert!(materiales::de_construccion("cal").iter().any(|e| e.id == "caliza"));
+    assert!(materiales::se_saca_del_suelo("piedra") && materiales::se_saca_del_suelo("ladrillo") && materiales::se_saca_del_suelo("madera"));
+    assert!(!materiales::se_saca_del_suelo("mármol"));
+    // La amatista no es lo mismo que la caliza: distinta categoría, precio, usos y lugar.
+    let (am, ca) = (materiales::entrada("amatista").unwrap(), materiales::entrada("caliza").unwrap());
+    assert_eq!((am.categoria.as_str(), ca.categoria.as_str()), ("gema", "carbonato"));
+    assert!(am.localidades.iter().any(|l| l.contains("Artigas")) && ca.localidades.iter().any(|l| l.contains("Minas")));
+}
+
+#[test]
+fn los_materiales_cerca_de_una_obra() {
+    let t = real();
+    let rec = Recursos::de(t);
+    let cerro = rec.materiales_cerca(crate::terrain::CERRO_REAL, 400.0);
+    assert!(cerro[Material::Gneis.i()] > 0.3);
+    assert!(rec.construccion_cerca("piedra", crate::terrain::CERRO_REAL, 400.0) > 0.3);
+    assert_eq!(rec.construccion_cerca("madera", crate::terrain::CERRO_REAL, 400.0), 0.0, "la madera no es un material del subsuelo");
+    // Más radio, nunca menos.
+    let lejos = rec.materiales_cerca(crate::terrain::FOUNDING_REAL, 1500.0);
+    let cerca = rec.materiales_cerca(crate::terrain::FOUNDING_REAL, 300.0);
+    assert!(lejos.iter().zip(&cerca).all(|(a, b)| a >= b));
+}
+
+#[test]
+fn el_dataset_del_pais_tiene_cada_recurso_en_su_departamento() {
+    #[derive(serde::Deserialize)]
+    struct Grilla {
+        lon_oeste: f32,
+        lat_norte: f32,
+        dlon: f32,
+        dlat: f32,
+        columnas: usize,
+        filas: usize,
+    }
+    #[derive(serde::Deserialize)]
+    struct PorMaterial {
+        titulos: u32,
+        departamentos: std::collections::BTreeMap<String, u32>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Titulos {
+        por_material: std::collections::BTreeMap<String, PorMaterial>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Pais {
+        grilla: Grilla,
+        titulos: Titulos,
+    }
+    let pais: Pais = serde_json::from_str(include_str!("../../../../assets/datos/uruguay/pais.json")).unwrap();
+    let geo = include_bytes!("../../../../assets/datos/uruguay/geologia_pais.bin");
+    let g = &pais.grilla;
+    assert_eq!(geo.len(), g.columnas * g.filas);
+    let unidad = |lon: f32, lat: f32| {
+        let i = ((lon - g.lon_oeste) / g.dlon).round() as usize;
+        let j = ((g.lat_norte - lat) / g.dlat).round() as usize;
+        geo[i + j * g.columnas] as i32 - 1
+    };
+    // Los Catalanes (Artigas): basalto de Arapey; Minas (Lavalleja) y Montevideo: basamento.
+    assert_eq!(unidad(-56.28, -30.83), 54);
+    assert!((0..=41).contains(&unidad(-55.24, -34.37)), "Minas: {}", unidad(-55.24, -34.37));
+    assert!((0..=41).contains(&unidad(-56.26, -34.89)), "el Cerro: {}", unidad(-56.26, -34.89));
+    let mayor = |m: &str| pais.titulos.por_material[m].departamentos.iter().max_by_key(|x| x.1).map(|x| x.0.clone()).unwrap();
+    assert_eq!(mayor("amatista"), "Artigas");
+    assert_eq!(mayor("agata"), "Artigas");
+    assert_eq!(mayor("oro"), "Rivera");
+    assert_eq!(mayor("bentonita"), "Cerro Largo");
+    assert!(["Lavalleja", "Treinta y Tres"].contains(&mayor("caliza").as_str()));
+    assert!(pais.titulos.por_material["tosca"].titulos > 300, "la tosca es lo que más títulos tiene");
+    // Cada material del catálogo con sustancias del catastro aparece en algún título.
+    for e in &materiales::catalogo().recursos {
+        if !e.sustancias_catastro.is_empty() && e.estado == "MEDIDO" && e.id != "arenisca" {
+            assert!(pais.titulos.por_material.contains_key(&e.id), "{} sin títulos", e.id);
+        }
+    }
 }
 
 #[test]

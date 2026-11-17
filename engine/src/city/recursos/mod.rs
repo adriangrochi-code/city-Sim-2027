@@ -2,13 +2,17 @@
 //!
 //! - **Datos** (ver `docs/sistemas/recursos-del-suelo.md`): el índice de productividad CONEAT
 //!   (`productividad.bin`), el grupo CONEAT con su aptitud y la de cultivos de verano
-//!   (`suelos.bin` + `suelos.json`), la geología de DINAMIGE (`geologia.bin`) y cuatro
-//!   materiales (`minerales.bin`: piedra, arcilla, arena y canto rodado). Los lee
-//!   [`TerrainGen`]; en el mapa ficticio (las pruebas) se estiman del relieve.
+//!   (`suelos.bin` + `suelos.json`), la geología de DINAMIGE (`geologia.bin`) y la ley de once
+//!   materiales con tipo (`materiales.bin`: granito, gneis, balasto, canto rodado, arena,
+//!   arcilla roja y gris, tosca, conchilla, caliza y turba; ver [`materiales`] y el catálogo
+//!   de recursos del Uruguay). Los lee [`TerrainGen`]; en el mapa ficticio (las pruebas) se
+//!   estiman del relieve.
 //! - **Aptitud** ([`Recursos::aptitud`]): de 0 a 1 para cada [`Uso`]: cultivo (chacras de trigo,
 //!   maíz y huerta), pastoreo (estancias) y la extracción de cada material.
-//! - **Rinde de los sitios** ([`rinde`]): chacras, estancias, hornos y canteras producen según
-//!   la tierra donde están; una cantera sin piedra no da nada y un horno sin barro tampoco.
+//! - **Rinde de los sitios** ([`rinde`]): chacras, estancias, hornos, canteras y caleras
+//!   producen según la tierra donde están; la cantera saca lo que hay (granito, gneis, balasto,
+//!   canto rodado, arena o tosca), el horno cuece según su barro y la calera necesita caliza o
+//!   conchilla ([`materiales::producto_cantera`] y los demás).
 //! - **Molestias** ([`molestias`]): olor, ruido, humo y agua sucia de cada industria y servicio,
 //!   con su alcance; el agua sucia baja por el arroyo.
 //! - **Valor del suelo** ([`valor`]): acceso (plaza, puerto, calle), agua, servicios, costa,
@@ -20,13 +24,15 @@
 //! [`City::recursos_del_lote`](super::City::recursos_del_lote) y
 //! [`City::valor_del_suelo`](super::City::valor_del_suelo).
 
+pub mod materiales;
 pub mod molestias;
 pub mod valor;
 #[cfg(test)]
 mod tests;
 
 use super::services::Kind;
-use crate::terrain::{TerrainGen, BIO_BANADO, BIO_BANCO, BIO_PLAYA, MINERAL_ARCILLA, MINERAL_ARENA, MINERAL_GRAVA, MINERAL_PIEDRA, SUELOS_JSON};
+use crate::terrain::{TerrainGen, BIO_BANADO, BIO_BANCO, BIO_PLAYA, NMAT, SUELOS_JSON};
+pub use materiales::Material;
 use glam::Vec2;
 use serde::Deserialize;
 use std::sync::OnceLock;
@@ -46,6 +52,10 @@ pub enum Uso {
     Arena,
     /// Canto rodado y grava de los lechos.
     Grava,
+    /// Un material con tipo (granito, tosca, conchilla…).
+    Mat(Material),
+    /// Piedra de cal: caliza o, si no hay, conchilla.
+    Cal,
 }
 
 #[allow(dead_code)]
@@ -60,6 +70,8 @@ impl Uso {
             Uso::Arcilla => "arcilla",
             Uso::Arena => "arena",
             Uso::Grava => "canto rodado",
+            Uso::Mat(m) => m.nombre(),
+            Uso::Cal => "piedra de cal",
         }
     }
 
@@ -72,8 +84,9 @@ impl Uso {
             "piedra" => Uso::Piedra,
             "arcilla" | "barro" => Uso::Arcilla,
             "arena" => Uso::Arena,
-            "grava" | "canto" | "canto rodado" => Uso::Grava,
-            _ => return None,
+            "grava" | "canto" => Uso::Grava,
+            "cal" | "calera" => Uso::Cal,
+            _ => return Material::de_id(s).map(Uso::Mat),
         })
     }
 }
@@ -89,6 +102,9 @@ pub struct RecursosLote {
     pub grava: f32,
     /// Índice de productividad CONEAT (media nacional 100).
     pub ip: f32,
+    /// Ley de cada material con tipo (índice: [`Material::i`]). Piedra, arcilla, arena y grava
+    /// son los grupos de antes, derivados de estos ([`RecursosLote::derivar`]).
+    pub mat: [f32; NMAT],
 }
 
 impl RecursosLote {
@@ -100,7 +116,25 @@ impl RecursosLote {
             Uso::Arcilla => self.arcilla,
             Uso::Arena => self.arena,
             Uso::Grava => self.grava,
+            Uso::Mat(m) => self.mat[m.i()],
+            Uso::Cal => materiales::fuente_de_cal(self).map_or(0.0, |x| x.1),
         }
+    }
+
+    /// Los grupos de siempre a partir de los materiales: piedra (granito, gneis), arcilla (roja,
+    /// gris), arena y grava (canto rodado, balasto).
+    pub fn derivar(&mut self) {
+        let m = &self.mat;
+        self.piedra = m[Material::Granito.i()].max(m[Material::Gneis.i()]);
+        self.arcilla = m[Material::ArcillaRoja.i()].max(m[Material::ArcillaGris.i()]);
+        self.arena = m[Material::Arena.i()];
+        self.grava = m[Material::CantoRodado.i()].max(0.8 * m[Material::Balasto.i()]);
+    }
+
+    /// El material de mayor ley (y la ley).
+    #[allow(dead_code)]
+    pub fn principal(&self) -> Option<(Material, f32)> {
+        Material::TODOS.into_iter().map(|m| (m, self.mat[m.i()])).filter(|x| x.1 >= MINIMO_MATERIAL).max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
     }
 
     fn sumar(&mut self, o: &RecursosLote, w: f32) {
@@ -111,6 +145,9 @@ impl RecursosLote {
         self.arena += o.arena * w;
         self.grava += o.grava * w;
         self.ip += o.ip * w;
+        for k in 0..NMAT {
+            self.mat[k] += o.mat[k] * w;
+        }
     }
 
     /// El mejor material para una industria («arcilla y piedra a mano»).
@@ -248,18 +285,16 @@ impl<'a> Recursos<'a> {
                 let g = t.grupo_coneat(x, z).and_then(|(i, _)| tabla().grupos.get(i as usize - 1));
                 let gen = peso_aptitud(g.and_then(|g| g.aptitud.as_deref()));
                 let cv = peso_cultivo(g.and_then(|g| g.cultivo_verano.as_deref()));
-                let mut m = [0.0f32; 4];
-                for (k, v) in m.iter_mut().enumerate() {
-                    *v = t.mineral(k, x, z).unwrap_or(0.0);
+                let mut mat = [0.0f32; NMAT];
+                for (k, v) in mat.iter_mut().enumerate() {
+                    *v = t.material(k, x, z).unwrap_or(0.0).clamp(0.0, 1.0);
                 }
                 RecursosLote {
                     cultivo: 0.5 * (ip / 210.0).clamp(0.0, 1.0) + 0.5 * cv,
                     pastoreo: 0.15 + 0.45 * (ip / 170.0).clamp(0.0, 1.0) + 0.4 * gen,
-                    piedra: m[MINERAL_PIEDRA],
-                    arcilla: m[MINERAL_ARCILLA],
-                    arena: m[MINERAL_ARENA],
-                    grava: m[MINERAL_GRAVA],
                     ip,
+                    mat,
+                    ..Default::default()
                 }
             }
             None => self.ficticio(x, z, h, s, da, hw),
@@ -271,7 +306,11 @@ impl<'a> Recursos<'a> {
         r.cultivo *= (1.0 - smoothstep(0.06, 0.2, s)) * (1.0 - 0.85 * banado) * (1.0 - 1.4 * roca).max(0.0) * (1.0 - 0.9 * arena_suelta);
         r.pastoreo *= (1.0 - 0.5 * smoothstep(0.15, 0.4, s)) * (1.0 - 0.35 * banado) * (1.0 - 1.1 * roca).max(0.1) * (1.0 - 0.75 * arena_suelta);
         // La piedra en laderas y crestas se saca más fácil; en el bañado no hay cantera.
-        r.piedra = (r.piedra * (0.85 + 0.6 * smoothstep(0.04, 0.2, s)) * (1.0 - 0.8 * banado)).clamp(0.0, 1.0);
+        let k = (0.85 + 0.6 * smoothstep(0.04, 0.2, s)) * (1.0 - 0.8 * banado);
+        for m in [Material::Granito, Material::Gneis] {
+            r.mat[m.i()] = (r.mat[m.i()] * k).clamp(0.0, 1.0);
+        }
+        r.derivar();
         r.cultivo = r.cultivo.clamp(0.0, 1.0);
         r.pastoreo = r.pastoreo.clamp(0.0, 1.0);
         r
@@ -283,15 +322,24 @@ impl<'a> Recursos<'a> {
         let costa = t.sea_distance(x, z);
         let arroyo = 1.0 - smoothstep(hw + 20.0, 350.0, da);
         let ip = (130.0 - 300.0 * s - (h - 30.0).max(0.0) * 0.8).clamp(20.0, 200.0);
-        RecursosLote {
-            cultivo: 0.5 * (ip / 210.0) + 0.3,
-            pastoreo: 0.15 + 0.45 * (ip / 170.0).min(1.0) + 0.3,
-            piedra: (0.85 * smoothstep(0.07, 0.22, s) + 0.25 * smoothstep(25.0, 60.0, h)).min(1.0),
-            arcilla: (0.3 + 0.55 * arroyo + 0.3 * (1.0 - smoothstep(60.0, 300.0, costa))).min(0.95),
-            arena: 0.9 * (1.0 - smoothstep(30.0, 350.0, costa)),
-            grava: 0.6 * (1.0 - smoothstep(hw + 5.0, hw + 40.0, da)) * smoothstep(0.03, 0.1, s).max(0.3),
-            ip,
-        }
+        let piedra = (0.85 * smoothstep(0.07, 0.22, s) + 0.25 * smoothstep(25.0, 60.0, h)).min(1.0);
+        let arcilla = (0.3 + 0.55 * arroyo + 0.3 * (1.0 - smoothstep(60.0, 300.0, costa))).min(0.95);
+        let mut mat = [0.0f32; NMAT];
+        // Sin carta geológica: granito en lo alto, gneis en las laderas bajas; el barro de los
+        // bajos es gris, el de las lomadas rojo; nada de caliza.
+        let alto = smoothstep(20.0, 45.0, h);
+        mat[Material::Granito.i()] = piedra * alto;
+        mat[Material::Gneis.i()] = piedra * (1.0 - alto);
+        mat[Material::Balasto.i()] = 0.5 * piedra * (1.0 - smoothstep(0.1, 0.25, s));
+        mat[Material::CantoRodado.i()] = 0.6 * (1.0 - smoothstep(hw + 5.0, hw + 40.0, da)) * smoothstep(0.03, 0.1, s).max(0.3);
+        mat[Material::Arena.i()] = 0.9 * (1.0 - smoothstep(30.0, 350.0, costa));
+        mat[Material::ArcillaRoja.i()] = arcilla * (1.0 - 0.5 * arroyo);
+        mat[Material::ArcillaGris.i()] = arcilla * arroyo;
+        mat[Material::Tosca.i()] = 0.4 * (1.0 - arroyo) * (1.0 - piedra);
+        mat[Material::Turba.i()] = 0.2 * arroyo;
+        let mut r = RecursosLote { cultivo: 0.5 * (ip / 210.0) + 0.3, pastoreo: 0.15 + 0.45 * (ip / 170.0).min(1.0) + 0.3, ip, mat, ..Default::default() };
+        r.derivar();
+        r
     }
 
     /// Promedio en un solar (centro y cuatro puntos hacia las esquinas).
@@ -336,6 +384,42 @@ impl<'a> Recursos<'a> {
     /// Media de la aptitud para cultivo y pastoreo en el campo alrededor de un punto (muestras
     /// cada 300 m sobre tierra, hasta `radio`): para la producción de las chacras y estancias
     /// privadas del entorno.
+    /// La mejor ley de cada material a menos de `radio` del punto (muestras cada 100 m, o
+    /// cada `radio / 6` si es más chico), sobre tierra. Para el sistema de materiales de
+    /// construcción: qué se puede sacar cerca de una obra.
+    #[allow(dead_code)] // API para el sistema de materiales de construcción
+    pub fn materiales_cerca(&self, p: Vec2, radio: f32) -> [f32; NMAT] {
+        let paso = (radio / 6.0).clamp(20.0, 100.0);
+        let n = (radio / paso).ceil() as i32;
+        let mut out = [0.0f32; NMAT];
+        for j in -n..=n {
+            for i in -n..=n {
+                let q = p + Vec2::new(i as f32, j as f32) * paso;
+                if q.distance(p) > radio {
+                    continue;
+                }
+                let r = self.en_punto(q);
+                for k in 0..NMAT {
+                    out[k] = out[k].max(r.mat[k]);
+                }
+            }
+        }
+        out
+    }
+
+    /// Cuánto hay cerca (la mejor ley, 0..1) de un material de construcción ("piedra",
+    /// "ladrillo", "teja", "cal", "arena", "adobe"…), según el catálogo; 0 si no sale del suelo
+    /// del mapa (se importa).
+    #[allow(dead_code)]
+    pub fn construccion_cerca(&self, clave: &str, p: Vec2, radio: f32) -> f32 {
+        let mats = materiales::materiales_de_construccion(clave);
+        if mats.is_empty() {
+            return 0.0;
+        }
+        let cerca = self.materiales_cerca(p, radio);
+        mats.iter().map(|m| cerca[m.i()]).fold(0.0, f32::max)
+    }
+
     pub fn media_entorno(&self, centro: Vec2, radio: f32) -> (f32, f32) {
         let paso = 300.0;
         let n = (radio / paso) as i32;
@@ -362,15 +446,28 @@ impl<'a> Recursos<'a> {
 pub const MINIMO_MATERIAL: f32 = 0.15;
 
 /// Rinde de un edificio del campo o de la industria según su sitio (1,0 = un sitio normal):
-/// la chacra según la tierra para cultivo, la estancia según las pasturas, el horno según la
-/// arcilla y la cantera según la piedra (sin material no rinden nada). Los demás, 1.
+/// la chacra según la tierra para cultivo, la estancia según las pasturas, el horno según su
+/// arcilla, la cantera según la ley de lo que saca (granito, gneis, balasto, canto, arena o
+/// tosca) y la calera según su caliza o conchilla (sin material no rinden nada). Los demás, 1.
 pub fn rinde(k: Kind, r: &RecursosLote) -> f32 {
     match k {
         Kind::Chacra => 0.35 + 1.0 * r.cultivo,
         Kind::Estancia => 0.4 + 0.9 * r.pastoreo,
         Kind::Horno => rinde_material(r.arcilla),
-        Kind::Cantera => rinde_material(r.piedra),
+        Kind::Cantera => rinde_material(materiales::ley_cantera(r)),
+        Kind::Calera => rinde_material(r.de(Uso::Cal)),
         _ => 1.0,
+    }
+}
+
+/// Lo que produce un edificio de material según su sitio (cantera, horno, calera); `None` para
+/// los demás.
+pub fn produccion_sitio(k: Kind, r: &RecursosLote) -> Option<materiales::ProduccionSitio> {
+    match k {
+        Kind::Cantera => Some(materiales::producto_cantera(r)),
+        Kind::Horno => Some(materiales::producto_horno(r)),
+        Kind::Calera => Some(materiales::producto_calera(r)),
+        _ => None,
     }
 }
 
@@ -387,6 +484,7 @@ pub fn rinde_por_clave(recurso: Option<&str>, r: &RecursosLote) -> f32 {
         None => 1.0,
         Some(Uso::Cultivo) => 0.35 + r.cultivo,
         Some(Uso::Pastoreo) => 0.4 + 0.9 * r.pastoreo,
+        Some(Uso::Piedra) => rinde_material(materiales::ley_cantera(r).max(r.piedra)),
         Some(u) => rinde_material(r.de(u)),
     }
 }

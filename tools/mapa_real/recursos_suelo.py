@@ -1,15 +1,16 @@
 """
 Recursos del suelo del mapa real de Montevideo: calidad de la tierra (índice de productividad
-CONEAT y aptitud para cultivos), geología (DINAMIGE) y materiales (piedra, arcilla, arena y
-canto rodado). Lo llama `construir_mapa.py` (paso «Recursos del suelo») o se corre solo:
+CONEAT y aptitud para cultivos), geología (DINAMIGE) y materiales con tipo (granito, gneis,
+balasto, canto rodado, arena, arcilla roja, arcilla gris, tosca, conchilla, caliza y turba).
+Lo llama `construir_mapa.py` (paso «Recursos del suelo») o se corre solo:
 
   python3 tools/mapa_real/construir_mapa.py --cache CARPETA --solo-recursos
 
 que usa las alturas, biomas, arroyos, costa y rocosidad ya generados en assets/mapas/montevideo/
 y lo que haya en la caché (sin red, si la caché está completa). Ver
-docs/sistemas/recursos-del-suelo.md.
+docs/sistemas/recursos-del-suelo.md y docs/sistemas/recursos-de-uruguay.md.
 
-Salida (todas en la grilla de altura.bin / contexto.bin, filas de norte a sur, salvo minerales):
+Salida (todas en la grilla de altura.bin / contexto.bin, filas de norte a sur, salvo materiales):
   suelos.bin / suelos_contexto.bin          uint8: índice del grupo CONEAT en suelos.json
                                             (bits 0-6, 1..127) + 128 si es una ESTIMACIÓN
                                             (zona sin dato CONEAT: la ciudad actual, rellenada
@@ -18,9 +19,10 @@ Salida (todas en la grilla de altura.bin / contexto.bin, filas de norte a sur, s
   productividad.bin / _contexto.bin         uint8: índice de productividad CONEAT (media
                                             nacional 100) del grupo; 0 en el agua.
   geologia.bin / geologia_contexto.bin      uint8: índice de la unidad geológica en suelos.json.
-  minerales.bin / minerales_contexto.bin    4 bytes por muestra (piedra, arcilla, arena, canto
-                                            rodado), 0..255 = 0..1; minerales.bin en una grilla
-                                            de 40 m (601 × 601), el entorno en la de 100 m.
+  materiales.bin / materiales_contexto.bin  11 bytes por muestra, uno por material (orden de
+                                            MATERIALES), 0..255 = ley 0..1; materiales.bin en una
+                                            grilla de 40 m (601 × 601), el entorno en una de
+                                            200 m (371 × 371) desde −25 km.
   suelos.json                               tabla de grupos (IP, aptitud, cultivos de verano,
                                             limitantes), unidades geológicas y fuentes.
 """
@@ -32,6 +34,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 import construir_mapa as cm
+import recursos_uruguay as ru
 
 # --- Fuentes -------------------------------------------------------------------------------
 # Productividad por grupo CONEAT (campo PROD_SUE) y grupo (SC), MGAP-RENARE: servicio ArcGIS del
@@ -44,9 +47,9 @@ URL_GRUPOS_INT = "https://dgrn.mgap.gub.uy/arcgis/rest/services/TEMATICOS/IntCon
 # Carta geológica (DINAMIGE, MIEM): unidades geológicas, mapa base 2017.
 URL_GEOLOGIA = ("https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/"
                 "Mapa_Base_Unidades_Geologicas_2017_GeoS/MapServer/2/query")
-# Catastro minero (DINAMIGE): concesiones para explotar otorgadas (4) y canteras de obra
-# pública (5). Solo la geometría: el servicio no dice qué mineral.
-URL_MINERIA = "https://geoportal.miem.gub.uy/arcgis1091/rest/services/Dinamige_GeoS/CatastroMineroGeoS/MapServer/{capa}/query"
+# Catastro minero con la sustancia de cada título: ver recursos_uruguay.py (Consulta Minera
+# 2026 de DINAMIGE). El servicio público CatastroMineroGeoS que se usaba antes solo daba la
+# geometría.
 # Actividad minera abandonada (canteras y pozos viejos), hidrografía de la IDE.
 CAPAS_MINERA_IDE = ["hidrografia:actividad_minera_abandonada_a", "hidrografia_urbana:actividad_minera_abandonada_a"]
 
@@ -91,18 +94,35 @@ GEO_CLASE = {
     73: "arena", 76: "arena",
     60: "arenisca", 63: "arenisca", 69: "arenisca",
 }
-# Materiales que da cada clase (piedra, arcilla, arena, canto rodado), de la descripción de la
-# unidad en la carta (ver docs/sistemas/recursos-del-suelo.md). Son pesos de diseño (0..1).
-GEO_MATERIAL = {
-    "roca": (0.70, 0.08, 0.0, 0.0),
-    "loess": (0.0, 0.70, 0.05, 0.0),
-    "aluvion": (0.0, 0.55, 0.35, 0.25),
-    "arena": (0.0, 0.10, 0.85, 0.05),
-    "arenisca": (0.15, 0.25, 0.45, 0.30),
-    None: (0.0, 0.3, 0.1, 0.0),
+# Materiales con tipo (canales de materiales.bin, en este orden; los ids son los del catálogo
+# assets/datos/recursos_uruguay.json y el enum `Material` del motor).
+MATERIALES = ["granito", "gneis", "balasto", "canto_rodado", "arena", "arcilla_roja", "arcilla_gris", "tosca",
+              "conchilla", "caliza", "turba"]
+MAT = {m: k for k, m in enumerate(MATERIALES)}
+# Lo que da cada unidad geológica de la ventana (pesos de diseño 0..1, ESTIMADOS de la
+# descripción litológica de la carta 1:500.000 y de la memoria de la carta geológica de
+# Montevideo; ver docs/sistemas/recursos-de-uruguay.md). No hay ninguna unidad calcárea: la
+# caliza queda en 0 en todo el mapa.
+GEO_MAT = {
+    3: {"granito": 0.50, "gneis": 0.35, "balasto": 0.35},           # Migmatitas y granitos de Suárez
+    4: {"gneis": 0.75, "balasto": 0.30},                            # Ortogneises
+    5: {"gneis": 0.80, "balasto": 0.30},                            # Formación Montevideo
+    11: {"granito": 0.75, "balasto": 0.45},                         # Granitos transamazónicos
+    12: {"granito": 0.80, "balasto": 0.45},                         # Granitoides tardíos
+    13: {"gneis": 0.60, "granito": 0.15, "balasto": 0.30},          # Zonas de cizalla (milonitas)
+    41: {"granito": 0.85, "balasto": 0.80},                         # Granito de La Paz (alterado: balasto)
+    60: {"arena": 0.45, "balasto": 0.35, "canto_rodado": 0.25, "arcilla_roja": 0.20},   # Migues
+    63: {"arena": 0.45, "balasto": 0.45, "canto_rodado": 0.35, "arcilla_roja": 0.15},   # Mercedes
+    69: {"arena": 0.55, "balasto": 0.40, "canto_rodado": 0.35, "arcilla_gris": 0.20},   # Raigón
+    65: {"arcilla_roja": 0.55, "tosca": 0.60},                      # Fray Bentos («tosca parda»)
+    70: {"arcilla_roja": 0.75, "tosca": 0.50},                      # Libertad (lodolitas con carbonato)
+    74: {"arcilla_roja": 0.70, "tosca": 0.30, "arcilla_gris": 0.15},  # Dolores
+    73: {"arena": 0.80, "arcilla_gris": 0.15},                      # Chuy
+    76: {"arena": 0.85},                                            # Arenas litorales y fluviales
+    75: {"arena": 0.45, "arcilla_gris": 0.45, "canto_rodado": 0.25, "conchilla": 0.35},  # Villa Soriano
+    77: {"arcilla_gris": 0.55, "arena": 0.30, "canto_rodado": 0.20, "turba": 0.15},      # Actual (aluviones, turbas)
 }
-# Ajuste de la arcilla por unidad (Dolores: lodolitas en lo bajo; Fray Bentos: más arenoso).
-GEO_ARCILLA = {74: 0.75, 70: 0.55, 65: 0.40, 77: 0.60, 75: 0.45}
+GEO_MAT_SIN_DATO = {"arcilla_roja": 0.3, "arena": 0.1}
 
 
 def _consulta(url, params):
@@ -195,20 +215,19 @@ def geologia(cache):
 
 
 def mineria(cache):
-    """Polígonos de minería: concesiones y canteras de obra pública (DINAMIGE) y actividad
-    minera abandonada (IDE). Lista de (fuente, geometría GeoJSON)."""
+    """Polígonos de minería con lo que se saca: los títulos de la Consulta Minera 2026 de
+    DINAMIGE (con sus materiales del catálogo; [] si el título no dice la sustancia) y la
+    actividad minera abandonada de la IDE (sin sustancia). Lista de (fuente, materiales,
+    geometría GeoJSON) dentro de la ventana del mapa y su entorno."""
+
+    lo, la_s, le, la_n = cm.bbox_geo()
     out = []
-    for capa, nombre in ((4, "concesion"), (5, "cantera_obra_publica")):
-        try:
-            fs = _cache_json(cache, f"dinamige_mineria_{capa}_{int(cm.OUTER)}.json", lambda c=capa: _geojson_paginado(URL_MINERIA.format(capa=c), {
-                "where": "1=1", "geometry": _ventana(), "geometryType": "esriGeometryEnvelope", "inSR": 4326, "outSR": 4326,
-                "spatialRel": "esriSpatialRelIntersects", "outFields": "OBJECTID", "returnGeometry": "true"}))
-            out += [(nombre, f.get("geometry")) for f in fs]
-        except Exception as e:  # noqa: BLE001
-            print(f"  sin el catastro minero, capa {capa} ({e})", flush=True)
+    for t in ru.titulos(cache, ru.catalogo()):
+        if lo <= t["lon"] <= le and la_s <= t["lat"] <= la_n:
+            out.append((t["capa"], t["materiales"], t["geometria"]))
     for capa in CAPAS_MINERA_IDE:
         try:
-            out += [("abandonada", f.get("geometry")) for f in cm.bajar_capa_wfs(cache, capa)]
+            out += [("abandonada", [], f.get("geometry")) for f in cm.bajar_capa_wfs(cache, capa)]
         except Exception as e:  # noqa: BLE001
             print(f"  sin {capa} ({e})", flush=True)
     return out
@@ -324,7 +343,8 @@ def construir(cache, salida, h, h_o, biomas, biomas_o, arroyos_main, arroyos_ctx
         c = pr.get("Codigo")
         if c is not None and c not in unidades:
             unidades[c] = {"codigo": c, "unidad": pr.get("Unidad"), "periodo": " ".join(x for x in (pr.get("Periodo"), pr.get("Epoca")) if x and x.strip()),
-                           "descripcion": pr.get("Descripcion"), "clase": GEO_CLASE.get(c)}
+                           "descripcion": pr.get("Descripcion"), "clase": GEO_CLASE.get(c),
+                           "materiales": GEO_MAT.get(c, GEO_MAT_SIN_DATO)}
     lista_geo = [unidades[c] for c in sorted(unidades)]
     gidx = {u["codigo"]: k + 1 for k, u in enumerate(lista_geo)}
 
@@ -369,60 +389,103 @@ def construir(cache, salida, h, h_o, biomas, biomas_o, arroyos_main, arroyos_ctx
         for g in grupos:
             ip_tabla[idx_de[g["sc"]]] = g["ip"] if g["ip"] is not None else 100.0
         ip = np.where(tierra & (grupo_final > 0), ip_tabla[grupo_final], 0.0)
-        # Materiales: clase geológica de cada celda, CONEAT y relieve.
-        mat = np.zeros((n, n, 4), dtype=np.float32)
+        # Materiales con tipo: la unidad geológica de cada celda, CONEAT, relieve, costa,
+        # arroyos y la minería conocida (ver docs/sistemas/recursos-de-uruguay.md).
+        mat = np.zeros((n, n, len(MATERIALES)), dtype=np.float32)
         for c in set(codigo_geo.ravel().tolist()):
             m = codigo_geo == c
-            base = GEO_MATERIAL[GEO_CLASE.get(c)]
-            for k in range(4):
-                mat[..., k][m] = base[k]
-            if c in GEO_ARCILLA:
-                mat[..., 1][m] = GEO_ARCILLA[c]
+            for nom, w in GEO_MAT.get(c, GEO_MAT_SIN_DATO).items():
+                mat[..., MAT[nom]][m] = w
         sc_de = np.array([""] + [g["sc"] for g in grupos], dtype=object)
         zona = np.array([s.split(".")[0].lstrip("0") for s in sc_de], dtype=object)
         zona_celda = zona[grupo_final]
-        # Piedra: el basamento da piedra; los afloramientos (rocosidad CONEAT) y las colinas de
-        # suelo superficial (grupos 1, 2, 4, 5) la dejan a mano. Sobre sedimentos, nada.
-        piedra = mat[..., 0] + 0.6 * np.clip(roc / 0.3, 0, 1) * (mat[..., 0] > 0)
-        piedra += np.where(np.isin(zona_celda, ["1", "2", "4", "5"]) & (mat[..., 0] > 0), 0.15, 0.0)
-        piedra = np.maximum(piedra, _costa_rocosa(tramos, desde, paso, n, alto))
-        # Arcilla: limos y lodolitas, más en los bajos junto a los arroyos (aluvión fino) y en
-        # los suelos de planicie (grupos 03: hidromórficos, arcillosos).
+        G, N = MAT["granito"], MAT["gneis"]
+        roca_base = np.maximum(mat[..., G], mat[..., N])
+        sobre_roca = roca_base > 0.3
+        # Qué roca es (granito o gneis) donde hay piedra: la proporción de la unidad; sobre
+        # sedimentos (la costa rocosa sobre la carta gruesa), gneis, la roca de la costa.
+        frac_granito = np.where(roca_base > 0, mat[..., G] / np.maximum(mat[..., G] + mat[..., N], 1e-6), 0.0)
+        # Piedra: el basamento; los afloramientos (rocosidad CONEAT) y las colinas de suelo
+        # superficial (grupos 1, 2, 4, 5) la dejan a mano. Sobre sedimentos, nada.
+        extra = 0.6 * np.clip(roc / 0.3, 0, 1) * (roca_base > 0)
+        extra += np.where(np.isin(zona_celda, ["1", "2", "4", "5"]) & (roca_base > 0), 0.15, 0.0)
+        costa_roca = _costa_rocosa(tramos, desde, paso, n, alto)
+        piedra = np.maximum(roca_base + extra, costa_roca)
+        frac_granito = np.where((roca_base <= 0) & (costa_roca > 0), 0.0, frac_granito)
+        granito = piedra * frac_granito
+        gneis = piedra * (1.0 - frac_granito)
+        # Balasto: la roca alterada bajo el suelo (no donde aflora sana) y las areniscas
+        # conglomerádicas.
+        balasto = mat[..., MAT["balasto"]] * (1.0 - 0.5 * np.clip(roc / 0.3, 0, 1))
+        # Arcillas: la roja (lodolitas) en las lomadas; la gris en los bajos junto a los arroyos
+        # (aluvión fino), en los suelos de planicie (grupos 03, hidromórficos) y en los bañados.
         cauce = _lineas_arroyo(arr, desde, paso, n, 3.0)
         cerca_arroyo = _cercania(cauce, max(1, int(round(300.0 / paso))))
         bajo = (alto - _vecinos_min(alto, max(1, int(round(300.0 / paso))))) < 4.0
-        arcilla = mat[..., 1] + 0.25 * cerca_arroyo * bajo * (mat[..., 0] == 0)
-        arcilla += np.where(zona_celda == "3", 0.15, 0.0)
-        arcilla = np.where(zona_celda == "7", arcilla * 0.3, arcilla)
-        # Arena: playas y bancos (IDE), médanos detrás de las playas, grupos 07 (arenas) y la
-        # geología arenosa.
+        vega = cerca_arroyo * bajo * ~sobre_roca
+        banado = bio == 2
+        roja = mat[..., MAT["arcilla_roja"]] * (1.0 - 0.4 * vega)
+        roja = np.where(zona_celda == "7", roja * 0.3, roja)
+        gris = mat[..., MAT["arcilla_gris"]] + 0.35 * vega + np.where(zona_celda == "3", 0.2, 0.0) + 0.3 * banado
+        gris = np.where(zona_celda == "7", gris * 0.3, gris)
+        # Tosca: en los limos de las lomadas, no en los bajos húmedos.
+        tosca = mat[..., MAT["tosca"]] * (1.0 - 0.8 * vega) * ~banado
+        # Arena: playas y bancos (IDE), médanos detrás de las playas, grupos 07 (arenas), la
+        # geología arenosa y la orilla de los arroyos anchos.
         playa = np.isin(bio, [1, 3])
-        arena = np.maximum(mat[..., 2], 0.95 * playa)
+        arena = np.maximum(mat[..., MAT["arena"]], 0.95 * playa)
         arena = np.maximum(arena, 0.7 * _cercania(playa, max(1, int(round(400.0 / paso)))) * tierra)
         arena = np.maximum(arena, np.where(zona_celda == "7", 0.9, 0.0))
         cauce_ancho = _lineas_arroyo([a for a in arr if max(p[2] for p in a) >= 8.0], desde, paso, n, 8.0)
         arena = np.maximum(arena, 0.4 * _cercania(cauce_ancho, max(1, int(round(40.0 / paso)))))
-        # Canto rodado: el lecho de los arroyos que bajan del basamento y las unidades con
-        # cantos (Villa Soriano, areniscas conglomerádicas).
-        roca_cerca = _cercania(mat[..., 0] > 0.3, max(1, int(round(1500.0 / paso))))
+        # Canto rodado: el lecho de los arroyos que bajan del basamento y las unidades con cantos.
+        roca_cerca = _cercania(sobre_roca, max(1, int(round(1500.0 / paso))))
         lecho = _cercania(_lineas_arroyo(arr, desde, paso, n, 4.0), max(1, int(round(40.0 / paso))))
-        grava = np.maximum(mat[..., 3], 0.75 * lecho * roca_cerca)
-        # Minería real (concesiones, canteras de obra pública, pozos abandonados): lo que se
-        # explotó; sobre roca es piedra, sobre sedimentos, arcilla (tosca) o arena.
-        polis = [p for _, g in minas for p in cm._poligonos(g)]
-        mina = np.asarray(cm.rasterizar(polis, desde, paso, n, borde=True)) > 0
-        mina_cerca = _cercania(mina, max(1, int(round(200.0 / paso))))
-        sobre_roca = mat[..., 0] > 0.3
-        piedra = np.maximum(piedra, np.where(sobre_roca, 0.95 * mina_cerca, 0.0))
-        arcilla = np.maximum(arcilla, np.where(~sobre_roca & (mat[..., 1] >= mat[..., 2]), 0.85 * mina_cerca, 0.0))
-        arena = np.maximum(arena, np.where(~sobre_roca & (mat[..., 2] > mat[..., 1]), 0.85 * mina_cerca, 0.0))
-        minerales = np.stack([piedra, arcilla, arena, grava], axis=-1)
-        minerales = np.clip(minerales, 0.0, 1.0) * tierra[..., None]
+        canto = np.maximum(mat[..., MAT["canto_rodado"]], 0.75 * lecho * roca_cerca)
+        # Conchilla: la Formación Villa Soriano (estimado); turba: bañados y aluviones bajos.
+        conchilla = mat[..., MAT["conchilla"]]
+        turba = np.maximum(0.55 * banado, mat[..., MAT["turba"]] * vega)
+        caliza = mat[..., MAT["caliza"]]
+        canales = {"granito": granito, "gneis": gneis, "balasto": balasto, "canto_rodado": canto, "arena": arena,
+                   "arcilla_roja": roja, "arcilla_gris": gris, "tosca": tosca, "conchilla": conchilla, "caliza": caliza, "turba": turba}
+        out = np.stack([canales[m] for m in MATERIALES], axis=-1)
+        # Minería conocida: cada título marca lo que dice que saca (a 200 m del polígono); la
+        # piedra partida («roca») es granito o gneis según la unidad; los títulos sin sustancia
+        # y los pozos abandonados, lo que da la geología (piedra sobre roca; arcilla o tosca
+        # sobre limos; arena sobre arenas).
+        cerca = max(1, int(round(200.0 / paso)))
+        mina = np.zeros((n, n), dtype=bool)
+        por_material = {}
+        for _fuente, mats, g in minas:
+            for m in (mats or ["?"]):
+                por_material.setdefault(m, []).extend(cm._poligonos(g))
+        for m, polis in por_material.items():
+            mk = np.asarray(cm.rasterizar(polis, desde, paso, n, borde=True)) > 0
+            if not mk.any():
+                continue
+            mina |= mk
+            k = _cercania(mk, cerca)
+            if m in ("roca", "?"):
+                if m == "?":
+                    # Sin sustancia: según la geología del lugar.
+                    sed_arena = ~sobre_roca & (mat[..., MAT["arena"]] > mat[..., MAT["arcilla_roja"]])
+                    sed_limo = ~sobre_roca & ~sed_arena
+                    out[..., MAT["arena"]] = np.maximum(out[..., MAT["arena"]], 0.85 * k * sed_arena)
+                    out[..., MAT["arcilla_roja"]] = np.maximum(out[..., MAT["arcilla_roja"]], 0.75 * k * sed_limo)
+                    out[..., MAT["tosca"]] = np.maximum(out[..., MAT["tosca"]], 0.75 * k * sed_limo)
+                es_g = frac_granito >= 0.5
+                out[..., G] = np.maximum(out[..., G], 0.95 * k * sobre_roca * es_g)
+                out[..., N] = np.maximum(out[..., N], 0.95 * k * sobre_roca * ~es_g)
+            elif m in MAT:
+                out[..., MAT[m]] = np.maximum(out[..., MAT[m]], 0.9 * k)
+        materiales = np.clip(out, 0.0, 1.0) * tierra[..., None]
         resultados[nombre] = {"suelos": suelos, "ip": ip, "geologia": np.where(tierra | (gunid > 0), gunid, 0).astype(np.uint8),
-                              "minerales": minerales, "estimado": estimado, "tierra": tierra, "mina": mina}
+                              "materiales": materiales, "estimado": estimado, "tierra": tierra, "mina": mina}
 
-    # Minerales del mapa a 40 m (la mitad de resolución: bastan para elegir canteras).
-    mm = resultados["main"]["minerales"][::2, ::2, :]
+    # Materiales a la mitad de resolución (bastan para elegir canteras): el mapa a 40 m, el
+    # entorno a 200 m.
+    mm = resultados["main"]["materiales"][::2, ::2, :]
+    mc = resultados["ctx"]["materiales"][::2, ::2, :]
     def u8(v):
         return np.clip(np.round(v * 255.0), 0, 255).astype(np.uint8)
     for nombre, suf in (("main", ""), ("ctx", "_contexto")):
@@ -433,23 +496,32 @@ def construir(cache, salida, h, h_o, biomas, biomas_o, arroyos_main, arroyos_ctx
             f.write(np.clip(np.round(r["ip"]), 0, 255).astype(np.uint8).tobytes())
         with open(os.path.join(salida, f"geologia{suf}.bin"), "wb") as f:
             f.write(r["geologia"].tobytes())
-        with open(os.path.join(salida, f"minerales{suf}.bin"), "wb") as f:
-            f.write(u8(mm if nombre == "main" else r["minerales"]).tobytes())
+        with open(os.path.join(salida, f"materiales{suf}.bin"), "wb") as f:
+            f.write(u8(mm if nombre == "main" else mc).tobytes())
+        # Los cuatro canales genéricos de antes quedan reemplazados por los materiales.
+        viejo = os.path.join(salida, f"minerales{suf}.bin")
+        if os.path.exists(viejo):
+            os.remove(viejo)
     main = resultados["main"]
     tierra = main["tierra"]
+    tierra_m = tierra[::2, ::2]
     resumen = {
         "archivos": {
             "suelos": "suelos.bin / suelos_contexto.bin: uint8, índice del grupo en suelos.json (bits 0-6) + 128 si es estimación; 0 = agua",
             "productividad": "productividad.bin / productividad_contexto.bin: uint8, índice de productividad CONEAT (media nacional 100); 0 en el agua",
             "geologia": "geologia.bin / geologia_contexto.bin: uint8, índice de la unidad en suelos.json (geologia); 0 = sin dato",
-            "minerales": "minerales.bin (grilla de 40 m, 601 × 601) / minerales_contexto.bin (grilla de contexto): 4 bytes por muestra: piedra, arcilla, arena, canto rodado; 0..255 = 0..1",
+            "materiales": f"materiales.bin (grilla de 40 m, {mm.shape[0]} × {mm.shape[0]}) / materiales_contexto.bin (grilla de 200 m desde {-cm.OUTER:.0f} m, {mc.shape[0]} × {mc.shape[0]}): {len(MATERIALES)} bytes por muestra, en el orden de «materiales»; 0..255 = ley 0..1",
         },
-        "minerales_paso_m": cm.STEP * 2, "minerales_muestras": int(mm.shape[0]),
+        "materiales": MATERIALES,
+        "materiales_paso_m": cm.STEP * 2, "materiales_muestras": int(mm.shape[0]),
+        "materiales_contexto_paso_m": cm.OUTER_STEP * 2, "materiales_contexto_muestras": int(mc.shape[0]),
         "fuente_ip": fuente_ip, "fuente_aptitud_cultivo": fuente_apt,
         "fraccion_estimada": round(float(main["estimado"].sum()) / max(1, int(tierra.sum())), 3),
         "ip_medio_tierra": round(float(main["ip"][tierra].mean()), 1),
         "celdas_con_mineria": int(main["mina"].sum()),
-        "media_minerales": {k: round(float(main["minerales"][..., i][tierra].mean()), 3) for i, k in enumerate(["piedra", "arcilla", "arena", "canto_rodado"])},
+        "titulos_mineros_en_la_ventana": len(minas),
+        "media_materiales": {k: round(float(mm[..., i][tierra_m].mean()), 3) for i, k in enumerate(MATERIALES)},
+        "fraccion_con_material": {k: round(float((mm[..., i][tierra_m] >= 0.15).mean()), 3) for i, k in enumerate(MATERIALES)},
     }
     cm.guardar_json(os.path.join(salida, "suelos.json"), {
         "descripcion": "Grupos CONEAT (MGAP-RENARE) con su índice de productividad (PROD_SUE) y aptitud para cultivos de verano de secano, y unidades geológicas (DINAMIGE, mapa base 2017) presentes en el mapa. Índices de suelos.bin y geologia.bin. Ver docs/sistemas/recursos-del-suelo.md.",
@@ -459,7 +531,8 @@ def construir(cache, salida, h, h_o, biomas, biomas_o, arroyos_main, arroyos_ctx
             "productividad": URL_CONSULTA + " (groupByFieldsForStatistics=SC,PROD_SUE)",
             "aptitud_cultivo": URL_APT_CULTIVO + " + " + URL_GRUPOS_INT,
             "geologia": URL_GEOLOGIA,
-            "mineria": [URL_MINERIA.format(capa=4), URL_MINERIA.format(capa=5)] + ["WFS " + cm.IDE_WFS.split("?")[0] + " " + c for c in CAPAS_MINERA_IDE],
+            "mineria": [ru.URL_CONSULTA_MINERA.format(capa="{2,3,4,5}")] + ["WFS " + cm.IDE_WFS.split("?")[0] + " " + c for c in CAPAS_MINERA_IDE],
+            "materiales": "pesos por unidad geológica (GEO_MAT en tools/mapa_real/recursos_suelo.py) y catálogo assets/datos/recursos_uruguay.json",
         },
         "resumen": resumen,
     }, compacto=False)
@@ -485,9 +558,20 @@ def vista_previa(r, grupos, lista_geo, h):
     rgb = (1 - t) * np.array([0.78, 0.62, 0.40]) + t * np.array([0.15, 0.55, 0.15])
     rgb = np.where(r["estimado"][..., None], rgb * 0.55 + 0.45, rgb)
     guardar("recursos-productividad.jpg", rgb)
-    m = r["minerales"]
+    # Materiales: el color del que tiene más ley en cada celda (los mismos de la capa del juego).
+    m = r["materiales"]
     rgb = fondo * 0.7
-    for k, col in enumerate([(0.45, 0.45, 0.5), (0.80, 0.35, 0.15), (0.95, 0.85, 0.45), (0.35, 0.55, 0.85)]):
-        a = m[..., k][..., None]
-        rgb = rgb * (1 - a * 0.85) + np.array(col) * a * 0.85
+    k = np.argmax(m, axis=-1)
+    a = np.clip(np.max(m, axis=-1), 0, 1)[..., None]
+    col = np.array([COLOR_MATERIAL[x] for x in MATERIALES])[k]
+    rgb = rgb * (1 - a * 0.85) + col * a * 0.85
     guardar("recursos-minerales.jpg", rgb)
+
+
+# Colores de cada material (los mismos que `Material::color` en el motor).
+COLOR_MATERIAL = {
+    "granito": (0.85, 0.45, 0.55), "gneis": (0.40, 0.42, 0.50), "balasto": (0.62, 0.45, 0.30),
+    "canto_rodado": (0.35, 0.55, 0.85), "arena": (0.98, 0.86, 0.40), "arcilla_roja": (0.80, 0.30, 0.12),
+    "arcilla_gris": (0.50, 0.58, 0.62), "tosca": (0.92, 0.62, 0.18), "conchilla": (0.97, 0.97, 0.92),
+    "caliza": (0.92, 0.92, 0.80), "turba": (0.22, 0.16, 0.10),
+}
