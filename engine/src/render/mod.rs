@@ -156,6 +156,21 @@ fn box_visible(planes: &[Vec4; 6], lo: Vec3, hi: Vec3) -> bool {
     true
 }
 
+/// Radio de la Tierra × 2 (m): el vertex shader baja cada punto d²/2R respecto de la cámara
+/// (`curved()` en voxel.wgsl).
+pub const EARTH_2R: f32 = 12_742_000.0;
+
+/// Caja de una columna tal como se dibuja: con la curvatura, la geometría baja hasta d²/2R
+/// (d = distancia horizontal del ojo a la esquina más lejana). Sin esto, de lejos y con la
+/// cámara baja, una columna cuya caja quedaba apenas por encima del borde de arriba de la
+/// pantalla se descartaba aunque su terreno (más bajo) sí se veía.
+fn curved_box(eye: Vec3, lo: Vec3, hi: Vec3) -> (Vec3, Vec3) {
+    let dx = (eye.x - lo.x).abs().max((eye.x - hi.x).abs());
+    let dz = (eye.z - lo.z).abs().max((eye.z - hi.z).abs());
+    let drop = (dx * dx + dz * dz) / EARTH_2R;
+    (Vec3::new(lo.x, lo.y - drop, lo.z), hi)
+}
+
 /// Qué grupos de caras pueden verse desde `eye` para una caja: las caras que miran en
 /// sentido contrario a la cámara no se dibujan (orden de [`crate::mesher::DIRS`]).
 fn visible_dirs(eye: Vec3, lo: Vec3, hi: Vec3) -> [bool; 6] {
@@ -1180,7 +1195,10 @@ impl Renderer {
             .batches
             .iter()
             .chain(self.columns.values())
-            .filter(|b| box_visible(&vp, b.lo, b.hi))
+            .filter(|b| {
+                let (lo, hi) = curved_box(view.eye, b.lo, b.hi);
+                box_visible(&vp, lo, hi)
+            })
             .map(|b| (((b.lo + b.hi) * 0.5 - view.eye).length_squared(), b))
             .collect();
         list.sort_by(|a, b| {
@@ -1504,5 +1522,33 @@ pub fn overlay_box(out: &mut Vec<OverlayVertex>, a: Vec3, b: Vec3, color: [f32; 
     ];
     for q in quads {
         out.extend_from_slice(&[q[0], q[1], q[2], q[0], q[2], q[3]]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Una columna lejana cuya caja queda apenas por encima del borde superior de la vista,
+    /// pero cuyo terreno se dibuja más abajo por la curvatura, no se puede descartar.
+    #[test]
+    fn el_descarte_tiene_en_cuenta_la_curvatura() {
+        let cam = OrbitCamera { target: Vec3::new(0.0, 0.0, 0.0), yaw: 0.0, pitch: 8.0, distance: 200.0, fov_y: 50.0 };
+        let vp = cam.proj(16.0 / 9.0) * cam.view();
+        let planes = frustum_planes(vp);
+        let eye = cam.eye();
+        // Hacia adelante (-z), a 12 km: allí la curvatura baja 11 m.
+        let z = eye.z - 12_000.0;
+        // Altura del borde superior de la vista a esa distancia (rayo de arriba).
+        let (o, d) = cam.ray(640.0, 0.0, 1280.0, 720.0);
+        let t = (z - o.z) / d.z;
+        let top = o.y + d.y * t;
+        // Caja de 4 m de alto que empieza 3 m por encima del borde: sin curvatura no se ve.
+        let lo = Vec3::new(-1.0, top + 3.0, z - 1.0);
+        let hi = Vec3::new(1.0, top + 7.0, z + 1.0);
+        assert!(!box_visible(&planes, lo, hi));
+        let (clo, chi) = curved_box(eye, lo, hi);
+        assert!(box_visible(&planes, clo, chi), "la caja curvada debería verse");
+        assert!(clo.y < lo.y - 10.0);
     }
 }

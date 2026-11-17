@@ -46,7 +46,15 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let c = cols[i];
-    var vis = c.hi.w > 0.5 && box_visible(c.lo.xyz, c.hi.xyz);
+    var lo = c.lo.xyz;
+    if (p.shadow == 0u) {
+        // Curvatura de la Tierra: la geometría se dibuja hasta d²/2R más abajo (ver curved_box
+        // en render/mod.rs); el pase de sombras no la aplica.
+        let dx = max(abs(p.eye.x - c.lo.x), abs(p.eye.x - c.hi.x));
+        let dz = max(abs(p.eye.z - c.lo.z), abs(p.eye.z - c.hi.z));
+        lo.y -= (dx * dx + dz * dz) / 12742000.0;
+    }
+    var vis = c.hi.w > 0.5 && box_visible(lo, c.hi.xyz);
     if (p.shadow == 1u && u32(c.lo.w) > p.max_lod) {
         vis = false;
     }

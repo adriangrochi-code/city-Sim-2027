@@ -30,6 +30,9 @@ pub type Key = (u32, IVec2);
 /// `tbb::parallel_pipeline` de Tisma engine en src/gcode/writer.cpp). Así la memoria no crece
 /// sin límite cuando se generan columnas más rápido de lo que se suben.
 pub const MAX_READY: usize = 96;
+/// Tope de seguridad de columnas retiradas que siguen en la GPU esperando que su zona quede
+/// cubierta (las tablas de la GPU tienen 65.536 lugares; lo normal son unos pocos cientos).
+const RETIRED_SAFETY: usize = 24_000;
 
 type FxMap<K, V> = HashMap<K, V, crate::fxhash::FxBuild>;
 type FxSet<K> = HashSet<K, crate::fxhash::FxBuild>;
@@ -312,9 +315,17 @@ impl Streamer {
         }
         // Lo que quedó fuera de los anillos se borra apenas su zona está cubierta por columnas
         // nuevas ya subidas (antes se esperaba a que no quedara nada pendiente, y al moverse
-        // rápido se veían mallas de dos niveles superpuestas). Si se acumula mucho, se borra.
+        // rápido se veían mallas de dos niveles superpuestas).
+        //
+        // Nunca antes: una columna se quita solo cuando las que la reemplazan ya están en la
+        // GPU. Antes se borraba todo lo retirado (1) si el streamer "parecía" ocioso, pero un
+        // hilo entrega la malla al canal *antes* de bajar `in_flight`, así que la columna que
+        // cubría el lugar podía estar todavía en el canal, y (2) si se juntaban más de 3.000
+        // retiradas (viajes o zoom rápidos). En los dos casos quedaban huecos rectangulares
+        // por un cuadro o más (se veía el plano del río debajo). Solo queda un tope de
+        // seguridad muy alto para no agotar las tablas de la GPU.
         if !self.retired.is_empty() {
-            let flush = self.idle_now() || self.retired.len() > 3000;
+            let flush = self.retired.len() > RETIRED_SAFETY;
             let done: Vec<Key> = self.retired.iter().copied().filter(|k| flush || self.covered(*k)).collect();
             for key in done {
                 self.retired.remove(&key);
@@ -329,17 +340,31 @@ impl Streamer {
     /// niveles que ya están en la GPU con su versión al día?
     fn covered(&self, key: Key) -> bool {
         let (l, c) = (key.0 as i32, key.1);
-        for k in (l - 3).max(0)..=(l + 3).min(self.specs.len() as i32 - 1) {
+        // Todos los niveles (antes solo ±3): un zoom rápido puede saltar el nivel más fino de
+        // 0 a 5 y la columna retirada la cubre un nivel mucho más grueso (o más fino).
+        for k in 0..self.specs.len() as i32 {
             if k == l {
                 continue;
             }
             if k < l {
-                let f = 1 << (l - k);
-                for dz in 0..f {
-                    for dx in 0..f {
-                        let kk = (k as u32, c * f + IVec2::new(dx, dz));
-                        if !self.is_current(kk) {
-                            return false;
+                let f = 1i32 << (l - k);
+                // Hijas en el nivel fino: si son muchas, se recorre lo que ese nivel quiere.
+                match self.sets.get(k as usize) {
+                    Some(set) if ((f * f) as usize) > set.len() => {
+                        for &cc in set.iter() {
+                            if IVec2::new(cc.x.div_euclid(f), cc.y.div_euclid(f)) == c && !self.is_current((k as u32, cc)) {
+                                return false;
+                            }
+                        }
+                    }
+                    _ => {
+                        for dz in 0..f {
+                            for dx in 0..f {
+                                let kk = (k as u32, c * f + IVec2::new(dx, dz));
+                                if !self.is_current(kk) {
+                                    return false;
+                                }
+                            }
                         }
                     }
                 }
@@ -1127,6 +1152,88 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         s.poll(usize::MAX);
+        assert!(s.retired.is_empty());
+    }
+
+    /// Lo que "ve" la GPU: claves de las columnas subidas, después de aplicar las órdenes.
+    fn apply(shown: &mut HashSet<Key>, ops: Vec<Op>) {
+        for op in ops {
+            match op {
+                Op::Set(k, _) => {
+                    shown.insert(k);
+                }
+                Op::Remove(k) => {
+                    shown.remove(&k);
+                }
+            }
+        }
+    }
+
+    /// ¿Algún nivel tiene subida la columna que contiene el punto?
+    fn point_in(s: &Streamer, keys: &HashSet<Key>, p: Vec2) -> bool {
+        s.specs.iter().any(|sp| {
+            let cm = sp.chunk_m();
+            keys.contains(&(sp.lod, IVec2::new((p.x / cm).floor() as i32, (p.y / cm).floor() as i32)))
+        })
+    }
+
+    /// ¿Algún nivel quiere la columna que contiene el punto (con la vista actual)?
+    fn point_wanted(s: &Streamer, p: Vec2) -> bool {
+        s.specs.iter().any(|sp| {
+            let cm = sp.chunk_m();
+            s.versions.contains_key(&(sp.lod, IVec2::new((p.x / cm).floor() as i32, (p.y / cm).floor() as i32)))
+        })
+    }
+
+    /// Error visto en una placa real: al acercar/alejar o mover rápido la cámara desaparecían
+    /// bloques rectangulares de terreno y se veía el río debajo. Un punto del suelo que se
+    /// estaba dibujando no puede quedar sin ninguna columna mientras llegan las nuevas: ni
+    /// con un salto grande del nivel más fino (zoom rápido, de 0 a 5) ni con varios
+    /// recentrados seguidos sin esperar (viaje rápido).
+    #[test]
+    fn nunca_quedan_huecos_al_hacer_zoom_o_viajar_rapido() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(7)));
+        let mut s = Streamer::new(t, store, 7, 3);
+        let c0 = Vec2::new(13500.0, 16300.0);
+        s.update_with(c0, 0);
+        let mut shown = HashSet::new();
+        let t0 = Instant::now();
+        while !s.idle() && t0.elapsed() < Duration::from_secs(120) {
+            apply(&mut shown, s.poll(usize::MAX));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        apply(&mut shown, s.poll(usize::MAX));
+        // Puntos de muestra alrededor del centro (hasta 1,2 km).
+        let pts: Vec<Vec2> = (-24..=24).flat_map(|j| (-24..=24).map(move |i| Vec2::new(i as f32 * 50.0 + 3.0, j as f32 * 50.0 + 7.0))).collect();
+        let check = |s: &Streamer, shown: &HashSet<Key>, center: Vec2, what: &str| {
+            for d in &pts {
+                let p = center + *d;
+                // (Todo el entorno está dentro del anillo más grueso: siempre se quiere.)
+                assert!(point_wanted(s, p), "{what}: ningún nivel quiere ({:.0}, {:.0})", p.x, p.y);
+                assert!(point_in(s, shown, p), "{what}: quedó un hueco en ({:.0}, {:.0})", p.x, p.y);
+            }
+        };
+        check(&s, &shown, c0, "antes de moverse");
+        // Zoom rápido hacia afuera (salto de nivel) y viaje rápido con recentrados seguidos.
+        let moves: [(Vec2, u32); 5] = [(c0, 5), (c0 + Vec2::new(700.0, 0.0), 5), (c0 + Vec2::new(700.0, 500.0), 2), (c0 + Vec2::new(300.0, 900.0), 0), (c0, 0)];
+        for (center, first) in moves {
+            s.update_with(center, first);
+            // Unas pocas entregas con presupuesto chico, sin esperar a que termine.
+            for _ in 0..3 {
+                apply(&mut shown, s.poll(4_000));
+                check(&s, &shown, center, "mientras se mueve");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        let t0 = Instant::now();
+        while !s.idle() && t0.elapsed() < Duration::from_secs(120) {
+            apply(&mut shown, s.poll(20_000));
+            check(&s, &shown, c0, "llegando");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        apply(&mut shown, s.poll(usize::MAX));
+        check(&s, &shown, c0, "al final");
         assert!(s.retired.is_empty());
     }
 }
