@@ -137,6 +137,26 @@ fn hash3(p: vec3<f32>) -> f32 {
     return f32(h & 0xffffffu) / 16777215.0;
 }
 
+// Ruido de valor 2D (0..1), suave, para variaciones de color a gran escala.
+fn vnoise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash3(vec3(i, 0.0));
+    let b = hash3(vec3(i + vec2(1.0, 0.0), 0.0));
+    let c = hash3(vec3(i + vec2(0.0, 1.0), 0.0));
+    let d = hash3(vec3(i + vec2(1.0, 1.0), 0.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Color de la niebla: el del horizonte, más cálido y claro mirando hacia el sol (la luz
+// que dispersa el aire), y nada de eso de noche.
+fn fog_color(world: vec3<f32>) -> vec3<f32> {
+    let vdir = normalize(world - g.cam_pos.xyz);
+    let s = pow(max(dot(vdir, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
+    return mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s * 0.6);
+}
+
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return pow(c, vec3(2.2));
 }
@@ -213,6 +233,22 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         }
     }
     albedo *= 1.0 - select(0.18, 0.05, terr) * line;
+    // Monte visto de lejos: en los niveles sin árboles (vóxel de más de 4 m) el suelo del
+    // monte toma el color de las copas, y a media distancia se mezcla con él (desde lejos,
+    // entre árbol y árbol se ven más copas que hojarasca).
+    if (mat == 53u) {
+        let m = vnoise(v.world.xz / 23.0);
+        let canopy = srgb_to_linear(mix(vec3(0.17, 0.27, 0.12), vec3(0.27, 0.36, 0.16), m));
+        let k = max(smoothstep(3.0, 6.0, v.voxel), smoothstep(0.1, 0.5, fw) * 0.7);
+        albedo = mix(albedo, canopy, k);
+    }
+    // Pastos y arenas: manchas de color de decenas de metros (más verde azulado en unas,
+    // más pajizo en otras), para que de lejos el campo no sea un verde parejo.
+    if (mat == 1u || mat == 20u || mat == 49u || mat == 3u || mat == 51u) {
+        let m = vnoise(v.world.xz / 70.0) * 0.6 + vnoise(v.world.xz / 19.0 + 13.0) * 0.4;
+        let k = select(0.5, 1.0, mat == 1u || mat == 20u || mat == 49u);
+        albedo *= mix(vec3(1.0), mix(vec3(0.86, 0.91, 0.88), vec3(1.09, 1.05, 0.9), m), k);
+    }
 
     // Detalle más fino que el vóxel, dibujado por material. Se apaga a lo lejos (fwidth)
     // para que no haga ruido: de lejos manda el color del material.
@@ -298,6 +334,6 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
-    col = mix(col, g.sky_horizon.rgb, clamp(fog, 0.0, 0.88));
+    col = mix(col, fog_color(v.world), clamp(fog, 0.0, 0.88));
     return vec4(col, 1.0);
 }

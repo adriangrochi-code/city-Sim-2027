@@ -120,7 +120,10 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     col *= 1.0 - 0.12 * edge;
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
-    col = mix(col, g.sky_horizon.rgb, clamp(fog, 0.0, 0.88));
+    let vdir_f = normalize(v.world - g.cam_pos.xyz);
+    let sun_f = pow(max(dot(vdir_f, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
+    let fog_c = mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, sun_f * 0.6);
+    col = mix(col, fog_c, clamp(fog, 0.0, 0.88));
     // El río es turbio (agua color león): casi no deja ver el fondo. Así tampoco se notan
     // los escalones del fondo entre niveles de detalle.
     return vec4(col, select(0.97, 0.88, flowing));
