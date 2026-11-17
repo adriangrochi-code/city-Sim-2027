@@ -37,6 +37,9 @@ var _n_hills := FastNoiseLite.new()
 var _n_detail := FastNoiseLite.new()
 var _seg_a := PackedVector2Array()
 var _seg_b := PackedVector2Array()
+var _seg_hw := PackedFloat32Array()   # medio ancho del agua de cada tramo (m)
+## Ancho del agua en cada punto de cada arroyo (m), paralelo a `arroyos`.
+var arroyo_anchos: Array[PackedFloat32Array] = []
 var _seg_hash := {}
 # Datos del mapa real (uint16: metros = valor / 200 − 50).
 var _main := PackedByteArray()
@@ -109,9 +112,11 @@ func _load_real() -> bool:
 	if typeof(arr) == TYPE_DICTIONARY:
 		for line in arr["arroyos"]:
 			var pts := PackedVector2Array()
+			var anchos := PackedFloat32Array()
 			for p in line:
 				pts.append(Vector2(float(p[0]), float(p[1])))
-			_register_arroyo(pts)
+				anchos.append(float(p[2]) if p.size() > 2 else 8.0)
+			_register_arroyo(pts, anchos)
 	return true
 
 
@@ -152,9 +157,12 @@ func height(x: float, z: float) -> float:
 		return _height_ficticio(x, z)
 	var h := raw_height(x, z)
 	if h > 0.3:
-		var da := arroyo_distance(x, z)
-		if da < CAUCE_ANCHO:
-			h -= CAUCE_PROFUNDIDAD * (1.0 - smoothstep(8.0, CAUCE_ANCHO, da))
+		# Cauce según el ancho del tramo: una cañada apenas se hunde; el Miguelete, casi 2 m.
+		var q := arroyo_query(x, z)
+		var hw := q.y
+		var reach := hw + 4.0 + hw * 1.5
+		if q.x < reach:
+			h -= (0.3 + 0.18 * hw) * (1.0 - smoothstep(hw, reach, q.x))
 	return h
 
 
@@ -164,13 +172,26 @@ func is_land(x: float, z: float) -> bool:
 
 ## Agua del río o de un arroyo (para no construir encima).
 func is_water(x: float, z: float) -> bool:
-	return height(x, z) <= 0.4 or (real and arroyo_distance(x, z) < 7.0)
+	if height(x, z) <= 0.4:
+		return true
+	if not real:
+		return false
+	var q := arroyo_query(x, z)
+	return q.x < q.y + 2.0
 
 
 func arroyo_distance(x: float, z: float) -> float:
+	return arroyo_query(x, z).x
+
+
+## Distancia al arroyo más cercano (x) y medio ancho del agua de ese tramo (y). Se elige el
+## tramo con el borde del agua más cerca, para que un arroyo ancho gane a una cañada vecina.
+func arroyo_query(x: float, z: float) -> Vector2:
 	var p := Vector2(x, z)
 	var c := Vector2i(floori(x / HASH_CELL), floori(z / HASH_CELL))
 	var best := 1e9
+	var best_edge := 1e9
+	var best_hw := 4.0
 	for dy in range(-1, 2):
 		for dx in range(-1, 2):
 			var k := c + Vector2i(dx, dy)
@@ -179,18 +200,29 @@ func arroyo_distance(x: float, z: float) -> float:
 			var arr: PackedInt32Array = _seg_hash[k]
 			for si in arr:
 				var q := Geometry2D.get_closest_point_to_segment(p, _seg_a[si], _seg_b[si])
-				best = minf(best, p.distance_to(q))
-	return best
+				var d := p.distance_to(q)
+				var hw: float = _seg_hw[si] if si < _seg_hw.size() else 4.0
+				if d - hw < best_edge:
+					best_edge = d - hw
+					best = d
+					best_hw = hw
+	return Vector2(best, best_hw)
 
 
-func _register_arroyo(pts: PackedVector2Array) -> void:
+func _register_arroyo(pts: PackedVector2Array, anchos := PackedFloat32Array()) -> void:
 	arroyos.append(pts)
+	if anchos.size() != pts.size():
+		anchos = PackedFloat32Array()
+		anchos.resize(pts.size())
+		anchos.fill(8.0)
+	arroyo_anchos.append(anchos)
 	for i in pts.size() - 1:
 		var a := pts[i]
 		var b := pts[i + 1]
 		var si := _seg_a.size()
 		_seg_a.append(a)
 		_seg_b.append(b)
+		_seg_hw.append((anchos[i] + anchos[i + 1]) * 0.25)
 		var mn := Vector2i(floori(minf(a.x, b.x) / HASH_CELL), floori(minf(a.y, b.y) / HASH_CELL))
 		var mx := Vector2i(floori(maxf(a.x, b.x) / HASH_CELL), floori(maxf(a.y, b.y) / HASH_CELL))
 		for cy in range(mn.y, mx.y + 1):

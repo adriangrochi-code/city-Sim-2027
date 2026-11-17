@@ -14,9 +14,9 @@
   "paso_m": 20.0,
   "muestras": 1201,
   "contexto": {
-    "desde_m": -6000.0,
+    "desde_m": -25000.0,
     "paso_m": 100.0,
-    "muestras": 361
+    "muestras": 741
   },
   "codificacion": "uint16 little-endian; metros = valor / 200 - 50; filas de norte a sur",
   "fundacion": {

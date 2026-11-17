@@ -39,7 +39,7 @@ from PIL import Image
 # --- Ventana del mapa -------------------------------------------------------------------
 MAP_SIZE = 24000.0      # metros
 STEP = 20.0             # resolución del mapa jugable
-OUTER = 6000.0          # anillo exterior (dos parcelas de 3 km)
+OUTER = 25000.0         # entorno: lo que se ve desde el mapa (el motor dibuja ~24 km alrededor)
 OUTER_STEP = 100.0
 LAT_N = -34.778         # borde norte
 LON_W = -56.325         # borde oeste
@@ -54,9 +54,25 @@ IDE_WCS = ("https://mapas.ide.uy/geoserver-raster/wcs?service=WCS&version=2.0.1&
 PLAZA_MATRIZ = (-34.9068, -56.2036)
 CERRO = (-34.8886, -56.2602)
 
+# Islas que el modelo del terreno no trae (el MDT deja el agua sin dato): nombre, centro x, z
+# (m locales), largo, ancho, altura (m) y giro (grados). La posición sale del relieve SRTM,
+# donde sí aparecen; el tamaño es aproximado.
+ISLAS = [
+    ("Isla de las Ratas (San José)", 8294.0, 12280.0, 180.0, 110.0, 5.0, 30.0),
+    # Frente a Carrasco, ya en el entorno: islote bajo y rocoso (faro desde el siglo XIX).
+    ("Isla de Flores", 36054.0, 18493.0, 800.0, 300.0, 6.0, 70.0),
+]
+
 # Umbral de cuenca para considerar un arroyo (km²).
-ARROYO_KM2 = 6.0
-ARROYO_MIN_LEN = 600.0
+# Con 0,6 km² entran las cañadas: los arroyitos que cruzan toda la campaña uruguaya.
+ARROYO_KM2 = 0.6
+ARROYO_MIN_LEN = 250.0
+
+
+def ancho_cauce(km2):
+    """Ancho del agua (m) según la cuenca: una cañada de 0,6 km² ≈ 2,6 m; un arroyo de
+    50 km² ≈ 11 m; el Miguelete o el Pantanoso (más de 100 km²) ≈ 15–19 m."""
+    return 1.5 + 1.4 * math.sqrt(km2)
 
 
 def escalas(lat0):
@@ -145,7 +161,7 @@ def bajar_mdt(cache):
     lat_n = LAT_N + OUTER / KY + 0.01
     lon_w = LON_W - OUTER / KX - 0.01
     lon_e = LON_W + (MAP_SIZE + OUTER) / KX + 0.01
-    ruta = os.path.join(cache, "mdt_ide_mvd.tif")
+    ruta = os.path.join(cache, f"mdt_ide_mvd_{int(OUTER)}.tif")
     if not os.path.exists(ruta):
         url = IDE_WCS.format(lat_s=f"{lat_s:.5f}", lat_n=f"{lat_n:.5f}", lon_w=f"{lon_w:.5f}", lon_e=f"{lon_e:.5f}")
         with urllib.request.urlopen(url, timeout=300) as r:
@@ -262,7 +278,7 @@ def arroyos(h, step):
         c = k
         while c >= 0:
             i, j = divmod(int(c), nx)
-            pts.append((j * step, i * step))
+            pts.append((j * step, i * step, ancho_cauce(acc[c] * step * step / 1e6)))
             if usados[c] or agua.ravel()[c]:
                 break
             usados[c] = True
@@ -276,10 +292,10 @@ def arroyos(h, step):
 def rdp(pts, tol):
     if len(pts) < 3:
         return pts
-    a, b = np.array(pts[0]), np.array(pts[-1])
+    a, b = np.array(pts[0][:2]), np.array(pts[-1][:2])
     ab = b - a
     n = np.linalg.norm(ab)
-    arr = np.array(pts)
+    arr = np.array([p[:2] for p in pts])
     if n < 1e-9:
         d = np.linalg.norm(arr - a, axis=1)
     else:
@@ -297,15 +313,15 @@ def suavizar(pts, veces=2):
             return pts
         out = [pts[0]]
         for p, q in zip(pts[:-1], pts[1:]):
-            out.append((0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1]))
-            out.append((0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1]))
+            out.append(tuple(0.75 * a + 0.25 * b for a, b in zip(p, q)))
+            out.append(tuple(0.25 * a + 0.75 * b for a, b in zip(p, q)))
         out.append(pts[-1])
         pts = out
     return pts
 
 
 def largo(pts):
-    return sum(math.dist(p, q) for p, q in zip(pts[:-1], pts[1:]))
+    return sum(math.dist(p[:2], q[:2]) for p, q in zip(pts[:-1], pts[1:]))
 
 
 # --- Sitio de fundación --------------------------------------------------------------------
@@ -399,6 +415,21 @@ def suavizar_tierra(h):
     return out
 
 
+def agregar_islas(h, xs):
+    """Meseta suave por isla: borde de piedra y arena que baja al agua."""
+    zz, xx = np.meshgrid(xs, xs, indexing="ij")
+    for _, cx, cz, largo, ancho, alto, giro in ISLAS:
+        a = math.radians(giro)
+        dx, dz = xx - cx, zz - cz
+        u = (dx * math.cos(a) + dz * math.sin(a)) / (largo / 2)
+        v = (-dx * math.sin(a) + dz * math.cos(a)) / (ancho / 2)
+        r = np.sqrt(u * u + v * v)
+        t = np.clip((1.25 - r) / 0.5, 0, 1)
+        isla = -0.6 + (alto + 0.6) * t * t * (3 - 2 * t)
+        h = np.where(r < 1.25, np.maximum(h, isla), h)
+    return h
+
+
 def guardar_u16(ruta, h):
     v = np.clip(np.round((h + 50.0) * 200.0), 0, 65535).astype("<u2")
     with open(ruta, "wb") as f:
@@ -426,6 +457,8 @@ def main():
         h = limpiar_agua(h, STEP)
         h = suavizar_suave(h)
         h_o = limpiar_agua(h_o, OUTER_STEP)
+        h = agregar_islas(h, xs)
+        h_o = agregar_islas(h_o, xs_o)
         fuente = "MDT Uruguay 30 m (IDE Uruguay), servicio WCS raster__mdt_pais_30m_4326"
         atribucion = "Datos de elevación: Modelo Digital del Terreno del Uruguay, Infraestructura de Datos Espaciales (IDE Uruguay, Presidencia de la República). Ver docs/sistemas/mapa-real.md."
     else:
@@ -447,7 +480,7 @@ def main():
     for pts in lineas:
         p = suavizar(rdp(pts, STEP * 0.75), 2)
         if largo(p) >= ARROYO_MIN_LEN:
-            polis.append([[round(x, 1), round(z, 1)] for x, z in p])
+            polis.append([[round(x, 1), round(z, 1), round(w, 1)] for x, z, w in p])
     polis.sort(key=lambda p: -largo(p))
     print(f"  {len(polis)} tramos de arroyo", flush=True)
 
@@ -481,7 +514,7 @@ def main():
     from PIL import ImageDraw
     d = ImageDraw.Draw(img)
     for p in polis:
-        d.line([(x / STEP, z / STEP) for x, z in p], fill=(40, 90, 200), width=2)
+        d.line([(q[0] / STEP, q[1] / STEP) for q in p], fill=(40, 90, 200), width=max(1, int(max(q[2] for q in p) / 6)))
     d.ellipse([sitio[1] / STEP - 5, sitio[2] / STEP - 5, sitio[1] / STEP + 5, sitio[2] / STEP + 5], outline=(200, 0, 0), width=2)
     previa = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "capturas", "mapa-real-relieve.jpg")
     img.convert("RGB").save(previa, quality=85)

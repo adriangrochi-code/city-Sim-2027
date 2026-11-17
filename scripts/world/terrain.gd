@@ -131,18 +131,21 @@ func _add_streams() -> void:
 		return
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for path in gen.arroyos:
-		var src: PackedVector2Array = path
+	for ai in gen.arroyos.size():
+		var src: PackedVector2Array = gen.arroyos[ai]
+		var src_w: PackedFloat32Array = gen.arroyo_anchos[ai]
 		var pts := PackedVector2Array()
+		var anchos := PackedFloat32Array()
 		for i in src.size() - 1:
 			var n := maxi(1, int(src[i].distance_to(src[i + 1]) / 10.0))
 			for k in n:
 				pts.append(src[i].lerp(src[i + 1], float(k) / n))
+				anchos.append(lerpf(src_w[i], src_w[i + 1], float(k) / n))
 		pts.append(src[src.size() - 1])
+		anchos.append(src_w[src.size() - 1])
 		if pts.size() < 2:
 			continue
-		# El ancho crece aguas abajo (el arroyo suma caudal).
-		var total := float(pts.size())
+		# El ancho viene del mapa: crece aguas abajo con la cuenca (cañada → arroyo).
 		var prev_l := Vector3.ZERO
 		var prev_r := Vector3.ZERO
 		for i in pts.size():
@@ -154,7 +157,7 @@ func _add_streams() -> void:
 			else:
 				tan = pts[i + 1] - pts[i - 1]
 			tan = tan.normalized()
-			var w := lerpf(3.0, 8.0, float(i) / total)
+			var w := maxf(anchos[i] * 0.5, 0.8)
 			var nrm := Vector2(-tan.y, tan.x) * w
 			var y := maxf(gen.arroyo_water_height(pts[i].x, pts[i].y), 0.05)
 			var l := Vector3(pts[i].x + nrm.x, y, pts[i].y + nrm.y)
