@@ -63,6 +63,9 @@ const META_JSON: &str = include_str!("../../assets/mapas/montevideo/meta.json");
 /// alturas). Ver `docs/sistemas/vegetacion-historica.md`.
 const BOSQUE_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/bosque.bin");
 const BOSQUE_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/bosque_contexto.bin");
+/// Rocosidad de los suelos CONEAT (0..255 = 0..100 % de roca a la vista).
+const ROCAS_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/rocas.bin");
+const ROCAS_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/rocas_contexto.bin");
 
 /// Códigos de `biomas.bin`.
 pub const BIO_NADA: u8 = 0;
@@ -200,6 +203,9 @@ struct RealMap {
     /// Cobertura del monte nativo de 1726 (0..1).
     forest_main: Grid,
     forest_ctx: Grid,
+    /// Rocosidad de los suelos (0..1).
+    rock_main: Grid,
+    rock_ctx: Grid,
 }
 
 impl RealMap {
@@ -487,6 +493,8 @@ impl TerrainGen {
             beach_ctx,
             forest_main,
             forest_ctx,
+            rock_main: Grid::from_u8(ROCAS_BIN, main_n, main_step, 0.0),
+            rock_ctx: Grid::from_u8(ROCAS_CTX_BIN, ctx_n, ctx_step, ctx_from),
         }));
         for txt in [ARROYOS_JSON, ARROYOS_CTX_JSON] {
             let (arroyos, names) = parse_arroyos(txt);
@@ -528,6 +536,66 @@ impl TerrainGen {
 
     /// Cobertura de copas del monte nativo de 1726 (0..1) según `bosque.bin`: dentro del mapa la
     /// grilla de 20 m, afuera la de 100 m, con una transición en el borde. 0 en el mapa ficticio.
+    /// Rocosidad del suelo (fracción de roca a la vista, de los suelos CONEAT).
+    pub fn rock_cover(&self, x: f32, z: f32) -> f32 {
+        let Some(r) = &self.real else { return 0.0 };
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        if edge <= 0.0 {
+            r.rock_ctx.linear(x, z)
+        } else if edge < 400.0 {
+            let w = smoothstep(0.0, 400.0, edge);
+            r.rock_ctx.linear(x, z) * (1.0 - w) + r.rock_main.linear(x, z) * w
+        } else {
+            r.rock_main.linear(x, z)
+        }
+    }
+
+    /// Afloramiento de roca en este punto (0 nada, 1 roca maciza): manchas de 10 a 20 m
+    /// (bochas y lajas del basamento) que ocupan, en promedio, la fracción de roca del suelo.
+    pub fn outcrop(&self, x: f32, z: f32) -> f32 {
+        self.outcrop_field(x, z).map_or(0.0, |(n, thr)| smoothstep(thr - 0.03, thr + 0.03, n))
+    }
+
+    /// Relieve del afloramiento (0..1): sube en una rampa más ancha que el borde de la piedra,
+    /// así la bocha es un montículo y no un escalón.
+    fn outcrop_relief(&self, x: f32, z: f32) -> f32 {
+        self.outcrop_field(x, z).map_or(0.0, |(n, thr)| smoothstep(thr - 0.08, thr + 0.06, n))
+    }
+
+    /// Ruido de las bochas y su umbral según la rocosidad del suelo.
+    fn outcrop_field(&self, x: f32, z: f32) -> Option<(f32, f32)> {
+        let c = self.rock_cover(x, z);
+        if c < 0.01 {
+            return None;
+        }
+        // Las manchas se agrupan: un ruido grande decide dónde hay campos de piedra y otro
+        // chico, cada bocha.
+        let field = self.n_hills.get_noise_2d(x * 9.0, z * 9.0) * 0.5 + 0.5;
+        let stone = self.n_detail.get_noise_2d(x * 14.0 + 31.0, z * 14.0 - 17.0) * 0.5 + 0.5;
+        let n = stone * 0.7 + field * 0.3;
+        // Umbral para que la fracción del suelo por encima sea la rocosidad: cuantiles medidos
+        // de `n` (media 0,5, desvío ≈ 0,11) para la fracción que queda arriba.
+        const Q: [(f32, f32); 8] = [
+            (0.005, 0.74), (0.01, 0.714), (0.05, 0.658), (0.10, 0.626),
+            (0.15, 0.603), (0.20, 0.584), (0.30, 0.552), (0.50, 0.498),
+        ];
+        let c = c.min(0.5);
+        let mut thr = Q[0].1;
+        for w in Q.windows(2) {
+            if c >= w[0].0 && c <= w[1].0 {
+                let f = (c - w[0].0) / (w[1].0 - w[0].0);
+                thr = w[0].1 + (w[1].1 - w[0].1) * f;
+            }
+        }
+        Some((n, thr))
+    }
+
+    /// Variación de un vóxel a otro (−0,5..0,5): mezcla los bordes entre biomas en una banda
+    /// en lugar de una línea.
+    fn dither(&self, x: f32, z: f32) -> f32 {
+        hashf((x * 2.0).floor() as i32, (z * 2.0).floor() as i32, 97) - 0.5
+    }
+
     pub fn forest_cover(&self, x: f32, z: f32) -> f32 {
         let Some(r) = &self.real else { return 0.0 };
         let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
@@ -649,6 +717,12 @@ impl TerrainGen {
         if h > 0.3 {
             // Ondulación fina (±0,35 m) para que la ladera no sea una superficie de vidrio.
             h += self.n_detail.get_noise_2d(x, z) * 0.35 * smoothstep(0.5, 3.0, h);
+            // Afloramientos: la roca asoma entre 0,5 y 2 m sobre el pasto.
+            let o = self.outcrop_relief(x, z);
+            if o > 0.0 {
+                let bump = self.n_detail.get_noise_2d(x * 40.0, z * 40.0) * 0.5 + 0.5;
+                h += o * (0.5 + 1.5 * bump);
+            }
             let (da, hw) = self.arroyo_query(x, z);
             let (depth, reach) = cauce(hw);
             if da < reach {
@@ -866,6 +940,16 @@ impl TerrainGen {
         if slope > 0.9 || (h > 105.0 && slope > 0.3 + fine * 0.1) {
             return ROCK;
         }
+        // Afloramientos del basamento (suelos CONEAT): roca maciza en el centro de cada
+        // mancha, y en el borde piedra y pasto seco mezclados.
+        let dith = self.dither(x, z);
+        let o = self.outcrop(x, z);
+        if o > 0.55 + dith * 0.3 {
+            return ROCK;
+        }
+        if o > 0.15 + dith * 0.2 {
+            return GRASS_DRY;
+        }
         // Bañados: bajos llanos junto a los arroyos y en sus desembocaduras.
         if slope < 0.05 && h < 5.0 + blot * 2.0 && (da < 25.0 + hw * 22.0 || (da < 700.0 && hw > 5.0 && sd < 350.0)) && fine > -0.35 {
             return MARSH;
@@ -874,10 +958,11 @@ impl TerrainGen {
         // las manchas, pasto verde a la sombra entre la hojarasca.
         let grain = self.n_detail.get_noise_2d(x * 14.0, z * 14.0) * 0.18;
         let dens = self.forest_density(x, z);
-        if dens > 0.78 + fine * 0.15 {
+        // Bordes mezclados vóxel a vóxel (banda de unos metros), no una línea.
+        if dens > 0.78 + fine * 0.15 + dith * 0.25 {
             return FOREST_FLOOR;
         }
-        if dens > 0.45 + fine * 0.2 {
+        if dens > 0.45 + fine * 0.2 + dith * 0.25 {
             return GRASS_LUSH;
         }
         // Pradera: más verde y húmeda en los bajos, seca y amarillenta en las cuchillas, en las
@@ -885,9 +970,9 @@ impl TerrainGen {
         // Grano fino (metros) para que los bordes de las manchas no sean líneas limpias.
         let coast = (1.0 - sd / 900.0).max(0.0) * 0.35;
         let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain + coast + slope * 0.6;
-        if dry > 0.45 {
+        if dry > 0.45 + dith * 0.3 {
             GRASS_DRY
-        } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05) || dry < -0.45 || dens > 0.2 {
+        } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05 + dith * 0.3) || dry < -0.45 + dith * 0.3 || dens > 0.2 + dith * 0.2 {
             GRASS_LUSH
         } else {
             GRASS
@@ -935,7 +1020,8 @@ impl TerrainGen {
                     continue;
                 }
                 // Sin árboles en playas, bañados, bancos de arena ni lagunas oficiales.
-                if matches!(self.official_biome(x, z), BIO_PLAYA | BIO_BANADO | BIO_BANCO | BIO_LAGUNA) {
+                // Ni sobre la roca de los afloramientos.
+                if self.outcrop(x, z) > 0.3 || matches!(self.official_biome(x, z), BIO_PLAYA | BIO_BANADO | BIO_BANCO | BIO_LAGUNA) {
                     continue;
                 }
                 let u = hashf(i, j, 5);
@@ -1334,3 +1420,4 @@ mod tests {
         assert!(t.height(p.x, p.y) < 0.0);
     }
 }
+

@@ -29,6 +29,10 @@ piedra) y de la pendiente.
 
 - **Afloramientos**: donde hay rocosidad, manchones de roca de unos metros (bochas y lajas)
   que asoman sobre el pasto, más altos en las laderas y las crestas, como en las sierras de
-  Minas pero mucho menos densos.
+  Minas pero mucho menos densos. El umbral del ruido de las bochas sale de sus cuantiles
+  medidos (media 0,5, desvío ≈ 0,11), así la fracción de suelo con roca a la vista coincide
+  con la rocosidad CONEAT (14,5 % en las colinas del basamento del sur). La piedra tiene borde
+  neto, pero el montículo sube en una rampa más ancha: cima de roca y faldón de pasto seco, sin
+  escalones de más de 1,5 m por metro (lo verifica `mapa_real_de_montevideo`).
 - **Transiciones**: entre pasto verde, seco y húmedo, una banda mezclada de varios metros en
   lugar de un borde neto.
