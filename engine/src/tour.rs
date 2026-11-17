@@ -141,6 +141,19 @@ pub fn city_steps() -> Vec<Act> {
         Game("escuelas, salud y delito después de crecer", d::barrio_informe),
         Game("un mes al ritmo del juego", d::month_realtime),
         WaitIdle("re-mallado de un mes"),
+        // Materiales de construcción: una cuadra levantada con lo que había (ver `city::materiales`).
+        Game("una cuadra con lo que había", d::materiales),
+        Hour(10.5),
+        CamFn(d::view_materiales),
+        WaitIdle("cuadra de materiales"),
+        Shot("motor-materiales-cuadra"),
+        UiShot("motor-ui-ficha-materiales", ui_ficha_materiales),
+        UiShot("motor-ui-materiales", |s, u| {
+            s.game.as_mut().unwrap().inspected = None;
+            ui_detail(s, u, ui::Detail::Materiales)
+        }),
+        UiShot("motor-ui-colocar-sin-ladrillos", ui_colocar_sin_ladrillos),
+        Game("devolver los ladrillos y la piedra", crate::city::game_demo::devolver_ladrillos),
         // Vecinos y vehículos: la mañana de un día hábil.
         Game("unir los pedazos del damero", d::unir_calles),
         Game("vecinos y vehículos", d::vecinos),
@@ -674,6 +687,35 @@ fn ui_inspect(s: &mut Session, u: &mut GameUi) {
     });
     g.inspected = pick.or(cands.first().copied());
     g.hover = g.inspected;
+}
+
+/// Colocar una escuela cuando no hay ladrillos ni piedra: la tarjeta y la pista dicen con qué
+/// se hará (no se bloquea). Los ladrillos se devuelven en el paso siguiente.
+fn ui_colocar_sin_ladrillos(s: &mut Session, u: &mut GameUi) {
+    crate::city::game_demo::guardar_ladrillos(s);
+    let g = s.game.as_mut().unwrap();
+    g.inspected = None;
+    g.layer = None;
+    g.set_service(crate::city::services::Placeable::Building(crate::city::services::Kind::Escuela));
+    g.grupo = crate::city::services::Grupo::Educacion;
+    g.hover = Some(crate::city::game_demo::PLAZA + Vec2::new(60.0, 90.0));
+    u.detail = None;
+    u.open = Some(ui::Category::Servicios);
+    u.time += 30.0;
+}
+
+/// Ficha de una casa de la hilera de muestra de materiales (la de adobe).
+fn ui_ficha_materiales(s: &mut Session, u: &mut GameUi) {
+    u.open = None;
+    u.detail = None;
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    if let Some((_, _, ids)) = crate::city::game_demo::MUESTRA.lock().unwrap().clone() {
+        if let Some(l) = ids.get(3).or(ids.last()).and_then(|id| g.city.lots.lots.get(id)) {
+            g.inspected = Some(l.c);
+            g.hover = g.inspected;
+        }
+    }
 }
 
 /// Ficha de la calle con más gente ahora (tránsito y tiempo de paso medido).

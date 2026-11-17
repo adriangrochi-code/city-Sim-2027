@@ -139,7 +139,10 @@ impl City {
         for d in &drops {
             self.lots.lots.get_mut(&d.lot).unwrap().level = d.level;
         }
-        self.apply_levels(t, &drops, e);
+        // Bajan de nivel sin obra nueva: se dibujan con sus mismos materiales.
+        for d in &drops {
+            self.revoxelizar(t, d.lot, e);
+        }
         if self.poblacion.fundada {
             // Con la población de personas, mueren personas de los hogares de esos solares.
             dead = self.poblacion.choque_epidemia(0.04, Some(&afectados)) as i32;

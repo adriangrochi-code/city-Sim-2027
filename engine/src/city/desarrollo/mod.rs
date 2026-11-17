@@ -971,7 +971,9 @@ impl Desarrollo {
             if q <= 0.0 {
                 continue;
             }
-            let local = if p == Prod::Cal { q.min(ctx.cal_demanda) } else { q * (1.0 - exporta_sitio(p)) };
+            // La cal de las caleras va entera al depósito de materiales de la ciudad (ver
+            // `materiales`): es lo que piden las obras, y lo que falta lo trae el puerto allá.
+            let local = if p == Prod::Cal { q } else { q * (1.0 - exporta_sitio(p)) };
             ventas_sitios += local * prod_info(p).precio;
             let exp = q - local;
             if exp > 0.0 && !ctx.bloqueo {
@@ -986,6 +988,8 @@ impl Desarrollo {
             r.lineas.push(("Canteras, hornos y caleras: ventas".into(), ventas_sitios as i64));
         }
         // La cal que piden las obras y no dan las caleras se trae por barco (con el flete).
+        // La cal que falta la importa el depósito de materiales (barcos): aquí solo se cuenta si
+        // alguien pasa una demanda explícita (`cal_demanda`, hoy 0 en la ciudad).
         r.cal_importada = (ctx.cal_demanda - ctx.prod_sitios[Prod::Cal.i()]).max(0.0);
         let cal_de_afuera = r.cal_importada * self.precio_mundo(Prod::Cal) * FLETE_CAL;
         // Lo que embarcó la economía (cueros, sebo, carne, trigo) al precio del mundo.

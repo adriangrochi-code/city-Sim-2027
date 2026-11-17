@@ -33,9 +33,6 @@ pub fn rinde_del_sitio(ind: Ind, c: Vec2, t: &TerrainGen) -> f32 {
     0.75 + 0.25 * base
 }
 
-/// Cal (fanegas) por unidad de ladrillos y de piedra que usan las obras (estimación).
-pub const CAL_POR_LADRILLO: f32 = 0.35;
-pub const CAL_POR_PIEDRA: f32 = 0.2;
 
 /// El producto del comercio de cada producto propio de un sitio (`recursos::materiales`).
 pub fn prod_de_extra(e: crate::city::recursos::materiales::Extra) -> Prod {
@@ -158,7 +155,8 @@ impl City {
             prod_sitios: self.productos_de_sitios(),
             // Morteros: cal por cada unidad de ladrillos y de piedra que usaron las obras el
             // último mes (estimación).
-            cal_demanda: eco.stock(Res::Ladrillos).consumed * CAL_POR_LADRILLO + eco.stock(Res::Piedra).consumed * CAL_POR_PIEDRA,
+            // La cal de las obras la lleva el depósito de materiales (no se cuenta dos veces).
+            cal_demanda: 0.0,
         }
     }
 

@@ -188,6 +188,20 @@ pub const CONTAMINATION: f32 = 150.0;
 /// Sebo de un farol por mes (lo cobra la economía al precio del sebo).
 pub const LAMP_SPACING: f32 = 30.0;
 
+/// Un edificio de servicio en vóxeles, con los materiales de su obra (ver `materiales`).
+fn build_servicio(t: &TerrainGen, c: Vec2, f: Vec2, inf: &Info, seed: u64, obra: Option<super::materiales::Obra>) -> super::voxelize::Built {
+    match obra {
+        Some(o) => {
+            let nom = super::materiales::ciudad::nominal_servicio();
+            build_rotated(t, c, f, inf.frame.0, inf.frame.1, seed, &|t: &TerrainGen, e: &mut Edits, fr: &Frame| {
+                (inf.builder)(t, e, fr);
+                super::materiales::ciudad::remapear(e, &o, &nom, seed);
+            })
+        }
+        None => build_rotated(t, c, f, inf.frame.0, inf.frame.1, seed, &inf.builder),
+    }
+}
+
 /// Lo que el jugador puede colocar con la herramienta de servicios.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Placeable {
@@ -602,16 +616,11 @@ impl City {
         if let Some(p) = self.desarrollo_problema_sitio(t, k, c) {
             return Some(p);
         }
-        let eco = &self.economy;
         if inf.cost > self.money {
             return Some(format!("Fondos insuficientes: hacen falta {} pesos", super::game::fmt_thousands(inf.cost)));
         }
-        if eco.stock(Res::Ladrillos).amount < inf.ladrillos {
-            return Some(format!("Faltan ladrillos: hacen falta {}", inf.ladrillos as i32));
-        }
-        if eco.stock(Res::Piedra).amount < inf.piedra {
-            return Some(format!("Falta piedra: hacen falta {}", inf.piedra as i32));
-        }
+        // Los materiales no frenan la obra: si faltan, se levanta con lo que hay (ver
+        // `materiales`).
         None
     }
 
@@ -622,16 +631,19 @@ impl City {
         }
         let inf = info(k);
         self.money -= inf.cost;
-        self.economy.take(Res::Ladrillos, inf.ladrillos);
-        self.economy.take(Res::Piedra, inf.piedra);
+        // Con lo que hay: si faltan ladrillos, de adobe o de tablas (ver `materiales`).
+        let obra = (!super::materiales::ciudad::servicio_sin_obra(k)).then(|| self.construir_obra(&super::materiales::ciudad::plan_servicio(k)));
         let mut e = Edits::default();
         self.clear_lots_under(&corners_of(c, f, inf.size.0, inf.size.1), &mut e);
         self.lots.obstacles.push(Obstacle { c, f, w: inf.size.0, d: inf.size.1 });
         self.services.next += 1;
         let id = self.services.next;
         let seed = 0x5E41_u64 ^ (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        let b = build_rotated(t, c, f, inf.frame.0, inf.frame.1, seed, &inf.builder);
+        let b = build_servicio(t, c, f, inf, seed, obra);
         e.extend(b.edits);
+        if let Some(o) = obra {
+            self.materiales.servicios.insert(id, o);
+        }
         let rinde = super::recursos::rinde(k, &super::recursos::Recursos::de(t).en_area(c, f, inf.size.0, inf.size.1));
         self.services.buildings.insert(id, Building { id, kind: k, c, f, served: 0, contaminacion: 0.0, rinde, voxels: b.voxels });
         self.refresh_water();
@@ -646,6 +658,7 @@ impl City {
     /// Derriba un edificio de servicio (sin devolver lo gastado).
     pub fn demolish_service(&mut self, t: &TerrainGen, id: u32) -> Result<Edits, String> {
         let b = self.services.buildings.remove(&id).ok_or("No hay ningún servicio ahí")?;
+        self.materiales.servicios.remove(&id);
         let mut e = Edits::default();
         for &v in &b.voxels {
             e.dset(v, AIR);
@@ -794,7 +807,7 @@ impl City {
             let b = &self.services.buildings[&id];
             let inf = b.info();
             let seed = 0x5E41_u64 ^ (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            let built = build_rotated(t, b.c, b.f, inf.frame.0, inf.frame.1, seed, &inf.builder);
+            let built = build_servicio(t, b.c, b.f, inf, seed, self.materiales.servicios.get(&id).copied());
             e.extend(built.edits);
             self.services.buildings.get_mut(&id).unwrap().voxels = built.voxels;
         }
@@ -908,6 +921,9 @@ impl City {
         }
         if inf.upkeep > 0 {
             out.push(format!("Mantenimiento: {} pesos al mes", inf.upkeep));
+        }
+        if let Some(o) = self.materiales.servicios.get(&id) {
+            out.extend(self.lineas_obra(o));
         }
         out
     }

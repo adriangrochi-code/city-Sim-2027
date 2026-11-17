@@ -35,7 +35,7 @@ que conforman a unos vecinos y molestan a otros. Cada decisión es un dilema, no
 | **Pan** (trigo y harina) | Chacras privadas del entorno + atahonas | Comer: 1 ración por habitante | Sube el precio; los vecinos se enojan y llega menos gente |
 | **Carne** | Estancias (y el tasajo de los saladeros) | Comer | Sube el precio |
 | **Agua** | Pozos, aljibes, aguadores | Beber, apagar incendios, crecer | No se crece; más epidemias |
-| **Ladrillos** | Hornos de ladrillos | Casas de azotea y de altos, iglesia | No se construye |
+| **Ladrillos** | Hornos de ladrillos | Paredes y azoteas, iglesia, servicios | Las casas se levantan de adobe o de tablas (ver [materiales de construcción](materiales-de-construccion.md)); la iglesia espera |
 | **Cueros** | Estancias → saladeros → puerto | Exportar (aduana) | Menos ingresos |
 | **Grano del pósito** | Lo que la ciudad compra y guarda | Reserva para años malos | — |
 

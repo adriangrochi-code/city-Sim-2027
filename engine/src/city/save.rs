@@ -70,6 +70,9 @@ pub struct LotData {
     pub nivel: u8,
     pub edad: u32,
     pub semilla: u64,
+    /// Materiales del edificio (las partidas viejas los deducen del tipo de casa al cargar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obra: Option<super::materiales::Obra>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -150,6 +153,10 @@ pub struct CityData {
     /// (las partidas viejas lo calculan al cargar).
     #[serde(default)]
     pub valor_suelo: Option<Vec<(u32, [f32; 3])>>,
+    /// Existencias, precios y demanda de los materiales de construcción, y con qué se hizo
+    /// cada servicio (las partidas viejas empiezan con lo de la fundación).
+    #[serde(default)]
+    pub materiales: Option<super::materiales::ciudad::Materiales>,
 }
 
 impl CityData {
@@ -162,7 +169,7 @@ impl CityData {
             proximo_tramo: ne,
         };
         let solares = LotsData {
-            solares: c.lots.lots.values().map(|l| LotData { id: l.id, centro: v2(l.c), frente: v2(l.f), zona: l.zone, nivel: l.level, edad: l.age, semilla: l.seed }).collect(),
+            solares: c.lots.lots.values().map(|l| LotData { id: l.id, centro: v2(l.c), frente: v2(l.f), zona: l.zone, nivel: l.level, edad: l.age, semilla: l.seed, obra: if l.level > 0 { l.obra } else { None } }).collect(),
             obstaculos: c.lots.obstacles.iter().map(|o| ObstacleData { centro: v2(o.c), frente: v2(o.f), ancho: o.w, fondo: o.d }).collect(),
             centro_plaza: c.lots.plaza_center.map(v2),
             proximo: c.lots.next_id(),
@@ -201,6 +208,7 @@ impl CityData {
                 v.sort_by_key(|x| x.0);
                 v
             }),
+            materiales: Some(c.materiales.clone()),
         }
     }
 
@@ -212,7 +220,7 @@ impl CityData {
             edges.push((e.id, e.a, e.b, e.puntos.iter().map(|&p| p2(p)).collect(), kind_from(&e.tipo)?));
         }
         let net = RoadNetwork::restore(nodes, edges, self.calles.proximo_nodo, self.calles.proximo_tramo)?;
-        let lots: Vec<Lot> = self.solares.solares.iter().map(|l| Lot { id: l.id, c: p2(l.centro), f: p2(l.frente), zone: l.zona.min(9), level: l.nivel.min(3), age: l.edad, seed: l.semilla, voxels: Vec::new() }).collect();
+        let lots: Vec<Lot> = self.solares.solares.iter().map(|l| Lot { id: l.id, c: p2(l.centro), f: p2(l.frente), zone: l.zona.min(9), level: l.nivel.min(3), age: l.edad, seed: l.semilla, voxels: Vec::new(), obra: l.obra }).collect();
         let obstacles = self.solares.obstaculos.iter().map(|o| Obstacle { c: p2(o.centro), f: p2(o.frente), w: o.ancho, d: o.fondo }).collect();
         let mut lots = Lots::restore(lots, obstacles, self.solares.centro_plaza.map(p2), self.solares.proximo);
         let (services, caps) = match &self.servicios {
@@ -258,7 +266,10 @@ impl CityData {
             mejoras: Vec::new(),
             llegados_barco: 0,
             desarrollo: self.desarrollo.clone().unwrap_or_default(),
+            materiales: self.materiales.clone().unwrap_or_default(),
         };
+        // Partidas de antes de los materiales: cada casa queda con los de su tipo.
+        city.inferir_obras();
         city.poblacion = match &self.poblacion {
             Some(p) => {
                 let mut p = p.clone();
