@@ -98,15 +98,24 @@ impl Port {
     }
 }
 
-/// Hacia dónde está el agua profunda (más de 1,6 m) desde `p`: (dirección, distancia).
+/// Hacia dónde está el agua honda (ver `PIER_DEPTH`) desde `p`: (dirección, distancia).
+/// Hondura a la que llega el muelle y hasta dónde se busca. El Río de la Plata frente a
+/// Montevideo es muy playo (en el MDT: −0,8 m a 100 m de la orilla, −1,5 m a 300–400 m): los
+/// barcos fondeaban afuera y las lanchas descargaban en muelles largos. Un metro de agua alcanza
+/// para las lanchas.
+pub const PIER_DEPTH: f32 = -0.9;
+pub const SEA_SEARCH: f32 = 360.0;
+/// Largo máximo del muelle (m).
+pub const PIER_MAX_LEN: f32 = 380.0;
+
 pub fn find_sea(t: &TerrainGen, p: Vec2) -> Option<(Vec2, f32)> {
     let mut best: Option<(Vec2, f32)> = None;
     for k in 0..32 {
         let d = Vec2::from_angle(k as f32 / 32.0 * std::f32::consts::TAU);
         let mut dist = 10.0;
-        while dist < 170.0 {
+        while dist < SEA_SEARCH {
             let q = p + d * dist;
-            if t.height(q.x, q.y) < -1.6 {
+            if t.height(q.x, q.y) < PIER_DEPTH {
                 if best.is_none_or(|b| dist < b.1) {
                     best = Some((d, dist));
                 }
@@ -118,6 +127,41 @@ pub fn find_sea(t: &TerrainGen, p: Vec2) -> Option<(Vec2, f32)> {
     best
 }
 
+/// Arranque del muelle cerca del clic: el punto de la orilla (tierra baja con agua honda
+/// enfrente) más cercano, a menos de 120 m. Así no hace falta apuntar justo a la línea de costa.
+pub fn pier_start(t: &TerrainGen, click: Vec2) -> Option<Vec2> {
+    let ok = |q: Vec2| {
+        let h = t.height(q.x, q.y);
+        (0.3..=PIER_MAX_HEIGHT).contains(&h) && !t.is_water(q.x, q.y) && find_sea(t, q).is_some()
+    };
+    if ok(click) {
+        return Some(click);
+    }
+    let mut r = 4.0;
+    while r <= 120.0 {
+        let n = ((r * 0.8) as usize).clamp(8, 96);
+        let mut best: Option<(f32, Vec2)> = None;
+        for k in 0..n {
+            let q = click + Vec2::from_angle(k as f32 / n as f32 * std::f32::consts::TAU) * r;
+            if ok(q) {
+                // Entre los del mismo anillo, el de agua honda más cerca (muelle más corto).
+                let d = find_sea(t, q).map_or(f32::MAX, |x| x.1);
+                if best.is_none_or(|b| d < b.0) {
+                    best = Some((d, q));
+                }
+            }
+        }
+        if let Some((_, q)) = best {
+            return Some(q);
+        }
+        r += 4.0;
+    }
+    None
+}
+
+/// Alto máximo de la orilla donde arranca el muelle (con una rampa hasta el tablero).
+pub const PIER_MAX_HEIGHT: f32 = 8.0;
+
 impl City {
     /// `None` si el muelle se puede construir arrancando en `p`; si no, el motivo.
     pub fn pier_problem(&self, t: &TerrainGen, p: Vec2) -> Option<String> {
@@ -127,24 +171,18 @@ impl City {
         if self.services.port.pier.is_some() {
             return Some("La ciudad ya tiene su muelle".into());
         }
-        let h = t.height(p.x, p.y);
-        if h < 0.3 || t.is_water(p.x, p.y) {
-            return Some("El muelle arranca en tierra firme, en la orilla".into());
-        }
-        if h > 4.0 {
-            return Some("Demasiado alto: el muelle arranca en una orilla baja (playa o ribera)".into());
-        }
-        if self.net.clearance(p, 80.0) > 60.0 {
-            return Some("Debe estar junto a una calle (para las carretas)".into());
-        }
-        if find_sea(t, p).is_none() {
-            return Some("No hay agua profunda cerca: elige un punto de la costa".into());
+        let Some(p) = pier_start(t, p) else {
+            return Some(if t.is_water(p.x, p.y) || t.height(p.x, p.y) < 0.3 {
+                "Acercá el cursor a la orilla: el muelle arranca en tierra, junto al agua honda".into()
+            } else {
+                "Lejos de una orilla con agua honda (más de 120 m), o la barranca es muy alta".into()
+            });
+        };
+        if self.net.clearance(p, 200.0) > 150.0 {
+            return Some("Lejos de las calles: traza un camino hasta la costa (para las carretas)".into());
         }
         if PIER_COST > self.money {
             return Some(format!("Fondos insuficientes: hacen falta {PIER_COST} pesos"));
-        }
-        if self.economy.stock(super::super::economy::Res::Ladrillos).amount < PIER_WOOD_BRICKS {
-            return Some(format!("Faltan ladrillos para la barraca: hacen falta {}", PIER_WOOD_BRICKS as i32));
         }
         None
     }
@@ -154,14 +192,16 @@ impl City {
         if let Some(m) = self.pier_problem(t, p) {
             return Err(m);
         }
+        let p = pier_start(t, p).unwrap();
         let (dir, dist) = find_sea(t, p).unwrap();
         self.money -= PIER_COST;
-        self.economy.take(super::super::economy::Res::Ladrillos, PIER_WOOD_BRICKS);
-        let mut pier = Pier { land: p, dir, len: (dist + 25.0).clamp(40.0, 160.0), barraca: false, voxels: Vec::new() };
+        // La barraca de ladrillo, solo si hay ladrillos (el muelle se hace igual, de madera).
+        let ladrillos = self.economy.take(super::super::economy::Res::Ladrillos, PIER_WOOD_BRICKS);
+        let mut pier = Pier { land: p, dir, len: (dist + 25.0).clamp(40.0, PIER_MAX_LEN), barraca: false, voxels: Vec::new() };
         let mut e = Edits::default();
         let (bc, bf) = pier.barraca_site();
         let poly = corners_of(bc, bf, 18.0, 12.0);
-        let free = poly.iter().all(|q| t.height(q.x, q.y) > 0.5 && self.net.clearance(*q, 30.0) > 0.5) && !self.lots.obstacles.iter().any(|o| super::super::lots::polys_overlap(&poly, &corners_of(o.c, o.f, o.w, o.d)));
+        let free = ladrillos && poly.iter().all(|q| t.height(q.x, q.y) > 0.5 && self.net.clearance(*q, 30.0) > 0.5) && !self.lots.obstacles.iter().any(|o| super::super::lots::polys_overlap(&poly, &corners_of(o.c, o.f, o.w, o.d)));
         if free {
             self.clear_lots_under(&poly, &mut e);
             self.lots.obstacles.push(Obstacle { c: bc, f: bf, w: 18.0, d: 12.0 });
@@ -318,5 +358,29 @@ mod tests {
             ships += city.services.port.ships_month;
         }
         assert!(ships >= 2, "{ships} barcos en un año");
+    }
+}
+
+#[cfg(test)]
+mod pier_real_tests {
+    use super::*;
+    /// En el mapa real, un clic cerca de la costa (a menos de 60 m del agua) encuentra dónde
+    /// arrancar el muelle casi siempre.
+    #[test]
+    fn el_muelle_se_engancha_a_la_costa_real() {
+        let t = TerrainGen::montevideo();
+        let (mut costa, mut ok) = (0, 0);
+        for j in 0..120 {
+            for i in 0..120 {
+                let p = Vec2::new(i as f32 * 200.0 + 100.0, j as f32 * 200.0 + 100.0);
+                let sd = t.sea_distance(p.x, p.y);
+                if t.height(p.x, p.y) > 0.3 && sd > 0.0 && sd < 60.0 {
+                    costa += 1;
+                    ok += pier_start(&t, p).is_some() as i32;
+                }
+            }
+        }
+        eprintln!("muelle: {ok} de {costa} puntos de costa");
+        assert!(costa > 20 && ok as f32 >= costa as f32 * 0.7, "{ok} de {costa}");
     }
 }

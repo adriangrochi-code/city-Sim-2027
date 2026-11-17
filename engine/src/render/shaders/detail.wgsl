@@ -124,7 +124,10 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     if (ndl + trans > 0.0) {
         sh = shadow(v.world, n);
     }
-    let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, n.y * 0.5 + 0.5);
+    // Luz del cielo en la sombra, algo desaturada: si no, al atardecer las sombras se ponían
+    // violetas y azules.
+    let sky_c = mix(g.sky_horizon.rgb, g.sky_top.rgb, n.y * 0.5 + 0.5);
+    let sky = mix(vec3(dot(sky_c, vec3(0.299, 0.587, 0.114))), sky_c, 0.55);
     let moon = vec3(0.45, 0.5, 0.65) * 0.14 * g.extra.z * g.params.y * ao;
     let light = g.sun_color.rgb * (ndl + trans) * sh + sky * 0.55 * g.params.w * ao + moon;
     var col = v.color * light;
@@ -134,5 +137,17 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let s = pow(max(dot(vdir, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
     let fog_c = mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s * 0.6);
     col = mix(col, fog_c, clamp(fog, 0.0, 0.88));
-    return vec4(col, 1.0);
+    return vec4(curva_tonal(col), 1.0);
+}
+
+// Curva tonal suave: hasta 0,75 de luminancia no toca nada; más arriba comprime de a poco (sin
+// cambiar el tono), así los claros al sol no se queman en amarillo saturado.
+fn curva_tonal(c: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    if (l <= 0.75) {
+        return c;
+    }
+    let x = l - 0.75;
+    let l2 = 0.75 + x / (1.0 + x * 2.5);
+    return c * (l2 / l);
 }

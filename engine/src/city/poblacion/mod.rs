@@ -5,7 +5,8 @@
 //! solares, precios, agua, llegadas, ordenanzas) e [`InformeMes`] (lo que le devuelve: gente
 //! sin casa, ánimo por sector, mejoras de casas, líneas del presupuesto y noticias).
 //!
-//! Diseño, calibración y la decisión de representación: `docs/sistemas/poblacion.md`.
+//! Diseño, calibración y la decisión de no representar la esclavitud:
+//! `docs/sistemas/poblacion.md`.
 //!
 //! Para otros sistemas:
 //! - agentes móviles: [`Poblacion::habitantes_de_lote`], [`Poblacion::lugar_de_trabajo`],
@@ -21,7 +22,6 @@ pub mod demografia;
 pub mod economia;
 pub mod estadisticas;
 pub mod felicidad;
-pub mod historia;
 pub mod modelo;
 pub mod nombres;
 pub mod origenes;
@@ -158,15 +158,6 @@ pub struct InformeMes {
     pub lineas: Vec<(String, i64)>,
 }
 
-/// Leyes de libertad (fechas en meses absolutos).
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
-pub struct Leyes {
-    /// Libertad de vientres y prohibición del tráfico.
-    pub vientres: Option<i32>,
-    /// Abolición de la esclavitud.
-    pub abolicion: Option<i32>,
-}
-
 /// Contadores del mes y del año en curso.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
 pub struct Contadores {
@@ -175,9 +166,7 @@ pub struct Contadores {
     pub muertes_infantiles: u32,
     pub casamientos: u32,
     pub llegados: u32,
-    pub llegados_forzados: u32,
     pub emigrados: u32,
-    pub libertades: u32,
 }
 
 impl Contadores {
@@ -187,9 +176,7 @@ impl Contadores {
         self.muertes_infantiles += o.muertes_infantiles;
         self.casamientos += o.casamientos;
         self.llegados += o.llegados;
-        self.llegados_forzados += o.llegados_forzados;
         self.emigrados += o.emigrados;
-        self.libertades += o.libertades;
     }
 }
 
@@ -307,11 +294,10 @@ pub struct Poblacion {
     pub azar: u64,
     pub mes: i32,
     pub fundada: bool,
-    /// Modo "fiel a la historia": las llegadas históricas y las leyes de libertad ocurren en
-    /// sus fechas. Si no, dependen de las épocas y de las ordenanzas del jugador.
+    /// Modo "fiel a la historia": las llegadas históricas ocurren en sus fechas y la época
+    /// sigue al calendario. Si no, depende del jugador.
     pub fiel_historia: bool,
     pub epoca: Epoca,
-    pub leyes: Leyes,
     /// Crónica de la población (mes, texto), las últimas entradas.
     pub cronica: VecDeque<(i32, String)>,
     /// Fotos mensuales (últimos 24 meses) y anuales (todas).
@@ -324,15 +310,8 @@ pub struct Poblacion {
     pub legados: f64,
     /// Préstamos del cabildo pendientes de cobro.
     pub prestamos: f32,
-    /// Lo que el fondo de manumisión todavía no usó.
-    #[serde(default)]
-    pub fondo_libertad: f32,
     /// Meses que lleva la obra del fuerte (las cuadrillas guaraníes vuelven al terminar).
     pub obra: u32,
-    /// Hechos históricos de una sola vez que ya ocurrieron (bits `HITO_*`): la crónica no los
-    /// repite.
-    #[serde(default)]
-    pub hitos: u32,
     /// Población agregada (anónima) por edad simple: [hombres, mujeres]. Se usa cuando las
     /// personas individuales superan `limite_individuos` (épocas tardías).
     pub cohortes: Vec<[f32; 2]>,
@@ -415,13 +394,11 @@ impl Poblacion {
         self.textos.get(i as usize).map_or("", |s| s.as_str())
     }
 
-    /// "Juan Hernández Mesa" (o "Rosa, de nación Benguela" si llegó de África sin apellido, o
-    /// "Juan, nacido en Montevideo" si no tiene apellido).
+    /// "Juan Hernández Mesa" (o "Juan, nacido en Montevideo" si no tiene apellido).
     pub fn nombre_completo(&self, id: PersonaId) -> String {
         let Some(p) = self.persona(id) else { return "—".into() };
         let n = self.texto(p.nombre);
         match p.apellidos {
-            [NADIE, NADIE] if nombres::nacion(p.origen, p.id).is_some() => format!("{n}, de nación {}", nombres::nacion(p.origen, p.id).unwrap_or("")),
             [NADIE, NADIE] => format!("{n}, {} en {}", if p.sexo == Sexo::Mujer { "nacida" } else { "nacido" }, p.origen.corto()),
             [a, NADIE] | [NADIE, a] => format!("{n} {}", self.texto(a)),
             [a, b] => format!("{n} {} {}", self.texto(a), self.texto(b)),
@@ -490,7 +467,7 @@ impl Poblacion {
 
     /// Crea una persona (sin hogar) y devuelve su id.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn crear_persona(&mut self, rng: &mut Rng, sexo: Sexo, nacimiento: i32, origen: Origen, condicion: Condicion, apellidos: [u32; 2], padre: Option<PersonaId>, madre: Option<PersonaId>) -> PersonaId {
+    pub(crate) fn crear_persona(&mut self, rng: &mut Rng, sexo: Sexo, nacimiento: i32, origen: Origen, apellidos: [u32; 2], padre: Option<PersonaId>, madre: Option<PersonaId>) -> PersonaId {
         let lista = nombres::nombres(origen.cultura(), sexo);
         let nombre = self.interna(lista[(rng.next() % lista.len() as u64) as usize]);
         let raiz = match (padre.map(|p| self.personas[p as usize].raiz), madre.map(|m| self.personas[m as usize].raiz)) {
@@ -515,7 +492,6 @@ impl Poblacion {
             hogar: None,
             origen,
             raiz,
-            condicion,
             estamento: Estamento::Morador,
             oficio: Oficio::Ninguno,
             educacion: 0,
@@ -527,7 +503,6 @@ impl Poblacion {
             motivos: [felicidad::SIN_MOTIVO; 2],
             duelo: 0,
             historial: Vec::new(),
-            patronato: None,
         };
         p.evento(nacimiento, TipoEvento::Nacio, NADIE);
         self.personas.push(p);
@@ -578,9 +553,9 @@ impl Poblacion {
                 return;
             }
             self.hogares[prev as usize].miembros.retain(|&m| m != p);
-            // Si se va el jefe, queda al frente quien siga (de preferencia, una persona libre).
+            // Si se va el jefe, queda al frente quien siga.
             if self.hogares[prev as usize].jefe == p {
-                let nuevo = self.hogares[prev as usize].miembros.iter().copied().find(|&m| self.personas[m as usize].libre()).or(self.hogares[prev as usize].miembros.first().copied());
+                let nuevo = self.hogares[prev as usize].miembros.first().copied();
                 let hp = &mut self.hogares[prev as usize];
                 match nuevo {
                     Some(n) => hp.jefe = n,
@@ -608,7 +583,7 @@ impl Poblacion {
         let sexo_jefe = if tam == 1 && rng.f() < 0.15 { Sexo::Mujer } else { Sexo::Hombre };
         let jefe = {
             let nac = mes - edad_h * 12 - rng.range(0, 11);
-            self.crear_persona(rng, sexo_jefe, nac, o, Condicion::Libre, ap_h, None, None)
+            self.crear_persona(rng, sexo_jefe, nac, o, ap_h, None, None)
         };
         let h = self.crear_hogar(jefe, o, Alojamiento::SinCasa);
         let riqueza = ll.riqueza * (ll.dispersion * normal(rng)).exp();
@@ -619,7 +594,7 @@ impl Poblacion {
             let edad_m = (edad_h - 3 - rng.range(0, 8)).max(17);
             let esposa = {
                 let nac = mes - edad_m * 12 - rng.range(0, 11);
-                self.crear_persona(rng, Sexo::Mujer, nac, o, Condicion::Libre, ap_m, None, None)
+                self.crear_persona(rng, Sexo::Mujer, nac, o, ap_m, None, None)
             };
             self.casar(jefe, esposa, true, mes);
             self.unir_a_hogar(esposa, h);
@@ -631,7 +606,7 @@ impl Poblacion {
                 let sexo = if rng.f() < 0.51 { Sexo::Hombre } else { Sexo::Mujer };
                 let hijo = {
                     let nac = mes - e * 12 - rng.range(0, 11);
-                    self.crear_persona(rng, sexo, nac, o, Condicion::Libre, [ap_h[0], ap_m[0]], Some(jefe), Some(esposa))
+                    self.crear_persona(rng, sexo, nac, o, [ap_h[0], ap_m[0]], Some(jefe), Some(esposa))
                 };
                 self.personas[jefe as usize].hijos.push(hijo);
                 self.personas[esposa as usize].hijos.push(hijo);
@@ -675,37 +650,11 @@ impl Poblacion {
         h
     }
 
-    /// Personas que llegan en contra de su voluntad por la trata, y el hogar donde se las
-    /// somete. No hay ninguna transacción en el modelo: nadie paga ni cobra; es un flujo del
-    /// mundo (que la ley o el jugador pueden cortar) y la crónica lo cuenta.
-    pub(crate) fn llegada_forzada(&mut self, rng: &mut Rng, o: Origen, mes: i32, n: u32) -> u32 {
-        // Hogares de la ciudad con más recursos (los que, en la época, sometían a otras personas).
-        let ricos = self.hogares_receptores();
-        if ricos.is_empty() {
-            return 0;
-        }
-        for _ in 0..n {
-            let destino = Self::elegir_receptor(rng, &ricos);
-            let sexo = if rng.f() < 0.62 { Sexo::Hombre } else { Sexo::Mujer };
-            let edad = Self::edad_adulta(rng, 10, 32);
-            let p = {
-                let nac = mes - edad * 12 - rng.range(0, 11);
-                self.crear_persona(rng, sexo, nac, o, Condicion::Esclavizada, [NADIE, NADIE], None, None)
-            };
-            let pp = &mut self.personas[p as usize];
-            pp.evento(mes, TipoEvento::LlegoForzada(o), NADIE);
-            pp.oficio = if edad < 14 { Oficio::Ninguno } else if sexo == Sexo::Mujer { Oficio::Servicio } else if rng.f() < 0.5 { Oficio::Peon } else { Oficio::Servicio };
-            pp.salud = 0.45 + rng.f() * 0.3; // la travesía
-            self.unir_a_hogar(p, destino);
-        }
-        n
-    }
-
     // --- Fundación ----------------------------------------------------------------------
 
     /// Los primeros pobladores al fundar la plaza (meses desde enero de 1726): seis familias de
     /// Buenos Aires (33 personas), la guarnición del fuerte y las cuadrillas guaraníes de la
-    /// obra, y unas pocas personas esclavizadas en las casas más ricas (estimación).
+    /// obra.
     pub fn fundar(&mut self, mes: i32) {
         if self.fundada {
             return;
@@ -730,7 +679,7 @@ impl Poblacion {
             let edad = Self::edad_adulta(&mut rng, 17, 40);
             let p = {
                 let nac = mes - edad * 12 - rng.range(0, 11);
-                self.crear_persona(&mut rng, Sexo::Hombre, nac, o, Condicion::Libre, ap, None, None)
+                self.crear_persona(&mut rng, Sexo::Hombre, nac, o, ap, None, None)
             };
             let pp = &mut self.personas[p as usize];
             pp.oficio = Oficio::Soldado;
@@ -750,7 +699,7 @@ impl Poblacion {
             let edad = Self::edad_adulta(&mut rng, 16, 40);
             let p = {
                 let nac = mes - edad * 12 - rng.range(0, 11);
-                self.crear_persona(&mut rng, Sexo::Hombre, nac, Origen::Misiones, Condicion::Libre, ap, None, None)
+                self.crear_persona(&mut rng, Sexo::Hombre, nac, Origen::Misiones, ap, None, None)
             };
             let pp = &mut self.personas[p as usize];
             pp.oficio = if rng.f() < 0.25 { Oficio::Artesano } else { Oficio::Peon };
@@ -764,12 +713,8 @@ impl Poblacion {
             }
         }
         self.clasificar_hogares();
-        // Unas pocas personas esclavizadas en las casas más ricas (estimación).
-        let n = 3;
-        self.llegada_forzada(&mut rng, Origen::AfricaCentral, mes, n);
         self.azar = rng.state();
-        self.mes_actual.llegados += 33 + origenes::GUARNICION_1728 + origenes::CUADRILLA_GUARANI_1728 + n;
-        self.mes_actual.llegados_forzados += n;
+        self.mes_actual.llegados += 33 + origenes::GUARNICION_1728 + origenes::CUADRILLA_GUARANI_1728;
         self.anotar(mes, "Se funda la ciudad: seis familias de Buenos Aires, la guarnición del fuerte y las cuadrillas guaraníes de la obra".into());
         self.reindexar();
         self.stats = self.estadisticas();
@@ -783,7 +728,7 @@ impl Poblacion {
         let mut rng = Rng::from_state(p.azar);
         let mut n = 0;
         while n < habitantes.max(0) as u32 {
-            let ll = p.elegir_llegada(&mut rng, false);
+            let ll = p.elegir_llegada(&mut rng);
             let tam = p.tam_familia(&mut rng, ll);
             p.llegar_familia(&mut rng, ll, mes, tam);
             n += tam;
@@ -808,12 +753,11 @@ impl Poblacion {
         (m + normal(rng) * 1.2).round().clamp(2.0, 9.0) as u32
     }
 
-    /// Elige un origen de la tabla de la época (sin las llegadas forzadas si `forzadas` es
-    /// falso o si el tráfico está prohibido).
-    pub(crate) fn elegir_llegada(&self, rng: &mut Rng, forzadas: bool) -> &'static origenes::Llegada {
+    /// Elige un origen de la tabla de la época según su peso.
+    pub(crate) fn elegir_llegada(&self, rng: &mut Rng) -> &'static origenes::Llegada {
         let t = origenes::tabla(self.epoca);
         let año = año_de(self.mes);
-        let peso = |l: &origenes::Llegada| if l.forzada { if forzadas { l.peso * origenes::factor_trata(año) } else { 0.0 } } else { l.peso * origenes::factor_origen(l.origen, año) };
+        let peso = |l: &origenes::Llegada| l.peso * origenes::factor_origen(l.origen, año);
         let total: f32 = t.iter().map(peso).sum();
         let mut r = rng.f() * total;
         for l in t {
@@ -823,11 +767,7 @@ impl Poblacion {
             }
             r -= w;
         }
-        t.iter().find(|l| !l.forzada).unwrap()
-    }
-
-    pub(crate) fn trata_prohibida(&self, ent: &Entorno) -> bool {
-        self.leyes.vientres.is_some() || self.leyes.abolicion.is_some() || ent.vigente(Ordinance::LibertadVientres) || ent.vigente(Ordinance::Abolicion)
+        &t[0]
     }
 
     /// Las llegadas del mes: familias de los orígenes de la época hasta sumar `n` personas.
@@ -853,24 +793,9 @@ impl Poblacion {
                 }
             }
         }
-        let forzadas = !self.trata_prohibida(ent) && self.epoca <= Epoca::CiudadNueva;
         let mut notable: Option<HogarId> = None;
-        let mut forzados = 0;
-        let mut origen_forzado = None;
         while n > 0 {
-            let ll = self.elegir_llegada(rng, forzadas);
-            if ll.forzada {
-                // Llegan en grupo, en el mismo barco.
-                let k = (2 + rng.range(0, 6) as u32).min(n);
-                let k = self.llegada_forzada(rng, ll.origen, ent.mes, k);
-                if k == 0 {
-                    break;
-                }
-                forzados += k;
-                origen_forzado = Some(ll.origen);
-                n = n.saturating_sub(k);
-                continue;
-            }
+            let ll = self.elegir_llegada(rng);
             let tam = self.tam_familia(rng, ll).min(n.max(1));
             let h = self.llegar_familia(rng, ll, ent.mes, tam);
             if tam >= 4 && notable.is_none() {
@@ -879,18 +804,11 @@ impl Poblacion {
             self.mes_actual.llegados += tam;
             n = n.saturating_sub(tam);
         }
-        self.mes_actual.llegados += forzados;
-        self.mes_actual.llegados_forzados += forzados;
         if let Some(h) = notable {
             let hg = &self.hogares[h as usize];
             let j = hg.jefe;
             let hijos = hg.miembros.len().saturating_sub(2);
             let t = format!("Llega {} la familia {}: {} con su familia y {} {}", hg.origen.de(), self.apellido_hogar(h), self.nombre(j), hijos, if hijos == 1 { "hijo" } else { "hijos" });
-            self.anotar(ent.mes, t);
-        }
-        if let (true, Some(o)) = (forzados > 0, origen_forzado) {
-            let t = format!("Llegan en un barco {forzados} personas {} traídas por la trata, arrancadas de sus pueblos y sometidas a la esclavitud", o.de());
-            noticias.push(t.clone());
             self.anotar(ent.mes, t);
         }
     }
@@ -921,13 +839,10 @@ impl Poblacion {
         }
         let mut rng = Rng::from_state(self.azar);
         let mut noticias = Vec::new();
-        self.leyes_de_libertad(ent, &mut noticias);
-        self.hechos_historicos(&mut rng, ent, &mut noticias);
         self.llegadas(&mut rng, ent, &mut noticias);
         self.vivienda(&mut rng, ent, &mut inf);
         self.empleo(&mut rng, ent);
         self.economia_hogares(&mut rng, ent, &mut inf);
-        self.manumisiones(&mut rng, ent, &mut noticias);
         self.muertes(&mut rng, ent, &mut noticias);
         self.nacimientos(&mut rng, ent);
         self.casamientos(&mut rng, ent, &mut noticias);
@@ -988,7 +903,7 @@ impl Poblacion {
         let corte = self.mes - 12 * 40;
         for p in &mut self.personas {
             if p.muerte.is_some_and(|m| m < corte) && p.historial.len() > 6 {
-                p.historial.retain(|e| matches!(e.tipo, TipoEvento::Nacio | TipoEvento::Llego(_) | TipoEvento::LlegoForzada(_) | TipoEvento::LlegoColono(_) | TipoEvento::LlegoPrisionera | TipoEvento::Caso | TipoEvento::Union | TipoEvento::Libertad(_) | TipoEvento::Murio(_)));
+                p.historial.retain(|e| matches!(e.tipo, TipoEvento::Nacio | TipoEvento::Llego(_) | TipoEvento::Caso | TipoEvento::Union | TipoEvento::Murio(_)));
                 p.historial.shrink_to_fit();
             }
         }

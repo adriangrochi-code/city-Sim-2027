@@ -1,5 +1,5 @@
 //! Pruebas de la población: calibración demográfica, integridad de las familias, herencia,
-//! libertad, felicidad, políticas, determinismo y guardado.
+//! felicidad, políticas, determinismo, guardado y la decisión de no representar la esclavitud.
 
 use super::simulacion::CiudadSintetica;
 use super::*;
@@ -18,7 +18,7 @@ fn calibracion() {
             let f = c.p.anual.last().unwrap();
             let s = &c.p.stats;
             println!(
-                "{} hab {:6} TBN {:5.1} TBM {:5.1} TMI {:4.0} edad {:4.1} hogar {:3.1} h/m {:4.0} escl {:4.1}% lib {:3} forz {:3} afro {:4.1}% indig {:3.1}% gini {:.2}/{:.2} top10 {:.2} pobreza {:.2} fel {:.2} desc {:.2} sincasa {} leen {:.2} {:?}",
+                "{} hab {:6} TBN {:5.1} TBM {:5.1} TMI {:4.0} edad {:4.1} hogar {:3.1} h/m {:4.0} afro {:4.1}% indig {:3.1}% gini {:.2}/{:.2} top10 {:.2} pobreza {:.2} fel {:.2} desc {:.2} sincasa {} leen {:.2} {:?}",
                 año_de(c.mes),
                 s.habitantes,
                 f.natalidad,
@@ -27,9 +27,6 @@ fn calibracion() {
                 s.edad_media,
                 s.tam_hogar,
                 s.hombres_por_100_mujeres,
-                s.por_condicion[1] as f32 / s.habitantes.max(1) as f32 * 100.0,
-                f.cuenta.libertades,
-                f.cuenta.llegados_forzados,
                 s.afrodescendientes as f32 / s.habitantes.max(1) as f32 * 100.0,
                 s.indigenas as f32 / s.habitantes.max(1) as f32 * 100.0,
                 s.gini_riqueza,
@@ -45,16 +42,6 @@ fn calibracion() {
         }
     }
     println!("{:?} · {} personas registradas", t0.elapsed(), c.p.personas.len());
-    // Libertades por vía y por sexo (Frega et al.: dos tercios de las compras, mujeres).
-    let mut vias: BTreeMap<String, [u32; 2]> = BTreeMap::new();
-    for p in &c.p.personas {
-        for e in &p.historial {
-            if let TipoEvento::Libertad(v) = e.tipo {
-                vias.entry(format!("{v:?}")).or_default()[p.sexo as usize] += 1;
-            }
-        }
-    }
-    println!("libertades por vía [hombres, mujeres]: {vias:?}");
 }
 
 fn ciudad(semilla: u64, años: i32) -> CiudadSintetica {
@@ -127,10 +114,8 @@ fn familias_integras_y_linajes() {
                 assert!(pa.muerte.is_none_or(|m| m >= x.nacimiento - 10), "nadie nace mucho después de morir su padre");
             }
         }
-        let eligio = x.historial.iter().any(|e| e.tipo == TipoEvento::TomoApellido);
-        if let (Some(pa), Some(ma), false) = (x.padre, x.madre, eligio) {
-            // El primer apellido es el del padre (o el de la madre si el padre no tenía al
-            // nacer el hijo: las personas llegadas por la trata lo toman con la libertad).
+        if let (Some(pa), Some(ma)) = (x.padre, x.madre) {
+            // El primer apellido es el del padre (o el de la madre si el padre no tenía).
             let (ap, am) = (p.personas[pa as usize].apellidos[0], p.personas[ma as usize].apellidos[0]);
             let propio = [ap, am, NADIE].contains(&x.apellidos[0]) || x.apellidos[1] == NADIE;
             assert!(propio, "{} lleva el apellido de su familia", p.nombre_completo(x.id));
@@ -149,7 +134,7 @@ fn familias_integras_y_linajes() {
     // Cada persona viva está en el hogar que dice y cada hogar activo tiene jefe vivo dentro.
     for v in p.vivos() {
         let h = &p.hogares[v.hogar.unwrap() as usize];
-        assert!(h.activo && h.miembros.contains(&v.id), "{} está en su hogar: activo {} miembro {} {:?} jefe {} {:?} {:?}", p.nombre_completo(v.id), h.activo, h.miembros.contains(&v.id), h.alojamiento, h.jefe, v.historial, v.condicion);
+        assert!(h.activo && h.miembros.contains(&v.id), "{} está en su hogar: activo {} miembro {} {:?} jefe {} {:?}", p.nombre_completo(v.id), h.activo, h.miembros.contains(&v.id), h.alojamiento, h.jefe, v.historial);
     }
     for h in p.hogares.iter().filter(|h| h.activo && !h.miembros.is_empty()) {
         assert!(h.miembros.contains(&h.jefe), "el jefe vive en su hogar {}", h.id);
@@ -185,281 +170,157 @@ fn la_herencia_conserva_la_riqueza() {
     }
 }
 
-#[test]
-fn caminos_a_la_libertad() {
-    let mut c = ciudad(14, 50);
-    let esclavizadas = |c: &CiudadSintetica| c.p.vivos().filter(|p| p.condicion == Condicion::Esclavizada).count();
-    assert!(esclavizadas(&c) > 20, "la época colonial tiene personas esclavizadas: {}", esclavizadas(&c));
-    // Por ahorro: alguien que juntó la suma de su carta.
-    let id = c.p.vivos().find(|p| p.condicion == Condicion::Esclavizada && p.edad(c.mes) >= 20).unwrap().id;
-    c.p.personas[id as usize].riqueza = economia::CARTA_DE_LIBERTAD + 5.0;
-    let mut ruido = Vec::new();
-    let ent = c.entorno(0);
-    let mut rng = Rng::new(1);
-    c.p.manumisiones(&mut rng, &ent, &mut ruido);
-    let p = &c.p.personas[id as usize];
-    assert_eq!(p.condicion, Condicion::Liberta);
-    assert!(p.historial.iter().any(|e| e.tipo == TipoEvento::Libertad(ViaLibertad::Ahorro)));
-    assert_ne!(p.apellidos, [NADIE, NADIE], "toma un apellido");
-    assert!(c.p.hogares[p.hogar.unwrap() as usize].miembros.iter().all(|&m| c.p.personas[m as usize].libre()), "vive en un hogar libre");
-    // Con el fondo del cabildo hay libertades por el fondo.
-    let sin = ciudad(15, 60);
-    let mut con = ciudad(15, 40);
-    con.ordenanzas.push(Ordinance::FondoManumision);
-    for _ in 0..240 {
-        con.paso();
+/// Palabras de la esclavitud que no pueden aparecer en ningún texto que el juego muestre:
+/// comienzos de palabra, palabras enteras (`=`) y frases.
+const PALABRAS_PROHIBIDAS: &[&str] = &["esclav", "libert", "manumis", "coartaci", "patronato", "aboli", "vientre", "salsipuedes", "caserío", "peculio", "sometid", "cofradía", "colono", "prisioner", "=trata", "=amo", "=amos", "=ama", "=leva", "de nación", "carta de"];
+
+fn sin_palabras_prohibidas(donde: &str, t: &str) {
+    let t = t.to_lowercase();
+    let palabras: Vec<&str> = t.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    for w in PALABRAS_PROHIBIDAS {
+        let hay = match w.strip_prefix('=') {
+            Some(entera) => palabras.iter().any(|p| *p == entera),
+            None if w.contains(' ') => t.contains(w),
+            None => palabras.iter().any(|p| p.starts_with(w)),
+        };
+        assert!(!hay, "{donde}: «{t}» contiene «{w}»");
     }
-    let libres_por = |c: &CiudadSintetica, v: ViaLibertad| c.p.personas.iter().filter(|p| p.historial.iter().any(|e| e.tipo == TipoEvento::Libertad(v))).count();
-    assert!(libres_por(&con, ViaLibertad::Fondo) > 0, "el fondo libera");
-    assert!(libres_por(&sin, ViaLibertad::Testamento) > 0, "libertades por testamento");
-    // Libertad de vientres: después de la ley, nadie nace esclavizado.
-    con.ordenanzas.push(Ordinance::LibertadVientres);
-    let ley = con.mes + 1;
-    for _ in 0..60 {
-        con.paso();
-    }
-    assert!(con.p.personas.iter().filter(|p| p.nacimiento > ley).all(|p| p.condicion != Condicion::Esclavizada));
-    assert!(con.p.personas.iter().any(|p| p.historial.iter().any(|e| e.tipo == TipoEvento::Libertad(ViaLibertad::Vientres))), "hay nacidos libres por la ley");
-    assert!(con.p.personas.iter().all(|p| !p.historial.iter().any(|e| matches!(e.tipo, TipoEvento::LlegoForzada(_)) && e.mes > ley)), "se prohibió el tráfico");
-    // Abolición: nadie queda esclavizado y no hay vuelta atrás.
-    con.ordenanzas.push(Ordinance::Abolicion);
-    con.paso();
-    assert_eq!(esclavizadas(&con), 0);
-    con.ordenanzas.clear();
-    for _ in 0..24 {
-        con.paso();
-    }
-    assert_eq!(esclavizadas(&con), 0, "derogar la ordenanza no vuelve atrás");
-    let mut e = crate::city::economy::Economy::default();
-    let mut plata = 1000;
-    e.toggle(Ordinance::Abolicion, &mut plata).unwrap();
-    assert!(e.toggle(Ordinance::Abolicion, &mut plata).is_err(), "la abolición no se deroga");
 }
 
 #[test]
-fn en_la_historia_fiel_las_leyes_llegan_en_sus_fechas() {
-    use historia::*;
-    let mut p = Poblacion::nueva(3);
-    p.fundar(2);
-    let mut ent = Entorno { precio_pan: 1.0, precio_carne: 1.0, agua: 0.5, ..Default::default() };
-    ent.mes = mes_de(1824, 12);
-    p.mes(&ent);
-    assert!(p.leyes.vientres.is_none());
-    // La ley de la Florida (setiembre de 1825) no rigió en Montevideo, ocupada por el Brasil.
-    ent.mes = mes_de(1825, 9);
-    p.mes(&ent);
-    assert!(p.hito(HITO_LEY_FLORIDA), "la crónica cuenta la ley de la Florida");
-    assert!(p.leyes.vientres.is_none(), "en Montevideo la libertad de vientres no rige en 1825");
-    ent.mes = mes_de(1829, 12);
-    p.mes(&ent);
-    assert!(p.leyes.vientres.is_none());
-    // Rige desde que la Asamblea la extiende a todo el territorio (enero de 1830).
-    ent.mes = mes_de(1830, 1);
-    p.mes(&ent);
-    assert_eq!(p.leyes.vientres, Some(mes_de(1830, 1)));
-    // La abolición del Gobierno de la Defensa: diciembre de 1842, no enero.
-    ent.mes = mes_de(1842, 11);
-    p.mes(&ent);
-    assert!(p.leyes.abolicion.is_none());
-    ent.mes = mes_de(1842, 12);
-    p.mes(&ent);
-    assert_eq!(p.leyes.abolicion, Some(mes_de(1842, 12)));
-    assert!(p.vivos().all(|x| x.condicion != Condicion::Esclavizada));
-}
-
-/// La ciudad fiel a la historia desde la fundación hasta noviembre de `año`.
-fn ciudad_hasta(semilla: u64, año: i32) -> CiudadSintetica {
-    let mut c = CiudadSintetica::nueva(semilla);
-    while c.mes < historia::mes_de(año, 11) {
-        c.paso();
-    }
-    c
-}
-
-#[test]
-fn abolicion_de_1842_con_leva_y_patronato() {
-    use historia::*;
-    let mut c = ciudad_hasta(31, 1842);
+fn nadie_vive_sin_libertad() {
+    // El juego no representa la esclavitud: no hay condición legal, nadie vive sujeto a otro
+    // hogar y el modelo no tiene campos ni hechos de esa clase.
+    let c = ciudad(14, 70);
     let p = &c.p;
-    // Antes de 1830 entraban personas por la trata; después, solo los «colonos» (1832–1835).
-    let forzadas_despues = p.personas.iter().filter(|x| x.historial.iter().any(|e| matches!(e.tipo, TipoEvento::LlegoForzada(_)) && e.mes >= VIENTRES_MONTEVIDEO)).count();
-    assert_eq!(forzadas_despues, 0, "la trata se corta en 1830");
-    let colonos: Vec<&Persona> = p.personas.iter().filter(|x| x.historial.iter().any(|e| matches!(e.tipo, TipoEvento::LlegoColono(_)))).collect();
-    assert!(!colonos.is_empty(), "llegan colonos africanos entre 1832 y 1835");
-    for x in &colonos {
-        let llego = x.historial.iter().find(|e| matches!(e.tipo, TipoEvento::LlegoColono(_))).unwrap().mes;
-        assert!((COLONOS_DESDE..COLONOS_HASTA).contains(&llego));
-        assert!(x.edad(llego) <= 16, "los colonos no podían tener más de 16 años");
-        assert_eq!(x.condicion, Condicion::Liberta);
+    let json = serde_json::to_string(p).unwrap();
+    for campo in ["\"condicion\"", "\"patronato\"", "\"leyes\"", "Esclavizada", "Liberta", "LlegoForzada", "LlegoColono", "LlegoPrisionera", "Libertad", "fondo_libertad", "llegados_forzados", "libertades"] {
+        assert!(!json.contains(campo), "la partida guardada no tiene `{campo}`");
     }
-    // Los prisioneros de Salsipuedes, repartidos a familias distintas.
-    let presos: Vec<&Persona> = p.personas.iter().filter(|x| x.historial.iter().any(|e| e.tipo == TipoEvento::LlegoPrisionera)).collect();
-    assert!(presos.len() >= 3);
-    assert!(presos.iter().all(|x| x.origen == Origen::PueblosRegion));
-    assert!(presos.iter().filter(|x| x.sexo == Sexo::Hombre).all(|x| x.edad(SALSIPUEDES) < 12), "casi todos mujeres, niñas y niños");
-    // Nacidos en la ciudad después de enero de 1830: nadie esclavizado.
-    assert!(p.personas.iter().filter(|x| x.nacimiento >= VIENTRES_MONTEVIDEO).all(|x| x.condicion != Condicion::Esclavizada));
-    let esclavizadas: Vec<PersonaId> = p.vivos().filter(|x| x.condicion == Condicion::Esclavizada).map(|x| x.id).collect();
-    assert!(esclavizadas.len() > 10, "en 1842 todavía hay personas esclavizadas: {}", esclavizadas.len());
-    // Diciembre de 1842: varones aptos al ejército, el resto bajo patronato.
-    c.paso();
-    let p = &c.p;
-    assert!(p.vivos().all(|x| x.condicion != Condicion::Esclavizada));
-    let mut armas = 0;
-    let mut patronato = 0;
-    for &id in &esclavizadas {
-        let x = &p.personas[id as usize];
-        if !x.viva() {
-            continue;
-        }
-        if x.historial.iter().any(|e| e.tipo == TipoEvento::Libertad(ViaLibertad::Armas)) {
-            armas += 1;
-            assert_eq!(x.sexo, Sexo::Hombre);
-            assert!(x.historial.iter().any(|e| e.tipo == TipoEvento::Libertad(ViaLibertad::Armas) && e.mes == ABOLICION_DEFENSA));
-        } else {
-            patronato += 1;
-            let hasta = x.patronato.expect("quien no va a las armas queda bajo patronato");
-            let edad = x.edad(c.mes);
-            if edad < PATRONATO_MENORES {
-                assert_eq!(hasta, x.nacimiento + PATRONATO_MENORES * 12, "los menores, hasta los 25 años");
-            } else {
-                assert!(hasta <= c.mes + PATRONATO_ADULTOS * 12, "los mayores, tres años más");
-            }
-            assert!(x.sujeta());
-        }
-    }
-    assert!(armas > 0 && patronato > 0, "armas {armas}, patronato {patronato}");
-    // El patronato vence y la ley de 1853 lo termina para todos.
-    while c.mes < FIN_PATRONATO + 1 {
-        c.paso();
-    }
-    assert_eq!(c.p.stats.bajo_patronato, 0, "en 1853 no queda nadie bajo patronato");
-    assert!(c.p.personas.iter().any(|x| x.historial.iter().any(|e| e.tipo == TipoEvento::FinPatronato)));
-    assert!(c.p.hito(HITO_CERRITO) && c.p.hito(HITO_FIN_PATRONATO) && c.p.hito(HITO_CONSTITUCION));
-}
-
-#[test]
-fn bajo_patronato_no_elige_patron_ni_se_muda() {
-    let mut c = ciudad(33, 40);
-    let id = c.p.vivos().find(|x| x.condicion == Condicion::Esclavizada && x.edad(c.mes) >= 18 && x.conyuge.is_none()).unwrap().id;
-    let casa = c.p.personas[id as usize].hogar;
-    let mes = c.mes;
-    let mut ruido = Vec::new();
-    c.p.liberar_con(id, ViaLibertad::Abolicion, &mut ruido, Some(mes + 24));
-    let x = &c.p.personas[id as usize];
-    assert_eq!(x.condicion, Condicion::Liberta);
-    assert!(x.sujeta() && x.libre());
-    assert_eq!(x.hogar, casa, "bajo patronato sigue en la misma casa");
-    for _ in 0..12 {
-        c.paso();
-        let x = &c.p.personas[id as usize];
-        if !x.viva() {
-            return;
-        }
-        assert_eq!(x.hogar, casa, "no se muda por su cuenta");
-        if let Some(l) = x.trabajo {
-            let propio = c.p.hogares[casa.unwrap() as usize].solares.contains(&l);
-            assert!(propio, "trabaja donde lo mande el hogar");
-        }
-    }
-    for _ in 0..13 {
-        c.paso();
-    }
-    let x = &c.p.personas[id as usize];
-    if x.viva() {
-        assert!(x.patronato.is_none(), "el patronato vence");
-        assert!(x.historial.iter().any(|e| e.tipo == TipoEvento::FinPatronato));
-        assert_ne!(x.hogar, casa, "al terminar el patronato arma su hogar o se reúne con su familia");
-    }
-}
-
-#[test]
-fn caminos_a_la_libertad_de_la_epoca() {
-    let c = ciudad(35, 92);
-    let p = &c.p;
-    let por = |v: ViaLibertad, s: Sexo| p.personas.iter().filter(|x| x.sexo == s && x.historial.iter().any(|e| e.tipo == TipoEvento::Libertad(v))).count();
-    // Las mujeres compraban su libertad más que los varones (dos tercios de las compras de
-    // 1790–1820): con su peculio, con su familia o con la colecta de la cofradía.
-    let compras = [ViaLibertad::Ahorro, ViaLibertad::Familia, ViaLibertad::Colecta];
-    let mujeres: usize = compras.iter().map(|&v| por(v, Sexo::Mujer)).sum();
-    let hombres: usize = compras.iter().map(|&v| por(v, Sexo::Hombre)).sum();
-    assert!(mujeres + hombres > 20, "hay compras de libertad: {mujeres} + {hombres}");
-    assert!(mujeres as f32 > 0.5 * (mujeres + hombres) as f32, "las mujeres compran más su libertad: {mujeres} de {}", mujeres + hombres);
-    assert!(por(ViaLibertad::Familia, Sexo::Mujer) > por(ViaLibertad::Familia, Sexo::Hombre), "las familias liberan primero a la esposa y madre");
-    assert!(por(ViaLibertad::Colecta, Sexo::Mujer) + por(ViaLibertad::Colecta, Sexo::Hombre) > 0, "colectas de las cofradías");
-    assert!(por(ViaLibertad::Armas, Sexo::Hombre) > 0 && por(ViaLibertad::Armas, Sexo::Mujer) == 0, "la leva de 1816");
-    // Las cofradías y las salas de nación existen y la crónica las cuenta.
-    assert!(p.hay_cofradias() && p.hito(historia::HITO_SALAS) && p.hito(historia::HITO_CASERIO));
-    assert!(p.cronica.iter().any(|(_, t)| t.contains("Día de Reyes")));
-    // Quienes llegan por la trata se nombran por su «nación», sin dueño.
-    let llegada = p.vivos().find(|x| x.apellidos == [NADIE, NADIE] && nombres::nacion(x.origen, x.id).is_some()).unwrap();
-    let n = p.nombre_completo(llegada.id);
-    assert!(n.contains(", de nación "), "{n}");
-    // Restricción colonial: ninguna persona afrodescendiente libre entra al clero ni a una
-    // escribanía antes de 1830 (limpieza de sangre); las milicias, en cambio, son un camino.
-    let asc = p.ascendencias();
-    for x in &p.personas {
-        if asc[x.id as usize] & historia::ASC_AFRICANA == 0 {
-            continue;
-        }
+    // Todas las personas viven en su propio hogar o en el de su familia: nadie vive en un hogar
+    // ajeno sin parentesco salvo el cuartel y el campamento (colectivos), y quien llega lo hace
+    // con su familia o solo.
+    for x in p.vivos() {
         for e in &x.historial {
-            if let TipoEvento::Oficio(o) = e.tipo {
-                assert!(!matches!(o, Oficio::Clerigo | Oficio::Funcionario), "{} se hace {:?}", p.nombre_completo(x.id), o);
+            if let TipoEvento::Llego(_) = e.tipo {
+                let h = &p.hogares[x.hogar.unwrap() as usize];
+                let pariente = |a: &Persona, b: &Persona| a.id == b.id || a.conyuge == Some(b.id) || b.conyuge == Some(a.id) || a.padre == Some(b.id) || a.madre == Some(b.id) || b.padre == Some(a.id) || b.madre == Some(a.id) || (a.padre.is_some() && a.padre == b.padre) || (a.madre.is_some() && a.madre == b.madre);
+                let jefe = &p.personas[h.jefe as usize];
+                assert!(Poblacion::colectivo(h) || e.mes < c.mes - 12 || h.jefe == x.id || pariente(x, jefe) || p.personas.iter().any(|y| pariente(x, y) && y.id != x.id && y.hogar == x.hogar), "{} llegó y vive con su familia o sola", p.nombre_completo(x.id));
             }
         }
     }
-    // La parte de la población esclavizada a principios del siglo XIX ronda la de los padrones
-    // (cerca de un tercio en 1805, menos del 25 % en 1819; Borucki 2005): entre 15 y 35 %.
-    let f = p.anual.iter().find(|f| año_de(f.mes) == 1805).unwrap();
-    let parte = f.esclavizadas as f32 / f.habitantes as f32;
-    assert!((0.15..=0.35).contains(&parte), "esclavizadas en 1805: {parte}");
-}
-
-#[test]
-fn las_libertades_conservan_la_riqueza() {
-    // La carta de libertad, la ayuda de la familia y la colecta mueven dinero entre hogares y
-    // hacia los legados, nunca lo crean ni lo dan a quien sometía.
-    let mut c = ciudad(36, 70);
-    let mut rng = Rng::new(9);
-    let ent = c.entorno(0);
-    for x in c.p.personas.iter_mut().filter(|x| x.condicion == Condicion::Esclavizada).take(40) {
-        x.riqueza = economia::CARTA_DE_LIBERTAD * 0.8;
+    // Hay personas de origen africano e indígena, libres, con nombre, apellido y oficio.
+    let africanas: Vec<&Persona> = p.personas.iter().filter(|x| x.origen.raiz() == Raiz::Africana).collect();
+    assert!(!africanas.is_empty(), "llegan personas de origen africano");
+    assert!(africanas.iter().all(|x| x.apellidos[0] != NADIE), "con apellido");
+    assert!(p.stats.afrodescendientes > 0 && p.stats.indigenas > 0);
+    // Ningún texto de la crónica, de las historias de vida ni de los nombres habla de esclavitud.
+    for (_, t) in &p.cronica {
+        sin_palabras_prohibidas("crónica", t);
     }
-    let mut ruido = Vec::new();
-    for _ in 0..24 {
-        let antes = c.p.riqueza_total();
-        c.p.manumisiones(&mut rng, &ent, &mut ruido);
-        assert!((c.p.riqueza_total() - antes).abs() < 0.01, "{} → {}", antes, c.p.riqueza_total());
-    }
-}
-
-#[test]
-fn no_hay_forma_de_comerciar_personas() {
-    // Ninguna función ni campo pone precio a una persona ni la compra, vende o transfiere.
-    let fuentes = [include_str!("mod.rs"), include_str!("modelo.rs"), include_str!("economia.rs"), include_str!("demografia.rs"), include_str!("felicidad.rs"), include_str!("politicas.rs"), include_str!("historia.rs")];
-    for f in fuentes {
-        for prohibido in ["fn comprar_persona", "fn vender", "fn subastar", "fn precio_de_persona", "fn transferir_persona", "fn comerciar"] {
-            assert!(!f.contains(prohibido), "no puede existir `{prohibido}`");
+    for x in p.personas.iter().take(4000) {
+        sin_palabras_prohibidas("nombre", &p.nombre_completo(x.id));
+        for e in &x.historial {
+            sin_palabras_prohibidas("historia de vida", &p.texto_evento(x, e));
         }
     }
-    let modelo = include_str!("modelo.rs");
-    let persona = &modelo[modelo.find("pub struct Persona {").unwrap()..];
-    let persona = &persona[..persona.find("\n}").unwrap()];
-    for campo in ["precio", "valor", "dueno", "amo", "propietario"] {
-        assert!(!persona.contains(&format!("pub {campo}")), "Persona no tiene `{campo}`");
-    }
-    // Las llegadas forzadas no mueven dinero: nadie paga ni cobra.
-    let mut c = ciudad(16, 30);
-    let antes = c.p.riqueza_total();
-    let mut rng = Rng::new(5);
-    let mes = c.mes;
-    let n = c.p.llegada_forzada(&mut rng, Origen::AfricaCentral, mes, 10);
-    assert_eq!(n, 10);
-    assert!((c.p.riqueza_total() - antes).abs() < 1e-6);
-    // Y entre las ordenanzas no hay nada para comprar o vender personas.
+}
+
+#[test]
+fn los_textos_no_hablan_de_esclavitud() {
+    // Las tablas de textos que muestra el juego: ordenanzas, políticas, motivos y factores de
+    // la felicidad, épocas, orígenes, oficios y causas de muerte.
     for o in crate::city::economy::ORDINANCES {
-        let t = format!("{} {}", o.name, o.desc).to_lowercase();
-        assert!(!t.contains("comprar esclav") && !t.contains("vender esclav") && !t.contains("mercado de"), "{}", o.name);
+        sin_palabras_prohibidas(o.name, &format!("{} {}", o.name, o.desc));
+    }
+    for (o, t) in politicas::SOCIALES {
+        sin_palabras_prohibidas(&format!("{o:?}"), t);
+    }
+    for f in politicas::FUTURAS {
+        sin_palabras_prohibidas(f.nombre, &format!("{} {}", f.nombre, f.efecto));
+    }
+    for k in 0..=255u8 {
+        sin_palabras_prohibidas("motivo", felicidad::motivo_texto(k));
+    }
+    for f in felicidad::FACTORES {
+        sin_palabras_prohibidas("factor", f);
+    }
+    for e in Epoca::ALL {
+        sin_palabras_prohibidas("época", e.nombre());
+    }
+    for o in Origen::ALL {
+        sin_palabras_prohibidas("origen", &format!("{} {}", o.nombre(), o.corto()));
+    }
+    for s in [Sexo::Hombre, Sexo::Mujer] {
+        for o in [Oficio::Ninguno, Oficio::Peon, Oficio::Labrador, Oficio::Hacendado, Oficio::Artesano, Oficio::Pulpero, Oficio::Comerciante, Oficio::Marinero, Oficio::Soldado, Oficio::Servicio, Oficio::Clerigo, Oficio::Funcionario, Oficio::Maestro, Oficio::Obrero, Oficio::Empleado, Oficio::Profesional] {
+            sin_palabras_prohibidas("oficio", o.nombre(s));
+        }
+    }
+    for c in [Causa::Natural, Causa::Parto, Causa::Epidemia, Causa::Incendio, Causa::Inundacion, Causa::Hambre] {
+        sin_palabras_prohibidas("causa", c.texto());
+    }
+    // Y las cadenas literales de los fuentes de la población y de sus paneles (como un grep).
+    let fuentes = [
+        ("mod.rs", include_str!("mod.rs")),
+        ("modelo.rs", include_str!("modelo.rs")),
+        ("demografia.rs", include_str!("demografia.rs")),
+        ("economia.rs", include_str!("economia.rs")),
+        ("felicidad.rs", include_str!("felicidad.rs")),
+        ("estadisticas.rs", include_str!("estadisticas.rs")),
+        ("textos.rs", include_str!("textos.rs")),
+        ("nombres.rs", include_str!("nombres.rs")),
+        ("origenes.rs", include_str!("origenes.rs")),
+        ("politicas.rs", include_str!("politicas.rs")),
+        ("ui/poblacion.rs", include_str!("../../ui/poblacion.rs")),
+        ("economy.rs", include_str!("../economy.rs")),
+    ];
+    for (nombre, f) in fuentes {
+        for linea in f.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            // Solo lo que está entre comillas.
+            for (i, trozo) in linea.split('"').enumerate() {
+                if i % 2 == 1 {
+                    sin_palabras_prohibidas(nombre, trozo);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn una_partida_vieja_carga_sin_esclavitud() {
+    // Una partida guardada por una versión anterior trae campos y hechos que el juego ya no
+    // tiene: se ignoran, y las llegadas de otro tipo se leen como llegadas.
+    let c = ciudad(17, 12);
+    let mut v: serde_json::Value = serde_json::to_value(&c.p).unwrap();
+    let personas = v["personas"].as_array_mut().unwrap();
+    let n = personas.len();
+    for (i, x) in personas.iter_mut().enumerate() {
+        x["condicion"] = serde_json::json!(if i % 3 == 0 { "Esclavizada" } else if i % 3 == 1 { "Liberta" } else { "Libre" });
+        x["patronato"] = serde_json::json!(if i % 5 == 0 { serde_json::Value::from(400) } else { serde_json::Value::Null });
+        let h = x["historial"].as_array_mut().unwrap();
+        h.push(serde_json::json!({"mes": 30, "tipo": {"LlegoForzada": "AfricaCentral"}, "con": u32::MAX}));
+        h.push(serde_json::json!({"mes": 31, "tipo": {"Libertad": "Ahorro"}, "con": u32::MAX}));
+        h.push(serde_json::json!({"mes": 32, "tipo": "Patronato", "con": u32::MAX}));
+        h.push(serde_json::json!({"mes": 33, "tipo": "TomoApellido", "con": u32::MAX}));
+    }
+    v["leyes"] = serde_json::json!({"vientres": 1248, "abolicion": null});
+    v["fondo_libertad"] = serde_json::json!(12.5);
+    v["hitos"] = serde_json::json!(7);
+    v["mes_actual"]["llegados_forzados"] = serde_json::json!(3);
+    v["mes_actual"]["libertades"] = serde_json::json!(1);
+    let mut p: Poblacion = serde_json::from_value(v).unwrap();
+    p.reconstruir();
+    assert_eq!(p.personas.len(), n);
+    for (x, y) in p.personas.iter().zip(&c.p.personas) {
+        // Los hechos desconocidos se descartan; la llegada vieja queda como `Llego`.
+        assert_eq!(x.historial.len(), y.historial.len() + 1);
+        assert_eq!(x.historial.last().unwrap().tipo, TipoEvento::Llego(Origen::AfricaCentral));
+    }
+    // Y la partida sigue andando.
+    let mut b = CiudadSintetica { p, lotes: c.lotes.clone(), mes: c.mes, ordenanzas: c.ordenanzas.clone(), inmigracion: c.inmigracion, precio_pan: c.precio_pan, epidemia_cada: c.epidemia_cada, servicios: c.servicios };
+    for _ in 0..12 {
+        b.paso();
     }
 }
 
@@ -490,7 +351,7 @@ fn guardar_y_cargar_da_la_misma_poblacion() {
 }
 
 #[test]
-fn felicidad_hambre_hacinamiento_y_libertad() {
+fn felicidad_hambre_y_hacinamiento() {
     let mut c = ciudad(24, 30);
     let ent = c.entorno(0);
     // Un hogar con casa y comida.
@@ -509,28 +370,21 @@ fn felicidad_hambre_hacinamiento_y_libertad() {
     assert!(hambre.total < base.total - 0.05, "el hambre baja la felicidad: {} → {}", base.total, hambre.total);
     assert_eq!(hambre.motivos[0] / 4, 0, "el motivo principal es la comida: {:?}", hambre.motivos);
     c.p.hogares[h as usize] = guardado;
-    // Hacinado: se meten otras tres familias en la misma casa.
+    // Hacinado: se meten otras familias en la misma casa hasta pasar del doble de su lugar.
     let l = c.p.hogares[h as usize].lote.unwrap();
-    let otros: Vec<HogarId> = c.p.hogares.iter().filter(|x| x.activo && x.id != h && x.vive_en_solar() && x.lote != Some(l) && !x.miembros.is_empty()).map(|x| x.id).take(3).collect();
+    let cap = c.lotes[l as usize].capacidad;
+    let otros: Vec<HogarId> = c.p.hogares.iter().filter(|x| x.activo && x.id != h && x.vive_en_solar() && x.lote != Some(l) && !x.miembros.is_empty()).map(|x| x.id).collect();
     for o in otros {
+        if c.p.hacinamiento(l, cap) > 2.0 {
+            break;
+        }
         c.p.hogares[o as usize].lote = Some(l);
+        c.p.reindexar();
     }
-    c.p.reindexar();
     let hacinado = c.p.desglose(j, &ent);
     assert!(hacinado.valores[1] < base.valores[1] && hacinado.total < base.total, "vivir hacinado baja la felicidad: {} → {}", base.total, hacinado.total);
     assert!(hacinado.motivos.contains(&5), "motivo: vive hacinado ({:?})", hacinado.motivos);
-    // La libertad la sube.
-    let e = c.p.vivos().find(|p| p.condicion == Condicion::Esclavizada && p.edad(c.mes) > 18).unwrap().id;
-    let antes = c.p.desglose(e, &ent);
-    assert!(antes.motivos.contains(&24), "vive sin libertad ({:?})", antes.motivos);
-    let mut ruido = Vec::new();
-    c.p.liberar(e, ViaLibertad::Testamento, &mut ruido);
-    let despues = c.p.desglose(e, &ent);
-    assert!(despues.total > antes.total + 0.08, "la libertad sube la felicidad: {} → {}", antes.total, despues.total);
-    assert!(despues.valores[6] > antes.valores[6] + 0.5);
-    // Por grupo: las personas esclavizadas son mucho menos felices.
-    let s = &c.p.stats;
-    assert!(s.fel_condicion[1] < s.fel_condicion[0] - 0.1, "{:?}", s.fel_condicion);
+    assert_eq!(base.valores.len(), felicidad::FACTORES.len());
 }
 
 #[test]
@@ -583,7 +437,7 @@ fn api_para_agentes_y_servicios() {
     // Perder la casa en un incendio pesa en la seguridad.
     if let Some(&m) = c.p.hogares[h as usize].miembros.first() {
         let d = c.p.desglose(m, &c.entorno(0));
-        assert!(d.valores[10] <= 0.3, "seguridad {}", d.valores[10]);
+        assert!(d.valores[9] <= 0.3, "seguridad {}", d.valores[9]);
     }
     assert!(c.p.choque_hambruna(1.0) < c.p.habitantes());
     c.paso();
@@ -601,7 +455,7 @@ fn inmigracion_por_epocas_y_poblacion_agregada() {
     }
     let italianos = c.p.vivos().filter(|p| p.origen == Origen::Italia).count();
     assert!(italianos > 20, "en la época de la inmigración llegan italianos: {italianos}");
-    assert!(c.p.personas.iter().all(|p| !p.historial.iter().any(|e| matches!(e.tipo, TipoEvento::LlegoForzada(_)) && e.mes > desde)), "sin trata en las épocas tardías");
+    assert!(c.p.personas.iter().filter(|p| p.historial.iter().any(|e| matches!(e.tipo, TipoEvento::Llego(_)) && e.mes > desde)).all(|p| p.origen.raiz() != Raiz::Africana || p.origen == Origen::Montevideo), "las llegadas siguen la tabla de la época");
     // Con un límite de individuos chico, el resto pasa a la población agregada.
     c.p.limite_individuos = 400;
     for _ in 0..24 {
@@ -640,7 +494,7 @@ fn banco_poblacion() {
     g.p.epoca = Epoca::Inmigracion;
     while g.p.habitantes() < 100_000 {
         let mut rng = Rng::new(g.p.habitantes() as u64);
-        let ll = g.p.elegir_llegada(&mut rng, false);
+        let ll = g.p.elegir_llegada(&mut rng);
         let tam = g.p.tam_familia(&mut rng, ll);
         let mes = g.mes;
         g.p.llegar_familia(&mut rng, ll, mes, tam);

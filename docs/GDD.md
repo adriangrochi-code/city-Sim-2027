@@ -311,6 +311,10 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
 
 - Cada vecino tiene casa, trabajo o escuela, nivel educativo, riqueza, origen (criollo,
   inmigrante italiano o español…) y estado de ánimo.
+- **Todas las personas son libres** (decidido el 17 de noviembre de 2026): el juego **no
+  representa la esclavitud**. No hay condición legal, personas sujetas a otro hogar, leyes ni
+  ordenanzas sobre el tema; las personas africanas, afrodescendientes e indígenas existen como
+  vecinas y vecinos libres (ver [sistemas/poblacion.md](sistemas/poblacion.md), sección 5).
 - Se puede **seguir a cualquier vecino**: ver su rutina, su trayecto y sus quejas.
 - **Vida de barrio**: la **feria vecinal** semanal ocupa una calle y atrae compradores; el
   **carnaval** y las **llamadas** recorren ciertos barrios; el fútbol llena el estadio. Son

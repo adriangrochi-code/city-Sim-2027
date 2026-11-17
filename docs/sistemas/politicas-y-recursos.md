@@ -76,8 +76,7 @@ mensual (o un ingreso), efectos en la simulación y efectos en la opinión.
 **Políticas sociales** (también ordenanzas, implementadas con la población; detalle y tabla en
 [poblacion.md](poblacion.md), sección 7): reparto de solares a familias pobres, contribución
 progresiva, pan barato para los pobres, hospital de caridad, escuelas de primeras letras,
-préstamos del cabildo, fondo de manumisión, libertad de vientres y abolición (estas dos no se
-derogan). La felicidad de la población de cada sector se suma a las causas de su opinión.
+préstamos del cabildo. La felicidad de la población de cada sector se suma a las causas de su opinión.
 
 Reglas de diseño:
 - **Ninguna ordenanza es gratis**: todas cuestan dinero o molestan a algún sector.

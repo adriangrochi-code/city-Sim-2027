@@ -353,9 +353,18 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // (9 lecturas del mapa por fragmento). El resultado es idéntico.
     var sh = 1.0;
     if (ndl > 0.0) {
-        sh = shadow(v.world, n);
+        // El terreno es una ladera suave hecha de escalones de un vóxel: con el sol bajo, cada
+        // escalón tiraba una sombra larga sobre el de al lado (rayas en las laderas). Se consulta
+        // la sombra unos vóxeles hacia el sol: los escalones vecinos ya no la tapan, y los árboles,
+        // las casas y los cerros siguen dando sombra.
+        // Con el sol bajo la sombra de un escalón es más larga: el corrimiento crece con 1/alto.
+        let hacia_sol = select(0.0, (v.voxel * 1.5 + 0.3) / max(g.sun_dir.y, 0.12), terr);
+        sh = shadow(v.world + g.sun_dir.xyz * hacia_sol, n);
     }
-    let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, ln.y * 0.5 + 0.5);
+    // Luz del cielo en la sombra, algo desaturada: si no, al atardecer las sombras se ponían
+    // violetas y azules.
+    let sky_c = mix(g.sky_horizon.rgb, g.sky_top.rgb, ln.y * 0.5 + 0.5);
+    let sky = mix(vec3(dot(sky_c, vec3(0.299, 0.587, 0.114))), sky_c, 0.55);
     let bounce = vec3(0.35, 0.30, 0.22) * max(-ln.y, 0.0);
     // Luz de luna: de noche, más clara en luna llena (extra.z), fría y desde arriba.
     let moon = vec3(0.45, 0.5, 0.65) * 0.14 * g.extra.z * g.params.y * (0.4 + 0.6 * max(ln.y, 0.0)) * ao;
@@ -371,11 +380,23 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     if (glass > 0.0) {
         // Toda la ventana se enciende o no (celda de ~2 m × 3 m), no vóxel por vóxel.
         let lit = step(0.5, hash3(floor(v.world / vec3(2.0, 3.0, 2.0))));
-        col += vec3(1.0, 0.55, 0.2) * 1.6 * g.params.y * lit * glass;
+        col += vec3(1.0, 0.55, 0.2) * 0.9 * g.params.y * lit * glass;
     }
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
     col = mix(col, fog_color(v.world), clamp(fog, 0.0, 0.88));
-    return vec4(col, 1.0);
+    return vec4(curva_tonal(col), 1.0);
+}
+
+// Curva tonal suave: hasta 0,75 de luminancia no toca nada; más arriba comprime de a poco (sin
+// cambiar el tono), así los claros al sol no se queman en amarillo saturado.
+fn curva_tonal(c: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    if (l <= 0.75) {
+        return c;
+    }
+    let x = l - 0.75;
+    let l2 = 0.75 + x / (1.0 + x * 2.5);
+    return c * (l2 / l);
 }

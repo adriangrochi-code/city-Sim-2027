@@ -1,0 +1,51 @@
+CITY SIM 2027 (nombre provisional) · Versión de prueba del motor de vóxeles
+==========================================================================
+
+Esta versión trae solo el juego en el motor de vóxeles (sin el prototipo viejo).
+
+JUGAR:  jugar.bat
+  Abre el menú principal: Nueva partida, Continuar, Cargar, Opciones y Salir.
+  Las partidas se guardan en %APPDATA%\CitySim2027\partidas.
+
+  La ciudad se funda sobre la geografía real de Montevideo en 1726: relieve,
+  arroyos, bañados, costa y monte nativo de la época, clima con datos reales,
+  mareas y viento.
+
+  Qué hay para probar:
+  - Calles rectas, curvas y damero: se enganchan a 45° y 90° de la calle de
+    arranque y del damero, y el largo se alinea con las esquinas vecinas
+    (Shift traza libre).
+  - Zonas residencial, comercial e industrial (densidad baja, media, alta):
+    al zonificar, los solares se tiñen según su aptitud.
+  - Menú "Capas" (abajo a la derecha): capas apagadas, suaves o marcadas, que
+    aparecen solas según la herramienta.
+  - Vecinos y carretas por las calles, con rutina diaria.
+  - Población con familias, orígenes, desigualdad y felicidad (ficha
+    "Población"; clic en una casa > Vecinos).
+  - Servicios: agua, serenos, incendios, puerto, muralla, iglesia, escuela,
+    botica y hospital, alcalde de barrio y cárcel, saneamiento.
+  - Desarrollo: escuela de oficios, tecnologías, industrias, inversores,
+    incentivos y comercio exterior.
+  - Recursos del suelo reales (CONEAT, DINAMIGE): cultivo, pasturas, piedra,
+    arcilla, arena; canteras, hornos y caleras rinden según su sitio.
+  - Materiales de construcción: cada casa se levanta con lo que hay (piedra,
+    ladrillo, adobe, tablas, barro y paja) y tiene sus efectos.
+  - Arquitectura variada de la época según la riqueza y el origen de la familia.
+
+  Controles: WASD/flechas mover · Q/E girar · rueda zoom · botón central
+  orbitar · botón derecho arrastrar · Tab tipo de calle · [ ] pincel ·
+  R girar la plaza · Shift trazar libre · Espacio pausa · Esc cancelar /
+  cerrar / menú de pausa · F5 guardar · F9 cargar la última partida
+
+SANDBOX:  sandbox.bat   (recorrer, colocar estructuras, excavar y rellenar)
+
+MEDIR EL RENDIMIENTO:
+  medir-fps.bat      (tarda unos minutos; enviar salida\bench.md)
+  medir-tirones.bat  (jugar un rato; al cerrar, enviar tirones.txt)
+
+Requisitos: Windows 10 u 11 de 64 bits con los controladores de la placa de
+video al día (DirectX 12 o Vulkan). Windows puede avisar que el programa no
+está firmado: elegir "Más información" y "Ejecutar de todas formas".
+
+Es una versión de prueba: puede tener errores. Cualquier problema, anotar
+qué se estaba haciendo y, si se puede, mandar captura.

@@ -898,7 +898,9 @@ pub fn escape(game: Option<&mut Game>, gui: &mut GameUi, menu: &mut Menu) -> Opt
         return menu.escape();
     }
     let g = game?;
-    if g.cancel() || gui.close_one(g) {
+    // Esc: primero cancela el trazado, después cierra paneles, después suelta la herramienta y
+    // recién entonces abre el menú de pausa.
+    if g.cancel() || gui.close_one(g) || g.drop_tool() {
         return None;
     }
     menu.open_pause();

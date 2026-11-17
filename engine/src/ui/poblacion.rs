@@ -1,5 +1,5 @@
 //! Paneles de la población: resumen (pirámide, nacimientos y muertes, orígenes, clases),
-//! desigualdad (Gini, el 10 % más rico, pobreza por origen y condición, políticas), felicidad
+//! desigualdad (Gini, el 10 % más rico, pobreza por origen, políticas), felicidad
 //! por grupo con sus motivos, la crónica, los hogares de una casa y la ficha de cada persona
 //! (personalidad, felicidad, familia, linaje e historia de vida).
 
@@ -10,7 +10,7 @@ use crate::city::poblacion::estadisticas::{BARRIOS, EDADES, GRUPOS_PIRAMIDE};
 use crate::city::poblacion::felicidad::{motivo_texto, FACTORES, SIN_MOTIVO};
 use crate::city::poblacion::politicas::{FUTURAS, SOCIALES};
 use crate::city::poblacion::textos::{educacion, fecha};
-use crate::city::poblacion::{año_de, Clase, Condicion, Estamento, Oficio, PersonaId, Poblacion, Rasgos, Sexo, DETALLE};
+use crate::city::poblacion::{año_de, Clase, Estamento, Oficio, PersonaId, Poblacion, Rasgos, Sexo, DETALLE};
 use egui::{vec2, Align2, Color32, RichText, Sense};
 
 const HOMBRES: Color32 = Color32::from_rgb(88, 116, 150);
@@ -194,28 +194,16 @@ fn resumen(ui: &mut egui::Ui, game: &Game) {
     for (o, n) in s.por_origen.iter().take(9) {
         hbar(ui, o.corto(), *n as f32 / max, fmt_thousands(*n as i64), theme::PRESSED);
     }
-    section(ui, "Clases y condición legal");
+    section(ui, "Clases y raíces");
     let tot = s.habitantes.max(1) as f32;
     for c in Clase::ALL {
         hbar(ui, &capitalize(c.nombre()), s.por_clase[c as usize] as f32 / tot, fmt_thousands(s.por_clase[c as usize] as i64), theme::PRESSED);
     }
-    for c in Condicion::ALL {
-        hbar(ui, c.plural(), s.por_condicion[c as usize] as f32 / tot, fmt_thousands(s.por_condicion[c as usize] as i64), if c == Condicion::Esclavizada { theme::BAD } else { theme::GOOD });
-    }
-    if s.bajo_patronato > 0 {
-        hbar(ui, "Bajo patronato", s.bajo_patronato as f32 / tot, fmt_thousands(s.bajo_patronato as i64), theme::BAD);
-    }
     if s.afrodescendientes > 0 {
-        hbar(ui, "Afrodescendientes (toda condición)", s.afrodescendientes as f32 / tot, fmt_thousands(s.afrodescendientes as i64), theme::PRESSED);
+        hbar(ui, "Afrodescendientes", s.afrodescendientes as f32 / tot, fmt_thousands(s.afrodescendientes as i64), theme::PRESSED);
     }
     if s.indigenas > 0 {
         hbar(ui, "Con raíz indígena", s.indigenas as f32 / tot, fmt_thousands(s.indigenas as i64), theme::PRESSED);
-    }
-    if let Some(m) = p.leyes.vientres {
-        ui.label(RichText::new(format!("Libertad de vientres desde {}.", fecha(m))).small().color(theme::INK_SOFT));
-    }
-    if let Some(m) = p.leyes.abolicion {
-        ui.label(RichText::new(format!("Esclavitud abolida desde {}.", fecha(m))).small().color(theme::INK_SOFT));
     }
 }
 
@@ -234,12 +222,6 @@ fn desigualdad(ui: &mut egui::Ui, game: &Game, acts: &mut Vec<UiAction>) {
     bars(ui, &g, None, theme::PRESSED, "Gini de la riqueza por año");
     let po: Vec<f32> = p.anual.iter().rev().take(30).rev().map(|f| f.pobreza * 100.0).collect();
     bars(ui, &po, None, theme::BAD, "Pobreza (%) por año");
-    section(ui, "Pobreza por condición legal");
-    for c in Condicion::ALL {
-        let v = s.pobreza_por_condicion[c as usize];
-        let txt = if c == Condicion::Esclavizada { "sin derecho a bienes".to_string() } else { pct(v) };
-        hbar(ui, c.plural(), v, txt, theme::BAD);
-    }
     section(ui, "Pobreza y riqueza por origen del hogar");
     for (o, v, n) in s.pobreza_por_origen.iter().take(8) {
         let r = s.riqueza_por_origen.iter().find(|x| x.0 == *o).map_or(0.0, |x| x.1);
@@ -288,7 +270,6 @@ fn felicidad(ui: &mut egui::Ui, p: &Poblacion) {
     grupo(ui, "Por edad", EDADES.iter().zip(s.fel_edad).map(|(a, b)| (a.to_string(), b)).collect());
     grupo(ui, "Por sexo", vec![("Hombres".into(), s.fel_sexo[0]), ("Mujeres".into(), s.fel_sexo[1])]);
     grupo(ui, "Por clase", Clase::ALL.iter().map(|c| (capitalize(c.nombre()), s.fel_clase[*c as usize])).filter(|x| x.1 > 0.0).collect());
-    grupo(ui, "Por condición legal", Condicion::ALL.iter().map(|c| (c.plural().to_string(), s.fel_condicion[*c as usize])).filter(|x| x.1 > 0.0).collect());
     grupo(ui, "Por barrio", BARRIOS.iter().zip(s.fel_barrio).filter(|x| x.1 > 0.0).map(|(a, b)| (a.to_string(), b)).collect());
     grupo(ui, "Por lugar de nacimiento", s.fel_origen.iter().take(8).map(|(o, f, _)| (o.corto().to_string(), *f)).collect());
     section(ui, "Últimos meses");
@@ -297,7 +278,7 @@ fn felicidad(ui: &mut egui::Ui, p: &Poblacion) {
 }
 
 fn cronica(ui: &mut egui::Ui, p: &Poblacion) {
-    ui.label(RichText::new("La crónica de la ciudad: llegadas, casamientos, herencias, libertades y el balance de cada año.").small().color(theme::INK_SOFT));
+    ui.label(RichText::new("La crónica de la ciudad: llegadas, casamientos, herencias y el balance de cada año.").small().color(theme::INK_SOFT));
     for (m, t) in p.cronica.iter().rev().take(60) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(fecha(*m)).small().color(theme::INK_SOFT));
@@ -335,8 +316,7 @@ fn hogares(ui: &mut egui::Ui, p: &Poblacion, lote: u32, nav: &mut Option<Option<
             ui.horizontal(|ui| {
                 persona_btn(ui, p, m, nav);
                 let rol = if m == h.jefe { "jefe del hogar".to_string() } else { q.oficio.nombre(q.sexo).to_string() };
-                let cond = if q.condicion != Condicion::Libre { format!(" · {}", q.condicion.nombre(q.sexo)) } else { String::new() };
-                ui.label(RichText::new(format!("{rol}{cond}")).small().color(theme::INK_SOFT));
+                ui.label(RichText::new(rol).small().color(theme::INK_SOFT));
             });
         }
     }
@@ -357,18 +337,12 @@ fn persona(ui: &mut egui::Ui, game: &Game, id: PersonaId, nav: &mut Option<Optio
         let estado = if q.muerte.is_some() { format!("murió en {}", fecha(q.muerte.unwrap())) } else if q.fuera.is_some() { "se fue de la ciudad".into() } else { format!("{} años", q.edad(mes)) };
         kv(ui, "Edad", format!("{} · nació en {}", estado, año_de(q.nacimiento)), theme::INK);
         kv(ui, "Lugar de nacimiento", capitalize(q.origen.nombre()), theme::INK);
-        let cond = match q.patronato {
-            Some(m) => format!("{} bajo patronato (hasta {})", capitalize(q.condicion.nombre(q.sexo)), fecha(m)),
-            None => capitalize(q.condicion.nombre(q.sexo)),
-        };
-        kv(ui, "Condición", cond, if q.sujeta() { theme::BAD } else { theme::INK });
         let est = if q.estamento == Estamento::Vecino { "vecino con casa poblada" } else { q.estamento.nombre() };
         kv(ui, "Oficio", format!("{} · {}", capitalize(q.oficio.nombre(q.sexo)), est), theme::INK);
         kv(ui, "Educación", capitalize(educacion(q.educacion)), theme::INK);
         kv(ui, "Salud", pct(q.salud), color_fel(q.salud));
         if q.riqueza >= 1.0 {
-            let k = if q.sujeta() { "Peculio ahorrado" } else { "Bienes propios" };
-            kv(ui, k, format!("{} pesos", fmt_thousands(q.riqueza.round() as i64)), theme::INK);
+            kv(ui, "Bienes propios", format!("{} pesos", fmt_thousands(q.riqueza.round() as i64)), theme::INK);
         }
         if let Some(l) = p.lugar_de_trabajo(id) {
             kv(ui, "Trabaja en", format!("el solar n.º {l}"), theme::INK);
@@ -377,11 +351,6 @@ fn persona(ui: &mut egui::Ui, game: &Game, id: PersonaId, nav: &mut Option<Optio
             kv(ui, "Hogar", format!("familia {} ({})", p.apellido_hogar(h.id), h.clase.nombre()), theme::INK);
         }
     });
-    if q.condicion == Condicion::Esclavizada {
-        ui.label(RichText::new("La ley de la época le niega la libertad: no puede tener casa ni elegir dónde trabajar, y su trabajo beneficia al hogar donde vive. Puede ahorrar un peculio para su carta de libertad (con la ayuda de su familia o de su cofradía), formar familia y ser libre por testamento, por las armas, por el fondo del cabildo o por la ley.").small().color(theme::INK_SOFT));
-    } else if q.patronato.is_some() {
-        ui.label(RichText::new("Es libre por ley, pero está bajo patronato: debe servir en la casa donde vive a cambio de techo, comida y ropa, sin elegir dónde trabajar ni mudarse, hasta que el patronato termine.").small().color(theme::INK_SOFT));
-    }
     if let Some(h) = q.hogar.and_then(|h| p.hogar(h)).and_then(|h| h.lote.filter(|_| h.vive_en_solar())) {
         if ui.small_button("Ver su casa").clicked() {
             *nav = Some(Some(Detail::Hogares(h)));

@@ -3,9 +3,8 @@
 //!
 //! - **Educación**: cada escuela (o el convento) tiene lugar para tantos alumnos de 6 a 12
 //!   años; se reparte, como el agua, a las casas más cercanas dentro de su alcance hasta llenarse.
-//!   Solo cuentan los niños libres (restricción de la época: los niños esclavizados o bajo patronato casi no
-//!   iban a la escuela; ver `docs/sistemas/poblacion.md`). La población decide quién va según
-//!   la clase del hogar y si el cabildo paga al maestro (ordenanza de escuelas).
+//!   Cuentan todos los niños de esa edad. La población decide quién va según la clase del
+//!   hogar y si el cabildo paga al maestro (ordenanza de escuelas).
 //! - **Salud**: botica, médico y cirujano y hospital de caridad atienden a tantas personas a su
 //!   alrededor (el médico y el hospital, por la red de calles). Baja la mortalidad (más la de
 //!   los niños) y sube la salud.
@@ -263,10 +262,10 @@ impl City {
                 let Some(lote) = per.hogar.and_then(|h| p.hogar(h)).filter(|h| h.vive_en_solar()).and_then(|h| h.lote) else { continue };
                 let edad = per.edad(p.mes);
                 let d = out.entry(lote).or_default();
-                if EDAD_ESCOLAR.contains(&edad) && !per.sujeta() {
+                if EDAD_ESCOLAR.contains(&edad) {
                     d.niños += 1;
                 }
-                if (16..=60).contains(&edad) && per.sexo == Sexo::Hombre && per.libre() {
+                if (16..=60).contains(&edad) && per.sexo == Sexo::Hombre {
                     d.hombres += 1.0;
                     if per.oficio == Oficio::Ninguno || (zona_de_trabajo(per.oficio).is_some() && per.trabajo.is_none()) {
                         d.parados += 1.0;
@@ -755,7 +754,7 @@ mod tests {
             }
             city.fast_forward(&t, 96);
             let p = &city.poblacion;
-            let jovenes: Vec<_> = p.vivos().filter(|x| (10..=20).contains(&x.edad(p.mes)) && x.libre()).collect();
+            let jovenes: Vec<_> = p.vivos().filter(|x| (10..=20).contains(&x.edad(p.mes))).collect();
             let leen = jovenes.iter().filter(|x| x.educacion > 0).count() as f32 / jovenes.len().max(1) as f32;
             (leen, jovenes.len())
         };

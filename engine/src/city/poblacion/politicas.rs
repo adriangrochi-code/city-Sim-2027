@@ -7,16 +7,13 @@ use super::origenes::Epoca;
 use crate::city::economy::Ordinance;
 
 /// Ordenanzas sociales de la época colonial y dónde actúan.
-pub const SOCIALES: [(Ordinance, &str); 9] = [
+pub const SOCIALES: [(Ordinance, &str); 6] = [
     (Ordinance::RepartoSolares, "Los hogares pobres sin casa reciben en propiedad los ranchos libres: más vecinos con solar, menos alquiler."),
     (Ordinance::ContribucionProgresiva, "Los hogares pobres no pagan contribución; los acomodados pagan 1,5 veces y los principales 2,5 veces."),
     (Ordinance::PanDeLosPobres, "Los hogares pobres compran el pan a precio normal aunque esté caro; la ciudad paga la diferencia."),
     (Ordinance::HospitalCaridad, "Menos mortalidad y mejor salud de pobres y modestos."),
     (Ordinance::EscuelasPrimerasLetras, "Más niños aprenden a leer: más movilidad (comercio, oficios letrados)."),
     (Ordinance::PrestamosCabildo, "Préstamos baratos a pobres y modestos: menos hambre en los malos meses."),
-    (Ordinance::FondoManumision, "El cabildo completa lo que les falta a quienes juntaron buena parte de la suma de su carta de libertad."),
-    (Ordinance::LibertadVientres, "Quien nace en la ciudad nace libre y se prohíbe el tráfico. No se puede derogar."),
-    (Ordinance::Abolicion, "Todas las personas esclavizadas recuperan la libertad. No se puede derogar."),
 ];
 
 /// Una política de una época futura (para la interfaz y el diseño).

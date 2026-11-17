@@ -230,6 +230,17 @@ impl Game {
         had
     }
 
+    /// Suelta la herramienta (vuelve al cursor libre de inspeccionar). Devuelve si había una.
+    pub fn drop_tool(&mut self) -> bool {
+        if self.city.plaza.is_none() || matches!(self.tool, Tool::Inspect) {
+            return false;
+        }
+        self.tool = Tool::Inspect;
+        self.stage = 0;
+        self.painting = false;
+        true
+    }
+
     pub fn snap(&self, p: Vec2) -> Vec2 {
         self.city.net.snap(p).pos
     }
@@ -400,7 +411,8 @@ impl Game {
                 let r = self.city.found_plaza(t, p, self.plaza_angle);
                 let e = self.report(r)?;
                 self.say("¡Fundada la ciudad! Traza calles (2, 3, 4) y zonifica solares (5)");
-                self.tool = Tool::Straight;
+                // Queda el cursor libre (inspeccionar), para mirar la ciudad sin herramienta.
+                self.tool = Tool::Inspect;
                 Some(e)
             }
             Tool::Straight => {
@@ -913,8 +925,10 @@ impl Game {
             }
             Placeable::Muelle => {
                 let good = self.city.pier_problem(t, h).is_none();
-                let dir = services::port::find_sea(t, h).map_or(Vec2::Y * 40.0, |(d, dist)| d * (dist + 25.0));
-                ribbon(out, t, &line(h, h + dir), 6.0, if good { ok } else { bad });
+                // El muelle se engancha a la orilla más cercana: se ve dónde va a quedar.
+                let s = services::port::pier_start(t, h).unwrap_or(h);
+                let dir = services::port::find_sea(t, s).map_or(Vec2::Y * 40.0, |(d, dist)| d * (dist + 25.0).clamp(40.0, services::port::PIER_MAX_LEN));
+                ribbon(out, t, &line(s, s + dir), 6.0, if good { ok } else { bad });
             }
             Placeable::Muralla if self.stage == 1 => {
                 let good = self.city.wall_problem(t, self.p0, h).is_none();
@@ -1151,9 +1165,16 @@ fn aptitud_color(a: f32) -> [f32; 4] {
 
 /// Circunferencia (alcance de un servicio) sobre el terreno.
 fn circle(out: &mut Vec<OverlayVertex>, t: &TerrainGen, c: Vec2, r: f32, color: [f32; 4]) {
-    let n = ((r / 6.0) as usize).clamp(24, 160);
-    let pts: Vec<Vec2> = (0..=n).map(|i| c + Vec2::from_angle(i as f32 / n as f32 * std::f32::consts::TAU) * r).collect();
-    ribbon(out, t, &pts, 2.0, color);
+    // Anillo continuo (cuadriláteros entre el radio de adentro y el de afuera): con una cinta
+    // por tramo, en los círculos chicos las puntas se abrían en abanico.
+    let n = ((r / 3.0) as usize).clamp(32, 200);
+    let w = (r * 0.25).min(1.0);
+    let (ri, ro) = (r - w, r + w);
+    for i in 0..n {
+        let a0 = Vec2::from_angle(i as f32 / n as f32 * std::f32::consts::TAU);
+        let a1 = Vec2::from_angle((i + 1) as f32 / n as f32 * std::f32::consts::TAU);
+        quad(out, t, &[c + a0 * ri, c + a0 * ro, c + a1 * ro, c + a1 * ri], 1.2, color);
+    }
 }
 
 fn y_at(t: &TerrainGen, p: Vec2, lift: f32) -> f32 {

@@ -38,11 +38,9 @@ derivado se recalcula al cargar.
 | Convento con aulas (30 × 36 m, uno por ciudad) | 60 | 0,8 | 650 m | 5.000 pesos, 250 ladrillos, 80 piedra | 15 |
 
 - Los lugares se reparten, como el agua, a las **casas más cercanas** dentro del alcance hasta
-  llenar el cupo. Cuentan los **niños libres de 6 a 12 años** de cada casa.
-- **Restricción de la época** (coherente con la decisión de representación de
-  [poblacion.md](poblacion.md)): los niños esclavizados no ocupan lugar; con la ordenanza de
-  escuelas y una escuela cerca tienen una probabilidad mínima (4 % al año) de aprender a leer, y
-  ninguna sin ella.
+  llenar el cupo. Cuentan **todos los niños de 6 a 12 años** de cada casa (el juego no
+  representa la esclavitud: no hay niños excluidos de la escuela, ver
+  [poblacion.md](poblacion.md), sección 5).
 - **Quién va**: a la probabilidad de base por clase (la familia o un preceptor) se suma
   `0,4 × acceso × paga`. Si el cabildo **paga al maestro** (ordenanza «Escuelas de primeras
   letras»), los pobres y modestos van como los demás; si no, solo el 25 % (pobres) o el 60 %

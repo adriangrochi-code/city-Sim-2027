@@ -5,10 +5,13 @@
 //! Cifras: los pesos relativos son ESTIMACIONES de diseño guiadas por los datos verificados
 //! (Pollero y González Demuro, *Población y sociedad de Montevideo*, 2024, ver la tabla de
 //! calibración en `docs/sistemas/poblacion.md`): en 1836, la mitad de los extranjeros eran
-//! europeos (63 % de ellos canarios, 13 % portugueses), algo más del 30 % africanos y un 15 %
-//! de la región; en 1860 los europeos eran un tercio españoles, un tercio italianos y un 27 %
-//! franceses; a fines de la década de 1770, más del 25 % de la población era afrodescendiente.
-//! Las riquezas y los oficios por origen son estimaciones de orden de magnitud.
+//! europeos (63 % de ellos canarios, 13 % portugueses); en 1860 los europeos eran un tercio
+//! españoles, un tercio italianos y un 27 % franceses. Las riquezas y los oficios por origen
+//! son estimaciones de orden de magnitud.
+//!
+//! El juego no representa la esclavitud (decisión de diseño): todas las personas llegan
+//! libres, con su familia, sus bienes y su oficio. Las personas de origen africano llegan como
+//! las demás; su peso en la tabla colonial es una estimación de diseño, no una cifra histórica.
 
 use super::modelo::{Oficio, Origen};
 use serde::{Deserialize, Serialize};
@@ -67,10 +70,6 @@ pub struct Llegada {
     pub lectura: f32,
     /// Oficios de los adultos (peso relativo).
     pub oficios: &'static [(Oficio, f32)],
-    /// Llegada forzada por la trata: llegan sin apellido, sin bienes y en condición de
-    /// esclavizadas. NO es una decisión del jugador ni una compra: es un flujo del mundo que el
-    /// juego narra; se corta con la prohibición del tráfico (ley o política).
-    pub forzada: bool,
 }
 
 const CAMPO: &[(Oficio, f32)] = &[(Oficio::Labrador, 4.0), (Oficio::Peon, 4.0), (Oficio::Artesano, 1.0), (Oficio::Pulpero, 0.5)];
@@ -81,9 +80,8 @@ const MERCADERES: &[(Oficio, f32)] = &[(Oficio::Comerciante, 4.0), (Oficio::Pulp
 const MARINOS: &[(Oficio, f32)] = &[(Oficio::Marinero, 3.0), (Oficio::Peon, 2.0), (Oficio::Artesano, 1.0), (Oficio::Pulpero, 1.0)];
 const MISIONES: &[(Oficio, f32)] = &[(Oficio::Peon, 5.0), (Oficio::Artesano, 2.0), (Oficio::Labrador, 1.0)];
 const REGION: &[(Oficio, f32)] = &[(Oficio::Peon, 5.0), (Oficio::Servicio, 1.0)];
-/// Trabajo impuesto a las personas esclavizadas en la ciudad colonial (servicio doméstico,
-/// lavado, oficios, carga en el puerto, peonaje).
-const ESCLAVITUD: &[(Oficio, f32)] = &[(Oficio::Servicio, 5.0), (Oficio::Peon, 3.0), (Oficio::Artesano, 1.5), (Oficio::Marinero, 0.8)];
+/// Oficios urbanos y del puerto (artesanos, peones, servicio, marineros, pulperos).
+const URBANOS: &[(Oficio, f32)] = &[(Oficio::Artesano, 3.0), (Oficio::Peon, 3.0), (Oficio::Servicio, 2.0), (Oficio::Marinero, 1.5), (Oficio::Pulpero, 0.5)];
 const OBREROS: &[(Oficio, f32)] = &[(Oficio::Obrero, 4.0), (Oficio::Artesano, 2.0), (Oficio::Peon, 2.0), (Oficio::Pulpero, 1.0), (Oficio::Comerciante, 0.5), (Oficio::Servicio, 1.0)];
 const TENDEROS: &[(Oficio, f32)] = &[(Oficio::Comerciante, 3.0), (Oficio::Pulpero, 2.0), (Oficio::Artesano, 1.0), (Oficio::Obrero, 1.0)];
 const MODERNOS: &[(Oficio, f32)] = &[(Oficio::Empleado, 4.0), (Oficio::Obrero, 3.0), (Oficio::Servicio, 2.0), (Oficio::Comerciante, 1.0), (Oficio::Profesional, 1.0)];
@@ -91,10 +89,7 @@ const PROFESIONALES: &[(Oficio, f32)] = &[(Oficio::Profesional, 3.0), (Oficio::E
 
 macro_rules! ll {
     ($o:ident, $p:expr, $f:expr, $r:expr, $d:expr, $l:expr, $of:expr) => {
-        Llegada { origen: Origen::$o, peso: $p, familia: $f, riqueza: $r, dispersion: $d, lectura: $l, oficios: $of, forzada: false }
-    };
-    (forzada $o:ident, $p:expr) => {
-        Llegada { origen: Origen::$o, peso: $p, familia: 1.0, riqueza: 0.0, dispersion: 0.0, lectura: 0.0, oficios: ESCLAVITUD, forzada: true }
+        Llegada { origen: Origen::$o, peso: $p, familia: $f, riqueza: $r, dispersion: $d, lectura: $l, oficios: $of }
     };
 }
 
@@ -114,9 +109,9 @@ pub const COLONIAL: &[Llegada] = &[
     ll!(Interior, 5.0, 3.5, 30.0, 0.8, 0.05, CAMPO),
     ll!(Britania, 0.5, 1.2, 400.0, 1.0, 0.8, MERCADERES),
     ll!(Francia, 0.5, 1.3, 200.0, 1.0, 0.6, MERCADERES),
-    ll!(forzada AfricaCentral, 14.0),
-    ll!(forzada AfricaOccidental, 6.0),
-    ll!(forzada AfricaOriental, 3.0),
+    ll!(AfricaCentral, 4.0, 1.8, 15.0, 0.6, 0.05, URBANOS),
+    ll!(AfricaOccidental, 2.0, 1.8, 15.0, 0.6, 0.05, URBANOS),
+    ll!(AfricaOriental, 1.0, 1.6, 15.0, 0.6, 0.05, URBANOS),
 ];
 
 /// Ciudad Nueva (1830–1869): canarios, vascos, gallegos, franceses e italianos; argentinos.
@@ -197,34 +192,6 @@ pub fn tabla(e: Epoca) -> &'static [Llegada] {
         Epoca::ArtDeco => ART_DECO,
         Epoca::Modernismo => MODERNISMO,
         Epoca::Contemporanea => CONTEMPORANEA,
-    }
-}
-
-/// Peso de la trata según el año (estimación guiada por la historiografía; ver
-/// `docs/sistemas/esclavitud-y-pueblos-originarios.md`):
-/// - hasta 1776, poca: Montevideo es chico y la trata entra sobre todo por Buenos Aires y por
-///   la Colonia portuguesa;
-/// - 1777–1790: el comercio libre (1778) y los viajes de la Real Compañía de Filipinas (desde
-///   1787; primeros arribos a Montevideo en 1788) la hacen crecer;
-/// - 1791–1810: la libre introducción de esclavizados para el Río de la Plata (1791) hace de
-///   Montevideo el puerto de entrada: al menos 70.000 personas llegaron al Río de la Plata
-///   entre 1777 y 1812, el 60 % desde Brasil (Borucki, en Frega et al., 2020, cap. 3);
-/// - 1811–1816: revolución, sitios de la ciudad y prohibición del tráfico por el gobierno de
-///   Buenos Aires (abril de 1812): casi se corta;
-/// - 1817–1829: con la dominación luso-brasileña "aumentó la introducción de esclavizados"
-///   (Frega et al., 2020, cap. 5);
-/// - desde la libertad de vientres (en Montevideo, enero de 1830) queda prohibida; lo que siguió
-///   entrando (los "colonos" africanos de 1832–1835, el contrabando) lo cuentan los hechos
-///   históricos de `historia.rs`.
-pub fn factor_trata(año: i32) -> f32 {
-    match año {
-        ..=1749 => 0.5,
-        1750..=1776 => 1.0,
-        1777..=1790 => 3.5,
-        1791..=1810 => 6.0,
-        1811..=1816 => 0.15,
-        1817..=1829 => 1.3,
-        _ => 0.3,
     }
 }
 
