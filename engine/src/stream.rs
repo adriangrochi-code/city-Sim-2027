@@ -438,7 +438,11 @@ pub fn top_from_height(h: f32, vs: f32) -> i32 {
     if h < 0.0 {
         (h / vs - 1.0).floor() as i32
     } else {
-        (h / vs - 0.5).floor() as i32
+        // En tierra firme la cara de arriba queda por lo menos un vóxel sobre el nivel del mar:
+        // si no, en los niveles gruesos (vóxel de 4 a 64 m) toda la tierra baja (bañados,
+        // costas, planicies de hasta medio vóxel de alto) se redondea al nivel del mar y el
+        // plano del río (con la marea encima) la tapa, y cambia al mover la cámara.
+        ((h / vs - 0.5).floor() as i32).max(0)
     }
 }
 
@@ -927,6 +931,22 @@ pub fn terrain_top_l0(t: &TerrainGen, x: i32, z: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use super::top_from_height;
+
+    #[test]
+    fn la_tierra_firme_no_queda_bajo_el_agua_en_ningun_nivel() {
+        // El agua del río es un plano en y = 0 (más la marea): la tierra con altura positiva
+        // tiene que quedar arriba en todos los niveles de detalle, y el fondo, abajo; si no, el
+        // agua se dibuja sobre la tierra (o la tierra asoma en el río) según dónde esté la cámara.
+        for lod in 0..9 {
+            let vs = crate::lod::BASE_VOXEL * (1u32 << lod) as f32;
+            for k in 1..400 {
+                let h = k as f32 * 0.05;
+                assert!((top_from_height(h, vs) + 1) as f32 * vs > 0.0, "tierra a {h} m tapada con vóxel de {vs} m");
+                assert!(((top_from_height(-h, vs) + 1) as f32 * vs) < 0.0, "fondo a -{h} m asoma con vóxel de {vs} m");
+            }
+        }
+    }
     use super::*;
     use crate::buildings::Edits;
     use std::time::{Duration, Instant};
