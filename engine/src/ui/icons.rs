@@ -43,6 +43,8 @@ pub enum Icon {
     Vecinos,
     Comercio,
     Hacienda,
+    /// Población: dos adultos y un niño.
+    Familia,
 }
 
 /// Dibuja el ícono dentro de `r` con el color `c`.
@@ -227,6 +229,14 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32) {
         }
         Icon::Agua => {
             poly(&[(0.0, -0.8), (0.45, 0.05), (0.45, 0.3), (0.2, 0.7), (-0.2, 0.7), (-0.45, 0.3), (-0.45, 0.05)], true, st);
+        }
+        Icon::Familia => {
+            circle(-0.45, -0.45, 0.22);
+            arc(-0.45, 0.55, 0.45, PI, 2.0 * PI, st);
+            circle(0.45, -0.45, 0.22);
+            arc(0.45, 0.55, 0.45, PI, 2.0 * PI, st);
+            circle(0.0, 0.05, 0.15);
+            arc(0.0, 0.8, 0.3, PI, 2.0 * PI, thin);
         }
         Icon::Opinion | Icon::Vecinos => {
             circle(0.0, -0.4, 0.3);

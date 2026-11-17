@@ -241,7 +241,11 @@ impl City {
             people = now;
         }
         self.services.port.year[1] += people;
-        self.pool = (self.pool + people).min(600);
+        if self.poblacion.fundada {
+            self.llegados_barco += people;
+        } else {
+            self.pool = (self.pool + people).min(600);
+        }
         if people > 0 {
             news.push(if has_pier { format!("Llega un barco al muelle con {people} pobladores") } else { format!("Un barco desembarca {people} pobladores en la playa (no hay muelle)") });
         }

@@ -164,6 +164,29 @@ pub fn grow(s: &mut Session) -> String {
     )
 }
 
+/// Cuarenta años de historia (para las capturas de la población: linajes de tres
+/// generaciones, herencias, libertades).
+pub fn historia(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let months = 480;
+    let t0 = Instant::now();
+    let e = g.city.fast_forward(&t, months);
+    let sim = t0.elapsed();
+    let p = &g.city.poblacion;
+    let st = &p.stats;
+    let out = format!(
+        "{months} meses en {sim:.2?} · {} · {} habitantes ({} en casas) · {} personas registradas · Gini {:.2} · felicidad {:.0} % · ",
+        g.city.date(),
+        p.habitantes(),
+        g.city.population(),
+        p.personas.len(),
+        st.gini_riqueza,
+        st.felicidad * 100.0
+    );
+    out + &apply(s, Ok(e))
+}
+
 /// Un mes más al ritmo del juego (20 pasos de crecimiento de 0,5 s), aplicando cada paso
 /// como en la ventana: mide el costo de la simulación y del encolado del re-mallado.
 pub fn month_realtime(s: &mut Session) -> String {

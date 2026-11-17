@@ -305,7 +305,9 @@ antiguas pesan: las calles coloniales estrechas limitan la densidad y el tráfic
 
 ### 4.6 Vecinos (simulación por agentes)
 > Detalle del comportamiento y la conducción realista en
-> [sistemas/agentes-y-conduccion.md](sistemas/agentes-y-conduccion.md).
+> [sistemas/agentes-y-conduccion.md](sistemas/agentes-y-conduccion.md). Personas, familias,
+> linajes, economía de los hogares, desigualdad y felicidad en
+> [sistemas/poblacion.md](sistemas/poblacion.md) (implementado en el motor).
 
 - Cada vecino tiene casa, trabajo o escuela, nivel educativo, riqueza, origen (criollo,
   inmigrante italiano o español…) y estado de ánimo.

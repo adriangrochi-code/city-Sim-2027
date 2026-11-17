@@ -106,7 +106,11 @@ impl City {
             }
         });
         if released > 0 {
-            self.pool = (self.pool + released).min(600);
+            if self.poblacion.fundada {
+                self.llegados_barco += released;
+            } else {
+                self.pool = (self.pool + released).min(600);
+            }
             news.push(format!("Terminó la cuarentena: {released} pobladores entran sanos a la ciudad"));
         }
         if self.services.epidemic.infected.is_empty() {
@@ -115,6 +119,7 @@ impl City {
         let mut dead = 0;
         let mut drops = Vec::new();
         let ids: Vec<u32> = self.services.epidemic.infected.keys().copied().collect();
+        let afectados = ids.clone();
         for id in ids {
             let months = self.services.epidemic.infected.get_mut(&id).unwrap();
             *months += 1;
@@ -135,7 +140,12 @@ impl City {
             self.lots.lots.get_mut(&d.lot).unwrap().level = d.level;
         }
         self.apply_levels(t, &drops, e);
-        self.pool = (self.pool - dead).max(0);
+        if self.poblacion.fundada {
+            // Con la población de personas, mueren personas de los hogares de esos solares.
+            dead = self.poblacion.choque_epidemia(0.04, Some(&afectados)) as i32;
+        } else {
+            self.pool = (self.pool - dead).max(0);
+        }
         self.services.epidemic.deaths_total += dead;
         if dead > 0 {
             news.push(format!("La fiebre se cobra {dead} víctimas este mes"));
@@ -193,7 +203,9 @@ mod tests {
         assert!(n1.is_empty() && city.pool == pool, "primer mes: siguen en cuarentena");
         let n2 = city.epidemic_month(&t, &mut e);
         assert!(n2.iter().any(|n| n.contains("cuarentena")), "{n2:?}");
-        assert_eq!(city.pool, (pool + 40).min(600), "entran sanos");
+        // Los sanos entran a la ciudad: a la espera de casa o, con la población de personas, a las
+        // llegadas del mes.
+        assert_eq!(city.pool + city.llegados_barco, (pool + 40).min(600), "entran sanos");
         assert_eq!(city.services.epidemic.quarantined_now(), 0);
     }
 }

@@ -76,6 +76,9 @@ pub struct Inspect {
     /// "¿Por qué no crece?" (vacío si no aplica).
     pub why: Vec<String>,
     pub kind: InspectKind,
+    /// Solar inspeccionado y cuántas personas viven en él (para abrir sus vecinos).
+    pub lot: Option<u32>,
+    pub vecinos: usize,
 }
 
 /// Qué se está inspeccionando (decide los botones de acción de la ficha).
@@ -325,23 +328,32 @@ impl Game {
         let p = self.inspected?;
         if let Some(id) = self.city.services.at(p) {
             let b = &self.city.services.buildings[&id];
-            return Some(Inspect { title: b.info().name.into(), lines: self.city.service_lines(id), why: vec![], kind: InspectKind::Service(id) });
+            return Some(Inspect { title: b.info().name.into(), lines: self.city.service_lines(id), why: vec![], kind: InspectKind::Service(id), ..Default::default() });
         }
         if let Some((c, f)) = self.city.church_site() {
             if super::lots::point_in_poly(p, &corners_of(c, f, 18.0, 44.0)) {
-                return Some(Inspect { title: "Iglesia matriz".into(), lines: self.city.church_lines(), why: vec![], kind: InspectKind::Church });
+                return Some(Inspect { title: "Iglesia matriz".into(), lines: self.city.church_lines(), why: vec![], kind: InspectKind::Church, ..Default::default() });
             }
         }
         if let Some(id) = self.city.lots.lot_at(p) {
             let l = &self.city.lots.lots[&id];
             let front = self.city.lots.frontage(l, &self.city.net);
             let value = self.city.lots.land_value(l);
-            let mut i = Inspect { title: capitalize(l.name()), kind: InspectKind::Lot, ..Default::default() };
+            let mut i = Inspect { title: capitalize(l.name()), kind: InspectKind::Lot, lot: Some(id), ..Default::default() };
             i.lines.push(format!("Zona: {}", zone_name(l.zone)));
+            let pob = &self.city.poblacion;
+            i.vecinos = pob.habitantes_de_lote(id).count();
             match l.kind() {
+                Some(ZoneKind::Residencial) | None if pob.fundada => {
+                    let familias = pob.hogares_de_lote(id).count();
+                    i.lines.push(format!("Habitantes: {} de {} ({} {})", i.vecinos, l.residents(), familias, if familias == 1 { "familia" } else { "familias" }));
+                    if let Some(&d) = pob.duenos.get(&id) {
+                        i.lines.push(format!("Dueño: familia {}", pob.apellido_hogar(d)));
+                    }
+                }
                 Some(ZoneKind::Residencial) | None => i.lines.push(format!("Habitantes: {}", l.residents())),
-                Some(ZoneKind::Comercial) => i.lines.push(format!("Empleos: {} (comercio)", super::lots::JOBS_C[l.level as usize])),
-                Some(ZoneKind::Industrial) => i.lines.push(format!("Empleos: {} (talleres)", super::lots::JOBS_I[l.level as usize])),
+                Some(ZoneKind::Comercial) => i.lines.push(format!("Empleos: {} de {} (comercio)", pob.trabajadores_de_lote(id).count(), super::lots::JOBS_C[l.level as usize])),
+                Some(ZoneKind::Industrial) => i.lines.push(format!("Empleos: {} de {} (talleres)", pob.trabajadores_de_lote(id).count(), super::lots::JOBS_I[l.level as usize])),
             }
             i.lines.push(format!("Valor del suelo: {} %", (value * 100.0) as i32));
             i.lines.push(format!("Calle: {}", front.map_or("—", |k| k.name())));
@@ -370,15 +382,15 @@ impl Game {
         }
         // Un vecino, jinete o carreta justo ahí (a menos de 2,5 m).
         if let Some((title, lines)) = self.city.agentes.cerca_de(&self.city.net, p, 2.5).and_then(|id| self.city.agentes.describir(id)) {
-            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Terrain });
+            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Terrain, ..Default::default() });
         }
         if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
             let ed = &self.city.net.edges[&e.edge];
             let mut lines = vec![format!("Largo del tramo: {} m", ed.len() as i32)];
             lines.extend(super::agentes::lineas_de_tramo(&self.city.agentes, &self.city.net, e.edge));
-            return Some(Inspect { title: ed.kind.name().into(), lines, why: vec![], kind: InspectKind::Road });
+            return Some(Inspect { title: ed.kind.name().into(), lines, kind: InspectKind::Road, ..Default::default() });
         }
-        Some(Inspect { title: "Terreno".into(), lines: vec![format!("Posición: {:.0}, {:.0}", p.x, p.y)], why: vec![], kind: InspectKind::Terrain })
+        Some(Inspect { title: "Terreno".into(), lines: vec![format!("Posición: {:.0}, {:.0}", p.x, p.y)], kind: InspectKind::Terrain, ..Default::default() })
     }
 
     /// Pista de la herramienta para la interfaz: (ayuda con el costo en vivo, motivo de error).

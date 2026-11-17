@@ -209,6 +209,9 @@ impl City {
         for &id in &lost {
             self.services.fires.burning.remove(&id);
             self.services.fires.destroyed_total += 1;
+            if self.poblacion.fundada {
+                self.poblacion.choque_incendio(id);
+            }
             self.ruin_edits(t, id, e);
             let l = self.lots.lots.get_mut(&id).unwrap();
             l.level = 0;
