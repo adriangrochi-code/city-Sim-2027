@@ -8,6 +8,7 @@
 //!   avisos de la gaceta arriba al centro y un panel de listado genérico (políticas u ordenanzas).
 //! Los atajos de teclado se muestran en los globos de ayuda, no en los botones.
 
+pub mod desarrollo;
 pub mod icons;
 pub mod paint;
 pub mod services;
@@ -52,13 +53,15 @@ pub enum Category {
     Zonas,
     Servicios,
     Produccion,
+    /// Tecnologías, saberes, industria, fomento y comercio exterior (ver `ui::desarrollo`).
+    Desarrollo,
     Puerto,
     Ordenanzas,
     Capas,
     Demoler,
 }
 
-pub const CATEGORIES: [Category; 8] = [Category::Calles, Category::Zonas, Category::Servicios, Category::Produccion, Category::Puerto, Category::Ordenanzas, Category::Capas, Category::Demoler];
+pub const CATEGORIES: [Category; 9] = [Category::Calles, Category::Zonas, Category::Servicios, Category::Produccion, Category::Desarrollo, Category::Puerto, Category::Ordenanzas, Category::Capas, Category::Demoler];
 
 impl Category {
     pub fn name(self) -> &'static str {
@@ -67,6 +70,7 @@ impl Category {
             Category::Zonas => "Zonas",
             Category::Servicios => "Servicios",
             Category::Produccion => "Producción",
+            Category::Desarrollo => "Desarrollo",
             Category::Puerto => "Puerto y muralla",
             Category::Ordenanzas => "Ordenanzas",
             Category::Capas => "Capas de datos",
@@ -79,6 +83,7 @@ impl Category {
             Category::Zonas => Icon::Zonas,
             Category::Servicios => Icon::Servicios,
             Category::Produccion => Icon::Produccion,
+            Category::Desarrollo => Icon::Desarrollo,
             Category::Puerto => Icon::Puerto,
             Category::Ordenanzas => Icon::Ordenanzas,
             Category::Capas => Icon::Capas,
@@ -90,7 +95,8 @@ impl Category {
             Category::Calles => "Plaza, calles rectas, curvas y damero · atajos 1 a 4, Tab cambia el tipo",
             Category::Zonas => "Pintar o quitar zona · atajos 5 y 6, [ y ] cambian el pincel",
             Category::Servicios => "Agua, educación, salud, seguridad, saneamiento e iglesia",
-            Category::Produccion => "Hornos de ladrillos, atahonas, canteras, saladeros",
+            Category::Produccion => "Chacras, estancias, hornos, canteras y las industrias: saladero, molino, carpintería de ribera, imprenta",
+            Category::Desarrollo => "Tecnologías, saberes, industrias, incentivos a la inversión y comercio exterior",
             Category::Puerto => "Muelle, muralla, portones y aduana",
             Category::Ordenanzas => "Decisiones del cabildo y presupuesto",
             Category::Capas => "Inspeccionar (atajo 8) y mapas de datos",
@@ -162,6 +168,9 @@ pub fn cards(cat: Category, game: &Game, list_open: bool, budget_open: bool) -> 
     if let Some(c) = services::cards(cat, game) {
         return c;
     }
+    if cat == Category::Desarrollo {
+        return desarrollo::cards(game, None);
+    }
     match cat {
         Category::Calles => vec![
             Card::tool(game, 0, Icon::Plaza, "gratis".into(), "Fundar la plaza mayor (R la gira)"),
@@ -191,6 +200,7 @@ pub fn cards(cat: Category, game: &Game, list_open: bool, budget_open: bool) -> 
             Card::soon(Icon::Cantera, "Cantera", "Piedra para empedrar"),
             Card::soon(Icon::Saladero, "Saladero", "Carne salada y cueros"),
         ],
+        Category::Desarrollo => desarrollo::cards(game, None),
         Category::Puerto => vec![
             Card::soon(Icon::Puerto, "Muelle", "Barcos con pobladores y mercaderías"),
             Card::soon(Icon::Muralla, "Muralla", "Defensa de la plaza fuerte"),
@@ -471,6 +481,8 @@ pub enum UiAction {
     Servicio(services::Act),
     /// Abre un panel de detalle (por ejemplo, los vecinos de una casa).
     Abrir(Detail),
+    /// Tecnologías e incentivos del panel de Desarrollo.
+    Desarrollo(desarrollo::Act),
 }
 
 /// Estado propio de la interfaz entre cuadros.
@@ -602,7 +614,11 @@ impl GameUi {
         self.gazette(ctx);
         if let Some(d) = self.detail {
             let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
-            if matches!(d, Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_)) {
+            if let Detail::Desarrollo(tab) = d {
+                if let Some(nav) = desarrollo::panel(ctx, game, tab, reserved, &mut acts) {
+                    self.detail = nav;
+                }
+            } else if matches!(d, Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_)) {
                 if let Some(nav) = poblacion::panel(ctx, game, d, reserved, &mut acts) {
                     self.detail = nav;
                 }
@@ -981,6 +997,8 @@ pub enum Detail {
     Hogares(u32),
     /// La ficha de una persona.
     Persona(u32),
+    /// Panel de Desarrollo (pestaña: tecnologías, saberes, industria, fomento, comercio).
+    Desarrollo(u8),
 }
 
 /// A qué panel lleva cada ficha de `chips()` (mismo orden).
@@ -1040,6 +1058,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                 Detail::Transito => (Icon::Vecinos, "Vecinos y tránsito".to_string()),
                 // Los de la población se dibujan en `poblacion::panel`.
                 Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) => (Icon::Familia, "Población".to_string()),
+                Detail::Desarrollo(_) => (Icon::Desarrollo, "Desarrollo".to_string()),
             };
             ui.horizontal(|ui| {
                 icons::show(ui, icon, 22.0, theme::INK);
@@ -1144,7 +1163,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                     });
                     ui.label(RichText::new("Si los viajes en carreta o a caballo tardan mucho más de lo previsto, los vecinos se quejan. Inspeccioná una calle para ver su tránsito.").small().color(theme::INK_SOFT));
                 }
-                Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) => {}
+                Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) | Detail::Desarrollo(_) => {}
                 Detail::Clima => {
                     let m = (c.month % 12) as usize;
                     let w = &c.climate.last;
@@ -1334,6 +1353,7 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             UiAction::ToggleList => list.open = !list.open,
             UiAction::ToggleBudget | UiAction::Abrir(_) => {}
             UiAction::Servicio(a) => services::apply(*a, game),
+            UiAction::Desarrollo(a) => desarrollo::apply(*a, game),
             UiAction::Tax(i, d) => {
                 if let Some(t) = Tax::ALL.get(*i) {
                     let e = &mut game.city.economy;
@@ -1394,7 +1414,7 @@ mod tests {
     #[test]
     fn categorias_y_tarjetas() {
         let mut g = Game::default();
-        assert_eq!(CATEGORIES.len(), 8);
+        assert_eq!(CATEGORIES.len(), 9);
         // Cada herramienta del juego aparece en alguna tarjeta, con su atajo en el globo.
         for (i, _) in TOOLS.iter().enumerate() {
             let found = CATEGORIES.iter().flat_map(|c| cards(*c, &g, false, false)).find(|c| c.action == Some(UiAction::Tool(i)) || (i == 4 && c.action == Some(UiAction::Zone(ZoneKind::Residencial)))).expect("la herramienta tiene tarjeta");

@@ -43,6 +43,12 @@ fn icon_of(k: Kind) -> Icon {
         Kind::Alcalde => Icon::Alcalde,
         Kind::Carcel => Icon::Carcel,
         Kind::Basurero => Icon::Basura,
+        Kind::EscuelaOficios => Icon::Produccion,
+        Kind::EscuelaNautica => Icon::Puerto,
+        Kind::Saladero => Icon::Saladero,
+        Kind::Molino => Icon::Atahona,
+        Kind::Astillero => Icon::Puerto,
+        Kind::Imprenta => Icon::Escuela,
     }
 }
 
@@ -56,6 +62,8 @@ fn nombre_corto(k: Kind) -> &'static str {
         Kind::Alcalde => "Alcalde de barrio",
         Kind::Carcel => "Cárcel del Cabildo",
         Kind::Basurero => "Basurero",
+        Kind::EscuelaOficios => "Escuela de oficios",
+        Kind::Astillero => "Astillero",
         _ => services::info(k).name,
     }
 }
@@ -119,7 +127,7 @@ fn future_cards(g: Grupo) -> Vec<Card> {
 pub fn group_cards(g: Grupo, game: &Game) -> Vec<Card> {
     let mut v = match g {
         Grupo::Agua => vec![place_card(game, Kind::Pozo), place_card(game, Kind::Aljibe), place_card(game, Kind::Aguadores), ordinance_card(game, Ordinance::TurnosAgua, Icon::Agua)],
-        Grupo::Educacion => vec![place_card(game, Kind::Escuela), place_card(game, Kind::Convento), ordinance_card(game, Ordinance::EscuelasPrimerasLetras, Icon::Escuela)],
+        Grupo::Educacion => vec![place_card(game, Kind::Escuela), place_card(game, Kind::Convento), ordinance_card(game, Ordinance::EscuelasPrimerasLetras, Icon::Escuela), place_card(game, Kind::EscuelaOficios), place_card(game, Kind::EscuelaNautica)],
         Grupo::Salud => vec![place_card(game, Kind::Botica), place_card(game, Kind::Medico), place_card(game, Kind::Hospital), place_card(game, Kind::Lazareto), ordinance_card(game, Ordinance::HospitalCaridad, Icon::Hospital)],
         Grupo::Seguridad => vec![place_card(game, Kind::Serenos), place_card(game, Kind::Alcalde), place_card(game, Kind::Carcel)],
         Grupo::Saneamiento => vec![
@@ -134,6 +142,11 @@ pub fn group_cards(g: Grupo, game: &Game) -> Vec<Card> {
     v
 }
 
+/// Tarjeta para colocar un edificio (para los cajones armados fuera de este módulo).
+pub fn place_card_pub(game: &Game, k: Kind) -> Card {
+    place_card(game, k)
+}
+
 fn place_card(game: &Game, k: Kind) -> Card {
     let i = services::info(k);
     let eco = &game.city.economy;
@@ -143,6 +156,10 @@ fn place_card(game: &Game, k: Kind) -> Card {
     }
     let disabled = if game.city.plaza.is_none() {
         Some("Falta la plaza")
+    } else if !game.city.desarrollo.habilitado(k) {
+        Some("Falta tecnología")
+    } else if matches!(k, Kind::Imprenta | Kind::EscuelaNautica) && game.city.services.count(k) > 0 {
+        Some("Ya hay una")
     } else if game.city.money < i.cost {
         Some("Sin fondos")
     } else if eco.stock(Res::Ladrillos).amount < i.ladrillos {
@@ -216,8 +233,10 @@ pub fn cards(cat: Category, game: &Game) -> Option<Vec<Card>> {
             place_card(game, Kind::Estancia),
             place_card(game, Kind::Horno),
             place_card(game, Kind::Cantera),
-            soon(Icon::Atahona, "Atahona", "Muele el trigo: harina para el pan"),
-            soon(Icon::Saladero, "Saladero", "Carne salada y cueros"),
+            place_card(game, Kind::Saladero),
+            place_card(game, Kind::Molino),
+            place_card(game, Kind::Astillero),
+            place_card(game, Kind::Imprenta),
         ],
         Category::Puerto => {
             let has = game.city.services.port.pier.is_some();

@@ -1923,3 +1923,186 @@ mod tests {
         }
     }
 }
+
+// --- Desarrollo: escuelas de oficios, náutica, astillero e imprenta ------------------------
+// Ver docs/sistemas/desarrollo-y-tecnologia.md. Medidas en vóxeles de diseño de 0,5 m; las
+// proporciones son estimaciones (licencia de diseño), a la escala de las casas coloniales.
+
+/// Escuela de dibujo y oficios: casa de azotea de 20 m de frente con dos aulas de ventanas
+/// grandes (dibujo y geometría), y al fondo el taller-escuela, un galpón de ladrillo con techo
+/// de teja, fragua, banco de carpintero y tablones apilados. Marco: 40 × 36 (20 × 18 m).
+pub fn escuela_oficios(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h) = (40, 14, 10);
+    f.foundation(t, e, 0, wd, 0, fd, ZOCALO);
+    f.fill(e, 0, wd, 0, h, 0, fd, CAL_OCRE);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, wd, h, h + 1, 0, fd, CAL_OCRE);
+    zocalo(f, e, 0, wd, 0, fd, 2, ZOCALO);
+    cornisa(f, e, 0, wd, h - 1, CAL);
+    // Portón al centro con el escudo de la escuela (un tablero) encima.
+    opening(f, e, 18, 22, 0, 7, 1, WOOD_DARK);
+    f.fill(e, 17, 23, 7, 8, -1, 0, STONE);
+    f.raw_fill(e, 18, 22, 8, 9, -1, 0, WOOD);
+    // Ventanas altas y anchas de las aulas de dibujo (mucha luz).
+    for u in [3, 9, 27, 33] {
+        window_reja(f, e, u, u + 4, 3, 8);
+    }
+    // Taller-escuela en el fondo: galpón de ladrillo abierto hacia el patio.
+    let ga = f.sub(2, fd + 4, 36, 14, 3);
+    ga.foundation(t, e, 0, 36, 0, 14, BRICK);
+    ga.fill(e, 0, 36, 0, 8, 0, 14, BRICK);
+    ga.clear(e, 2, 34, 0, 7, 0, 3);
+    for u in [0, 12, 24, 35] {
+        ga.raw_fill(e, u, u + 1, 0, 7, 0, 1, WOOD_DARK);
+    }
+    gable(&ga, e, 0, 36, 0, 14, 8, 2, 1, TILE, BRICK, true);
+    chimney(&ga, e, 30, 8, 0, 14);
+    // Fragua, yunque y banco de carpintero bajo el alero.
+    ga.fill(e, 28, 32, 0, 2, 4, 7, BRICK_DARK);
+    ga.raw_fill(e, 25, 26, 0, 2, 5, 6, IRON);
+    ga.raw_fill(e, 6, 16, 0, 2, 4, 6, WOOD);
+    // Patio entre las aulas y el taller, con tablones apilados.
+    f.surface(e, 0, wd, fd, fd + 4, DIRT);
+    for k in 0..3 {
+        f.raw_fill(e, 4, 14, 0, 1 + k % 2, fd + 1 + k, fd + 2 + k, WOOD);
+    }
+    f.surface(e, 0, wd, fd + 4, f.depth, DIRT);
+}
+
+/// Escuela de náutica: casa de altos encalada con un mirador en la azotea (para tomar alturas
+/// del sol con el sextante) y un mástil con verga para las prácticas de aparejo. Marco: 24 × 32.
+pub fn escuela_nautica(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h) = (24, 16, 17);
+    f.foundation(t, e, 0, wd, 0, fd, STONE);
+    f.fill(e, 0, wd, 0, h, 0, fd, CAL_AZUL);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, wd, h, h + 1, 0, fd, CAL);
+    zocalo(f, e, 0, wd, 0, fd, 2, ZOCALO);
+    cornisa(f, e, 0, wd, 8, CAL);
+    cornisa(f, e, 0, wd, h - 1, CAL);
+    opening(f, e, 10, 14, 0, 7, 1, WOOD_DARK);
+    for u in [3, 18] {
+        window_reja(f, e, u, u + 3, 3, 7);
+    }
+    for u in [3, 10, 18] {
+        opening(f, e, u, u + 3, 10, 15, 1, SHUTTER);
+        balcony(f, e, u - 1, u + 4, 9);
+    }
+    // Mirador: torrecita cuadrada sobre la azotea con ventanas a los cuatro vientos.
+    let (mu, mw) = (8, 5);
+    f.fill(e, mu, mu + 8, h, h + 7, mw, mw + 7, CAL);
+    for (u0, w0, u1, w1) in [(mu + 2, mw, mu + 6, mw + 1), (mu + 2, mw + 6, mu + 6, mw + 7)] {
+        f.fill(e, u0, u1, h + 2, h + 5, w0, w1, WINDOW);
+    }
+    f.fill(e, mu - 1, mu + 9, h + 7, h + 8, mw - 1, mw + 8, STONE);
+    // Mástil de prácticas en el patio, con verga y una cofa.
+    f.surface(e, 0, wd, fd, f.depth, DIRT);
+    let (pu, pw) = (18, fd + 8);
+    f.raw_fill(e, pu, pu + 1, 0, 26, pw, pw + 1, WOOD_DARK);
+    f.raw_fill(e, pu - 7, pu + 8, 20, 21, pw, pw + 1, WOOD);
+    f.raw_fill(e, pu - 1, pu + 2, 16, 17, pw - 1, pw + 2, WOOD);
+    // Ancla y rollos de cabo junto al mástil.
+    f.raw_fill(e, 4, 5, 0, 4, fd + 6, fd + 7, IRON);
+    f.raw_fill(e, 2, 7, 0, 1, fd + 6, fd + 7, IRON);
+    cylinder(f, e, 9.0, (fd + 11) as f32, 1.4, 0, 1, SACK);
+}
+
+/// Carpintería de ribera (astillero): una grada de madera con el casco de una lancha en
+/// construcción (cuadernas a la vista), el galpón de los carpinteros y calafates, pilas de
+/// tablones y la caldera de la brea. Marco: 70 × 50 (35 × 25 m).
+pub fn astillero(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    f.surface(e, 0, f.width, 0, f.depth, SAND);
+    // Galpón de los carpinteros sobre la calle.
+    let ga = f.sub(2, 2, 24, 14, 1);
+    ga.foundation(t, e, 0, 24, 0, 14, STONE);
+    ga.fill(e, 0, 24, 0, 8, 0, 14, WOOD);
+    ga.clear(e, 2, 22, 0, 7, 13, 14);
+    gable(&ga, e, 0, 24, 0, 14, 8, 2, 1, TILE, WOOD, true);
+    opening(&ga, e, 9, 15, 0, 7, 1, WOOD_DARK);
+    // Grada: durmientes de madera y el casco sobre picaderos.
+    let (u0, u1, wc) = (30, 66, 25);
+    f.foundation(t, e, u0 - 2, u1 + 2, wc - 6, wc + 7, STONE);
+    let mut u = u0;
+    while u < u1 {
+        f.raw_fill(e, u, u + 1, 0, 1, wc - 5, wc + 6, WOOD_DARK);
+        u += 4;
+    }
+    let len = (u1 - u0) as f32;
+    for k in 0..(u1 - u0) {
+        let x = k as f32 / len;
+        // Manga del casco: más ancha en el medio, fina en la proa y la popa.
+        let half = (5.0 * (std::f32::consts::PI * x).sin().powf(0.6)).round() as i32;
+        let uu = u0 + k;
+        // Quilla.
+        f.raw_fill(e, uu, uu + 1, 1, 2, wc, wc + 1, WOOD_DARK);
+        if half < 1 {
+            continue;
+        }
+        // Tablazón en la mitad de popa, cuadernas desnudas en la de proa.
+        let planked = x < 0.55;
+        for y in 2..8 {
+            let spread = (half as f32 * ((y - 1) as f32 / 6.0).sqrt()).round() as i32;
+            if planked || k % 3 == 0 {
+                f.raw(e, uu, y, wc - spread, if planked { WOOD } else { WOOD_DARK });
+                f.raw(e, uu, y, wc + spread, if planked { WOOD } else { WOOD_DARK });
+            }
+        }
+        if planked {
+            f.raw_fill(e, uu, uu + 1, 2, 3, wc - half + 1, wc + half, WOOD_DARK);
+        }
+    }
+    // Roda y codaste.
+    f.raw_fill(e, u1 - 1, u1, 1, 10, wc, wc + 1, WOOD_DARK);
+    f.raw_fill(e, u0, u0 + 1, 1, 9, wc, wc + 1, WOOD_DARK);
+    // Puntales que sostienen el casco.
+    for k in (u0 + 6..u1 - 4).step_by(8) {
+        for (dw, s) in [(-7, -1), (7, 1)] {
+            f.raw_fill(e, k, k + 1, 0, 5, wc + dw, wc + dw + 1, FENCE);
+            f.raw(e, k, 5, wc + dw - s, FENCE);
+        }
+    }
+    // Tablones apilados y troncos para aserrar.
+    for k in 0..4 {
+        f.raw_fill(e, 4, 22, k, k + 1, 22 + k % 2, 30 - k % 2, WOOD);
+    }
+    for k in 0..3 {
+        f.raw_fill(e, 6, 24, 0, 2, 36 + k * 3, 38 + k * 3, TRUNK);
+    }
+    // Caldera de la brea con su fogón.
+    cylinder(f, e, 27.0, 42.0, 1.8, 0, 3, IRON);
+    f.raw_fill(e, 26, 28, 3, 4, 41, 43, MUD);
+}
+
+/// Imprenta: casa de una planta con tienda a la calle (cartel de madera y vidriera), la prensa
+/// de madera dentro y papel en resmas; patio con tendederos de pliegos. Marco: 20 × 28.
+pub fn imprenta(t: &TerrainGen, e: &mut Edits, f: &Frame) {
+    let (wd, fd, h) = (20, 14, 10);
+    f.foundation(t, e, 0, wd, 0, fd, ZOCALO);
+    f.fill(e, 0, wd, 0, h, 0, fd, CAL);
+    f.fill(e, 1, wd - 1, h - 1, h, 1, fd - 1, AZOTEA);
+    ring(f, e, 0, wd, h, h + 1, 0, fd, CAL);
+    zocalo(f, e, 0, wd, 0, fd, 2, ZOCALO);
+    cornisa(f, e, 0, wd, h - 1, CAL);
+    opening(f, e, 3, 6, 0, 6, 1, WOOD_DARK);
+    // Vidriera de la tienda y cartel.
+    opening(f, e, 9, 17, 2, 7, 1, WINDOW);
+    f.fill(e, 8, 18, 1, 2, -1, 0, WOOD);
+    f.raw_fill(e, 8, 18, 7, 9, -1, 0, WOOD_DARK);
+    f.raw_fill(e, 9, 17, 8, 9, -2, -1, CAL_SUCIA);
+    // Prensa de madera en el fondo de la casa (se ve por el patio): bastidor alto y platina.
+    f.clear(e, 4, 16, 0, 8, fd - 6, fd);
+    f.raw_fill(e, 6, 7, 0, 8, fd - 4, fd - 3, WOOD_DARK);
+    f.raw_fill(e, 12, 13, 0, 8, fd - 4, fd - 3, WOOD_DARK);
+    f.raw_fill(e, 6, 13, 7, 8, fd - 4, fd - 3, WOOD_DARK);
+    f.raw_fill(e, 7, 12, 3, 4, fd - 5, fd - 2, WOOD);
+    f.raw_fill(e, 14, 16, 0, 2, fd - 4, fd - 2, CAL_SUCIA);
+    // Patio con pliegos secándose.
+    f.surface(e, 0, wd, fd, f.depth, DIRT);
+    ring(f, e, 0, wd, 0, 4, fd, f.depth, CAL);
+    for w in [fd + 4, fd + 8] {
+        f.raw_fill(e, 2, 3, 0, 5, w, w + 1, WOOD_DARK);
+        f.raw_fill(e, wd - 3, wd - 2, 0, 5, w, w + 1, WOOD_DARK);
+        f.raw_fill(e, 2, wd - 2, 4, 5, w, w + 1, WOOD);
+        f.raw_fill(e, 4, wd - 4, 2, 4, w, w + 1, CAL_SUCIA);
+    }
+}

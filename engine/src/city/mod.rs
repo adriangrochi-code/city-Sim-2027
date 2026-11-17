@@ -7,6 +7,7 @@
 
 pub mod agentes;
 pub mod climate;
+pub mod desarrollo;
 pub mod economy;
 pub mod game;
 pub mod game_demo;
@@ -68,6 +69,9 @@ pub struct City {
     /// Pobladores que trajeron los barcos (o salieron de la cuarentena) este mes y todavía no
     /// entraron a la población: se suman a las llegadas del mes.
     pub llegados_barco: i32,
+    /// Saberes, tecnologías, industrias, inversión e incentivos, y el comercio exterior
+    /// (ver `desarrollo`).
+    pub desarrollo: desarrollo::Desarrollo,
     /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
     mejoras: Vec<(u32, u8)>,
     rng: Rng,
@@ -78,7 +82,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), desarrollo: desarrollo::Desarrollo::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -545,6 +549,7 @@ impl City {
         while self.month_acc >= MONTH_SECONDS {
             self.month_acc -= MONTH_SECONDS;
             news.extend(self.services_month(t, e));
+            news.extend(self.desarrollo_month(t, e));
             news.extend(self.month_tick());
             self.aplicar_mejoras(t, e);
         }
@@ -620,6 +625,7 @@ impl City {
             ..Default::default()
         };
         self.services_input(&mut inp);
+        self.desarrollo_input(&mut inp);
         inp
     }
 
@@ -717,10 +723,14 @@ impl City {
             input.animo = Some(inf.animo);
             input.social = inf.lineas;
             news.extend(inf.noticias);
-        } else {
+        }
+        // Ganancias, salarios, escuelas y contratación del desarrollo (después de la población).
+        self.desarrollo_tras_poblacion();
+        if !self.poblacion.fundada {
             self.pool = (self.pool + arrivals).min(600);
         }
         let report = self.economy.month(&input);
+        self.desarrollo_opinion();
         self.money += report.balance();
         news.extend(report.news);
         // El tránsito: si los viajes tardan mucho más de lo previsto, los vecinos se quejan.

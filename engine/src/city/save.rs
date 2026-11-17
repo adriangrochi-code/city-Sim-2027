@@ -141,6 +141,10 @@ pub struct CityData {
     /// población la generan al cargar a partir de la fundación y de las casas.
     #[serde(default)]
     pub poblacion: Option<super::poblacion::Poblacion>,
+    /// Saberes, tecnologías, industrias, incentivos y comercio exterior (las partidas viejas
+    /// empiezan sin desarrollo).
+    #[serde(default)]
+    pub desarrollo: Option<super::desarrollo::Desarrollo>,
 }
 
 impl CityData {
@@ -186,6 +190,7 @@ impl CityData {
             vecinos: Some(c.agentes.e.clone()),
             servicios: Some(super::services::save::ServicesData::from_services(&c.services, &c.lots.level_cap)),
             poblacion: c.poblacion.fundada.then(|| c.poblacion.clone()),
+            desarrollo: Some(c.desarrollo.clone()),
         }
     }
 
@@ -238,6 +243,7 @@ impl CityData {
             poblacion: super::poblacion::Poblacion::nueva(1726),
             mejoras: Vec::new(),
             llegados_barco: 0,
+            desarrollo: self.desarrollo.clone().unwrap_or_default(),
         };
         city.poblacion = match &self.poblacion {
             Some(p) => {

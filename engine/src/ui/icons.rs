@@ -59,6 +59,8 @@ pub enum Icon {
     Basura,
     /// Delito: una bolsa de monedas con una mano.
     Delito,
+    /// Desarrollo: una rueda dentada.
+    Desarrollo,
 }
 
 /// Dibuja el ícono dentro de `r` con el color `c`.
@@ -329,6 +331,16 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32) {
             line((-0.75, 0.3), (0.75, 0.3));
             line((-0.3, -0.25), (-0.15, 0.0));
             line((0.1, -0.35), (0.25, -0.1));
+        }
+        Icon::Desarrollo => {
+            circle(0.0, 0.0, 0.5);
+            circle(0.0, 0.0, 0.17);
+            for k in 0..8 {
+                let a = k as f32 * PI / 4.0;
+                let (c, s2) = (a.cos(), a.sin());
+                let (tc, ts) = (-s2 * 0.13, c * 0.13);
+                poly(&[(0.5 * c + tc, 0.5 * s2 + ts), (0.8 * c + tc, 0.8 * s2 + ts), (0.8 * c - tc, 0.8 * s2 - ts), (0.5 * c - tc, 0.5 * s2 - ts)], false, st);
+            }
         }
         Icon::Plaza => {
             rect(-0.8, -0.8, 0.8, 0.8);

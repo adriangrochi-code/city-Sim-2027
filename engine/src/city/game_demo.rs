@@ -716,3 +716,82 @@ pub fn view_lamps(s: &Session) -> Option<[f32; 5]> {
     let b = s.game.as_ref()?.city.services.of_kind(Kind::Serenos).next()?;
     Some([b.c.x, b.c.y, 120.0, 200.0, 30.0])
 }
+
+// --- Desarrollo: tecnologías, escuelas de oficios, industrias e inversores -------------------
+
+/// Cinco años de desarrollo sobre la ciudad con historia: el cabildo invierte en las
+/// tecnologías a medida que se pueden (escuela de oficios, curtido, horno, saladero, molino,
+/// carpintería de ribera, náutica, imprenta), levanta las escuelas, dispone la exención, el
+/// crédito de fomento y los maestros de ultramar, y deja que los inversores abran las
+/// industrias. Si al final falta alguna industria para las capturas, la levanta el cabildo.
+pub fn desarrollo(s: &mut Session) -> String {
+    use super::desarrollo::{EstadoTec, Incentivo, Saber, TECNOLOGIAS};
+    use super::economy::Res;
+    {
+        let g = s.game.as_mut().unwrap();
+        g.city.money += 150_000;
+        g.city.economy.stocks[Res::Ladrillos as usize].amount += 2500.0;
+        g.city.economy.stocks[Res::Piedra as usize].amount += 1200.0;
+        for i in [Incentivo::Exencion, Incentivo::Credito, Incentivo::Maestros] {
+            let _ = g.city.desarrollo_alternar(i);
+        }
+    }
+    let (f, side) = plaza_frame(0.0);
+    let mut out = Vec::new();
+    let mut iniciadas = Vec::new();
+    let pier = s.game.as_ref().unwrap().city.services.port.pier.as_ref().map_or(PLAZA, |p| p.land);
+    let camino = (*CAMINO_END.lock().unwrap()).unwrap_or(PLAZA + side * 900.0);
+    for mes in 0..60 {
+        // Invertir en todo lo que ya se puede.
+        {
+            let g = s.game.as_mut().unwrap();
+            let ctx = g.city.desarrollo_contexto();
+            let disp: Vec<_> = TECNOLOGIAS.iter().filter(|t| g.city.desarrollo.estado(t.id, &ctx) == EstadoTec::Disponible).map(|t| t.id).collect();
+            for t in disp {
+                if g.city.desarrollo_iniciar(t).is_ok() {
+                    iniciadas.push(format!("{t:?} (mes {mes})"));
+                }
+            }
+            g.city.economy.stocks[Res::Ladrillos as usize].amount = g.city.economy.stocks[Res::Ladrillos as usize].amount.max(800.0);
+        }
+        // Las escuelas, en cuanto se habilitan.
+        for (k, around) in [(Kind::EscuelaOficios, PLAZA - side * (BLOCK * 2.2) + f * (BLOCK * 0.8)), (Kind::EscuelaNautica, pier)] {
+            let g = s.game.as_ref().unwrap();
+            if g.city.desarrollo.habilitado(k) && g.city.services.count(k) == 0 {
+                out.push(place(s, k, around, 600.0));
+            }
+        }
+        let t = s.terrain.clone();
+        let e = s.game.as_mut().unwrap().city.fast_forward(&t, 1);
+        s.apply_edits(&e);
+    }
+    // Lo que no abrieron los inversores lo levanta el cabildo (para verlo en las capturas).
+    for (k, around, r) in [(Kind::Saladero, camino, 1500.0), (Kind::Molino, PLAZA + side * 420.0, 900.0), (Kind::Astillero, pier, 900.0), (Kind::Imprenta, PLAZA + f * (BLOCK * 1.2), 450.0)] {
+        let g = s.game.as_ref().unwrap();
+        if g.city.desarrollo.habilitado(k) && g.city.services.count(k) == 0 {
+            out.push(format!("(cabildo) {}", place(s, k, around, r)));
+        }
+    }
+    let t = s.terrain.clone();
+    let e = s.game.as_mut().unwrap().city.fast_forward(&t, 6);
+    s.apply_edits(&e);
+    let g = s.game.as_ref().unwrap();
+    let d = &g.city.desarrollo;
+    let est: Vec<String> = d.establecimientos.iter().map(|e| format!("{:?} {:?} {} peones {:.0} %", e.ind, e.dueno, e.empleados.len(), e.marcha * 100.0)).collect();
+    let ult = d.historia.back();
+    format!(
+        "{} · tecnologías logradas {:?} · iniciadas {:?} · leen {} · artesanos {} · oficiales {} · pilotos {} · establecimientos [{}] · exportaciones {:.0} pesos/mes · concentración {:.2} · inversión privada {:.0} · {}",
+        g.city.date(),
+        d.hechas,
+        iniciadas,
+        d.saber(Saber::Alfabetizados),
+        d.saber(Saber::Artesanos),
+        d.saber(Saber::Oficiales),
+        d.saber(Saber::Pilotos),
+        est.join("; "),
+        ult.map_or(0.0, |f| f.exportaciones()),
+        d.concentracion(),
+        d.inversion_total,
+        out.join(" · ")
+    )
+}

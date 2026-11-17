@@ -62,6 +62,13 @@ pub enum Kind {
     Alcalde,
     Carcel,
     Basurero,
+    // --- Desarrollo: instituciones e industrias (ver `city::desarrollo`) ---
+    EscuelaOficios,
+    EscuelaNautica,
+    Saladero,
+    Molino,
+    Astillero,
+    Imprenta,
 }
 
 /// Grupos de servicios (pestañas del cajón de Servicios y capas de datos).
@@ -123,7 +130,7 @@ pub struct Info {
     pub plazas: i32,
 }
 
-pub const CATALOG: [Info; 18] = [
+pub const CATALOG: [Info; 24] = [
     Info { kind: Kind::Pozo, name: "Pozo de balde", key: "pozo", desc: "Agua de pozo para unas 60 personas cercanas. Calidad regular; los talleres cercanos la ensucian.", cost: 400, ladrillos: 0.0, piedra: 20.0, upkeep: 4, cap: 60, quality: 0.7, radius: 110.0, fire_reach: 140.0, size: (5.0, 5.0), frame: (10, 10), builder: colonial::pozo, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aljibe, name: "Aljibe público", key: "aljibe", desc: "Junta el agua de lluvia de los techos en una cisterna. Buena agua para unas 160 personas; en la sequía rinde menos.", cost: 1500, ladrillos: 60.0, piedra: 20.0, upkeep: 12, cap: 160, quality: 1.0, radius: 170.0, fire_reach: 180.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::aljibe_publico, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aguadores, name: "Puesto de aguadores", key: "aguadores", desc: "Los aguadores llenan sus pipas en un arroyo o manantial y las reparten en carro por las calles: llegan lejos, pero solo a donde llega la calle.", cost: 2500, ladrillos: 30.0, piedra: 0.0, upkeep: 30, cap: 360, quality: 0.9, radius: 1100.0, fire_reach: 450.0, size: (14.0, 18.0), frame: (28, 36), builder: colonial::puesto_aguadores, grupo: Grupo::Agua, plazas: 0 },
@@ -147,6 +154,15 @@ pub const CATALOG: [Info; 18] = [
     Info { kind: Kind::Carcel, name: "Cárcel del Cabildo", key: "carcel", desc: "Calabozos con cuerpo de guardia cerca de la plaza: la guardia vigila el centro y, con lugar para treinta presos, los ladrones lo piensan dos veces en toda la ciudad. Una por ciudad.", cost: 5000, ladrillos: 200.0, piedra: 120.0, upkeep: 45, cap: 0, quality: 0.3, radius: 600.0, fire_reach: 0.0, size: (24.0, 20.0), frame: (48, 40), builder: colonial::carcel, grupo: Grupo::Seguridad, plazas: 30 },
     // Saneamiento: el hueco donde las carretillas descargan la basura.
     Info { kind: Kind::Basurero, name: "Basurero fuera de la muralla", key: "basurero", desc: "Un hueco lejos de las casas donde las carretillas descargan la basura: con la recolección, los basurales del barrio desaparecen. Ensucia los pozos cercanos.", cost: 300, ladrillos: 0.0, piedra: 0.0, upkeep: 5, cap: 0, quality: 0.0, radius: 1600.0, fire_reach: 0.0, size: (30.0, 30.0), frame: (60, 60), builder: colonial::basurero, grupo: Grupo::Saneamiento, plazas: 0 },
+    // Desarrollo (ver `city::desarrollo`): se desbloquean con tecnologías. Las instituciones las
+    // paga el cabildo; las industrias las puede levantar el cabildo o un inversor privado (sin
+    // mantenimiento del cabildo: sus costos van en la cuenta del establecimiento).
+    Info { kind: Kind::EscuelaOficios, name: "Escuela de dibujo y oficios", key: "escuela_oficios", desc: "Aulas de dibujo y geometría y un taller-escuela, donde los jóvenes que ya saben leer salen oficiales de carpintería, herrería y albañilería en dos años. Hace falta la tecnología.", cost: 2500, ladrillos: 80.0, piedra: 10.0, upkeep: 40, cap: 0, quality: 1.0, radius: 0.0, fire_reach: 0.0, size: (20.0, 18.0), frame: (40, 36), builder: colonial::escuela_oficios, grupo: Grupo::Educacion, plazas: 30 },
+    Info { kind: Kind::EscuelaNautica, name: "Escuela de náutica", key: "escuela_nautica", desc: "Matemáticas, cartas y pilotaje para muchachos que leen y escriben. Forma pilotos para el cabotaje y la carpintería de ribera. Una por ciudad.", cost: 3000, ladrillos: 100.0, piedra: 20.0, upkeep: 50, cap: 0, quality: 1.0, radius: 0.0, fire_reach: 0.0, size: (12.0, 16.0), frame: (24, 32), builder: colonial::escuela_nautica, grupo: Grupo::Educacion, plazas: 15 },
+    Info { kind: Kind::Saladero, name: "Saladero", key: "saladero", desc: "Faena ganado y sala la carne al sol para hacer tasajo, que se exporta, y deja cueros y sebo. Mucho capital, pocos peones por lo que produce. Huele mal: lejos de la plaza, junto a un arroyo o la costa.", cost: 6000, ladrillos: 150.0, piedra: 20.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (60.0, 45.0), frame: (120, 90), builder: colonial::saladero, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Molino, name: "Molino de viento", key: "molino", desc: "Muele el trigo de las chacras con el viento, y da más harina y más barata que las atahonas, con cuatro molineros.", cost: 2500, ladrillos: 40.0, piedra: 30.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::molino, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Astillero, name: "Carpintería de ribera", key: "astillero", desc: "Gradas, carpinteros y calafates que carenan los barcos de paso (un servicio que pagan de afuera) y arman lanchas. Va sobre la costa.", cost: 6000, ladrillos: 60.0, piedra: 40.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (35.0, 25.0), frame: (70, 50), builder: colonial::astillero, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::Imprenta, name: "Imprenta", key: "imprenta", desc: "Prensa de madera, tipos y papel para bandos, almanaques, cartillas y una gaceta con los precios corrientes. Una por ciudad, cerca de la plaza.", cost: 3000, ladrillos: 50.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 14.0), frame: (20, 28), builder: colonial::imprenta, grupo: Grupo::Otros, plazas: 0 },
 ];
 
 pub fn info(k: Kind) -> &'static Info {
@@ -519,6 +535,10 @@ impl City {
             Kind::Basurero if far(450.0) => return Some("El basurero va fuera de la ciudad, a más de 450 m de la plaza".into()),
             _ => {}
         }
+        // Instituciones e industrias del desarrollo: tecnología y sitio (ver `city::desarrollo`).
+        if let Some(p) = self.desarrollo_problema_sitio(t, k, c) {
+            return Some(p);
+        }
         let eco = &self.economy;
         if inf.cost > self.money {
             return Some(format!("Fondos insuficientes: hacen falta {} pesos", super::game::fmt_thousands(inf.cost)));
@@ -772,9 +792,12 @@ impl City {
             Kind::Horno => out.push(format!("Ladrillos por mes: {}", (HORNO_LADRILLOS * self.climate.brick_factor()) as i32)),
             Kind::Cantera => out.push(format!("Piedra por mes: {}", CANTERA_PIEDRA as i32)),
             Kind::Aduana => out.push("Contrabando: baja de 35 % a 5 %".into()),
+            k if super::desarrollo::es_de_desarrollo(k) => self.desarrollo_lines(id, &mut out),
             _ => self.barrio_lines(id, &mut out),
         }
-        out.push(format!("Mantenimiento: {} pesos al mes", inf.upkeep));
+        if inf.upkeep > 0 {
+            out.push(format!("Mantenimiento: {} pesos al mes", inf.upkeep));
+        }
         out
     }
 }

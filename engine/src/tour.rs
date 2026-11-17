@@ -318,6 +318,48 @@ pub fn city_steps() -> Vec<Act> {
         UiShot("motor-ui-vecinos", ui_vecinos),
         UiShot("motor-ui-persona", ui_persona),
         UiShot("motor-ui-persona-liberta", ui_persona_liberta),
+        // Desarrollo: tecnologías, escuelas, industrias, inversores y comercio exterior.
+        Game("cinco años de desarrollo", d::desarrollo),
+        WaitIdle("ciudad con industrias"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Saladero, 95.0)),
+        Hour(11.0),
+        WaitIdle("saladero"),
+        Shot("motor-desarrollo-saladero"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Molino, 32.0)),
+        Hour(11.0),
+        WaitIdle("molino"),
+        Shot("motor-desarrollo-molino"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Astillero, 60.0)),
+        Hour(11.0),
+        WaitIdle("carpintería de ribera"),
+        Shot("motor-desarrollo-astillero"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::EscuelaOficios, 45.0)),
+        Hour(11.0),
+        WaitIdle("escuela de oficios"),
+        Shot("motor-desarrollo-escuela-oficios"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::EscuelaNautica, 40.0)),
+        Hour(11.0),
+        WaitIdle("escuela de náutica"),
+        Shot("motor-desarrollo-escuela-nautica"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Imprenta, 28.0)),
+        Hour(11.0),
+        WaitIdle("imprenta"),
+        Shot("motor-desarrollo-imprenta"),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Saladero, 150.0)),
+        WaitIdle("ficha del saladero"),
+        UiShot("motor-ui-ficha-saladero", |s, u| {
+            u.detail = None;
+            ui_ficha_servicio(s, u, crate::city::services::Kind::Saladero)
+        }),
+        Cam([c.x + 40.0, c.y + 30.0, 330.0, 205.0, 40.0]),
+        WaitIdle("vista para el panel de desarrollo"),
+        UiShot("motor-ui-desarrollo-cajon", |s, u| ui_desarrollo(s, u, None)),
+        UiShot("motor-ui-desarrollo-tecnologias", |s, u| ui_desarrollo(s, u, Some(0))),
+        UiShot("motor-ui-desarrollo-saberes", |s, u| ui_desarrollo(s, u, Some(1))),
+        UiShot("motor-ui-desarrollo-industria", |s, u| ui_desarrollo(s, u, Some(2))),
+        UiShot("motor-ui-desarrollo-fomento", |s, u| ui_desarrollo(s, u, Some(3))),
+        UiShot("motor-ui-desarrollo-comercio", |s, u| ui_desarrollo(s, u, Some(4))),
+        UiShot("motor-ui-cajon-produccion", ui_produccion),
         // Guardar y cargar: la ciudad cargada tiene que verse igual que la general.
         Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
         SaveLoad("guardar y cargar la ciudad"),
@@ -482,6 +524,29 @@ fn ui_detail(s: &mut Session, u: &mut GameUi, d: ui::Detail) {
     u.open = None;
     u.budget = false;
     u.detail = Some(d);
+}
+
+/// El cajón de Desarrollo (sin panel) o el panel en una pestaña.
+fn ui_desarrollo(s: &mut Session, u: &mut GameUi, tab: Option<u8>) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.inspected = None;
+    g.layer = None;
+    u.list.open = false;
+    u.budget = false;
+    u.detail = tab.map(ui::Detail::Desarrollo);
+    u.open = if tab.is_none() { Some(ui::Category::Desarrollo) } else { None };
+    u.time += 30.0;
+}
+
+/// El cajón de Producción con las industrias.
+fn ui_produccion(s: &mut Session, u: &mut GameUi) {
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.inspected = None;
+    u.detail = None;
+    u.open = Some(ui::Category::Produccion);
+    u.time += 30.0;
 }
 
 /// Un panel de la población (sin el listado de ordenanzas de la captura anterior).
@@ -845,7 +910,7 @@ impl Tour {
                     let summary = |s: &Session| {
                         let c = &s.game.as_ref().unwrap().city;
                         let sv = &c.services;
-                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default())
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default(), serde_json::to_string(&c.desarrollo).unwrap_or_default())
                     };
                     // Lo derivado del barrio (escuelas, delito por solar), al día con el estado
                     // que se guarda (al cargar se recalcula igual).
