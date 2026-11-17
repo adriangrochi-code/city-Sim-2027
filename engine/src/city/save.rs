@@ -134,6 +134,9 @@ pub struct CityData {
     /// Vecinos y vehículos (las partidas viejas los generan de nuevo desde los solares).
     #[serde(default)]
     pub vecinos: Option<super::agentes::Estado>,
+    /// Servicios, obras, puerto, incendios y epidemias (las partidas viejas empiezan sin ellos).
+    #[serde(default)]
+    pub servicios: Option<super::services::save::ServicesData>,
 }
 
 impl CityData {
@@ -177,6 +180,7 @@ impl CityData {
             clima: Some(c.climate.to_state()),
             rio: Some(c.water.to_state()),
             vecinos: Some(c.agentes.e.clone()),
+            servicios: Some(super::services::save::ServicesData::from_services(&c.services, &c.lots.level_cap)),
         }
     }
 
@@ -190,7 +194,13 @@ impl CityData {
         let net = RoadNetwork::restore(nodes, edges, self.calles.proximo_nodo, self.calles.proximo_tramo)?;
         let lots: Vec<Lot> = self.solares.solares.iter().map(|l| Lot { id: l.id, c: p2(l.centro), f: p2(l.frente), zone: l.zona.min(9), level: l.nivel.min(3), age: l.edad, seed: l.semilla, voxels: Vec::new() }).collect();
         let obstacles = self.solares.obstaculos.iter().map(|o| Obstacle { c: p2(o.centro), f: p2(o.frente), w: o.ancho, d: o.fondo }).collect();
-        let lots = Lots::restore(lots, obstacles, self.solares.centro_plaza.map(p2), self.solares.proximo);
+        let mut lots = Lots::restore(lots, obstacles, self.solares.centro_plaza.map(p2), self.solares.proximo);
+        let (services, caps) = match &self.servicios {
+            Some(d) => d.to_services()?,
+            None => Default::default(),
+        };
+        lots.level_cap = caps;
+        lots.walls = services.walls.obstacles();
         let ed = &self.economia;
         let mut economy = Economy::default();
         for (s, d) in economy.stocks.iter_mut().zip(&ed.existencias) {
@@ -215,6 +225,7 @@ impl CityData {
             climate: self.clima.as_ref().map(|(v, a)| super::climate::Climate::from_state(v, *a)).unwrap_or_default(),
             water: self.rio.as_ref().map(|(v, a)| super::water::WaterLevel::from_state(v, *a)).unwrap_or_default(),
             agentes: self.vecinos.clone().map(super::agentes::Agentes::from_estado).unwrap_or_default(),
+            services,
             pending_flood: None,
             rng: Rng::from_state(self.azar),
             month_acc: self.acumulado_mes,

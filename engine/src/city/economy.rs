@@ -230,6 +230,11 @@ pub struct MonthInput {
     pub world_hides: f32,
     /// Flujos cortados por un conflicto lejano (no llegan barcos de ultramar).
     pub blockade: bool,
+    /// Parte de los derechos de aduana que se pierde por el contrabando (0 a 1; la aduana lo
+    /// baja).
+    pub contraband: f32,
+    /// Otras líneas del presupuesto que traen los servicios (derechos de los portones…).
+    pub other: Vec<(String, i64)>,
 }
 
 /// Una línea del presupuesto (positiva = ingreso).
@@ -597,7 +602,10 @@ impl Economy {
         let coverage = (inp.jobs_c as f32 / (pop * 0.08).max(1.0)).min(1.2);
         let sales = pop * 0.9 * (self.price(Res::Pan) * 0.5 + 0.5) * (0.4 + 0.6 * coverage) + inp.jobs_i as f32 * 4.0;
         rep.add("Alcabala", (sales * self.tax(Tax::Alcabala) as f32 / 100.0 * 3.0) as i64);
-        rep.add("Aduana", duty as i64);
+        rep.add("Aduana", (duty * (1.0 - inp.contraband.clamp(0.0, 1.0))) as i64);
+        for (concept, amount) in &inp.other {
+            rep.add(concept.clone(), *amount);
+        }
 
         // Gastos.
         rep.add("Mantenimiento de calles", -inp.upkeep_roads);

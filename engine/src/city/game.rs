@@ -3,6 +3,7 @@
 
 use super::lots::{corners_of, growth_blockers, zone_code, zone_name, zone_of, Density, ZoneKind, D, W};
 use super::roads::{bezier, line, RoadKind};
+use super::services::{self, Kind, Layer, Order, Placeable};
 use super::{grid_lines, plaza_frame, City, BLOCK};
 use crate::buildings::Edits;
 use crate::render::OverlayVertex;
@@ -20,6 +21,8 @@ pub enum Tool {
     Dezone,
     Demolish,
     Inspect,
+    /// Colocar un servicio, el muelle o la muralla (`Game::service`); no tiene atajo numérico.
+    Service,
 }
 
 pub const TOOLS: [(Tool, &str); 8] = [
@@ -57,6 +60,12 @@ pub struct Game {
     /// Zona que pinta el pincel: tipo y densidad.
     pub zone_kind: ZoneKind,
     pub density: Density,
+    /// Qué coloca la herramienta de servicios.
+    pub service: Placeable,
+    /// Capa de datos sobre el mapa (agua, serenos, fuego).
+    pub layer: Option<Layer>,
+    /// Órdenes de la interfaz que producen vóxeles (se cumplen en `update`).
+    pub orders: Vec<Order>,
 }
 
 /// Ficha de lo inspeccionado para el panel de información.
@@ -76,6 +85,10 @@ pub enum InspectKind {
     Road,
     #[default]
     Terrain,
+    /// Un edificio de servicio (su id).
+    Service(u32),
+    /// La iglesia matriz (obra por fases).
+    Church,
 }
 
 /// Nombre de la etapa de la ciudad según su población (como en el prototipo).
@@ -101,6 +114,9 @@ impl Default for Game {
             brush: 30.0,
             zone_kind: ZoneKind::Residencial,
             density: Density::Baja,
+            service: Placeable::Building(Kind::Pozo),
+            layer: None,
+            orders: Vec::new(),
             plaza_angle: 0.0,
             painting: false,
             hover: None,
@@ -134,7 +150,22 @@ impl Game {
     }
 
     pub fn tool_name(&self) -> &'static str {
+        if self.tool == Tool::Service {
+            return self.service.name();
+        }
         TOOLS.iter().find(|t| t.0 == self.tool).map_or("", |t| t.1)
+    }
+
+    /// Elige qué colocar con la herramienta de servicios.
+    pub fn set_service(&mut self, p: Placeable) {
+        if self.city.plaza.is_none() {
+            self.say("Primero funda la plaza mayor");
+            return;
+        }
+        self.tool = Tool::Service;
+        self.service = p;
+        self.stage = 0;
+        self.painting = false;
     }
 
     /// Esc / clic derecho: cancela el trazado en curso. Devuelve si había algo que cancelar.
@@ -240,6 +271,37 @@ impl Game {
                 self.inspected = Some(p);
                 None
             }
+            Tool::Service => self.press_service(t, p),
+        }
+    }
+
+    fn press_service(&mut self, t: &TerrainGen, p: Vec2) -> Option<Edits> {
+        match self.service {
+            Placeable::Building(k) => {
+                let (c, f) = self.city.service_site(k, p);
+                let r = self.city.place_service(t, k, c, f);
+                let e = self.report(r)?;
+                self.say(format!("Construido: {}", services::info(k).name.to_lowercase()));
+                Some(e)
+            }
+            Placeable::Muelle => {
+                let r = self.city.build_pier(t, p);
+                let e = self.report(r)?;
+                self.say("Construido el muelle: ya pueden atracar los barcos");
+                Some(e)
+            }
+            Placeable::Muralla => {
+                if self.stage == 0 {
+                    self.p0 = p;
+                    self.stage = 1;
+                    return None;
+                }
+                let r = self.city.build_wall(t, self.p0, p);
+                let e = self.report(r)?;
+                self.say("Trazado un tramo de muralla: se levanta con la piedra de la cantera");
+                self.p0 = p;
+                Some(e)
+            }
         }
     }
 
@@ -261,6 +323,15 @@ impl Game {
     /// crece), calle (tipo y largo) o terreno.
     pub fn inspect_info(&self) -> Option<Inspect> {
         let p = self.inspected?;
+        if let Some(id) = self.city.services.at(p) {
+            let b = &self.city.services.buildings[&id];
+            return Some(Inspect { title: b.info().name.into(), lines: self.city.service_lines(id), why: vec![], kind: InspectKind::Service(id) });
+        }
+        if let Some((c, f)) = self.city.church_site() {
+            if super::lots::point_in_poly(p, &corners_of(c, f, 18.0, 44.0)) {
+                return Some(Inspect { title: "Iglesia matriz".into(), lines: self.city.church_lines(), why: vec![], kind: InspectKind::Church });
+            }
+        }
         if let Some(id) = self.city.lots.lot_at(p) {
             let l = &self.city.lots.lots[&id];
             let front = self.city.lots.frontage(l, &self.city.net);
@@ -276,6 +347,16 @@ impl Game {
             i.lines.push(format!("Calle: {}", front.map_or("—", |k| k.name())));
             if l.level > 0 {
                 i.lines.push(format!("Antigüedad: {} {}", l.age, if l.age == 1 { "mes" } else { "meses" }));
+            }
+            if l.level > 0 {
+                let w = self.city.services.water_of(l.id);
+                i.lines.push(format!("Agua: {}", if w <= 0.0 { "no tiene (acarrean del arroyo)" } else if w < 0.6 { "mala" } else if w < 0.95 { "regular" } else { "buena" }));
+                i.lines.push(format!("Techo: {} · riesgo de fuego {} %", super::services::fires::roof_of(l).name(), (self.city.fire_risk(l) * 100.0) as i32));
+                if self.city.services.fires.burning.contains_key(&l.id) {
+                    i.lines.push("¡Está ardiendo!".into());
+                }
+            } else if self.city.services.ruins.contains(&l.id) {
+                i.lines.push("Ruinas: se quemó; volverá a edificarse".into());
             }
             if let Some((k, _)) = zone_of(l.zone) {
                 let d = self.city.demand().of(k);
@@ -311,6 +392,11 @@ impl Game {
             Tool::Dezone => "Pinta para quitar la zona (derriba lo construido).",
             Tool::Demolish => "Clic sobre un tramo de calle para demolerlo.",
             Tool::Inspect => "Clic en un solar, una calle o el terreno para ver su información.",
+            Tool::Service => match self.service {
+                Placeable::Building(k) => services::info(k).desc,
+                Placeable::Muelle => "Clic en una orilla baja junto a una calle: el muelle entra al río hasta el agua profunda.",
+                Placeable::Muralla => "Clic en el inicio y clic en el final del tramo. Donde cruza una calle queda un portón.",
+            },
         };
         let mut help = help.to_string();
         let Some(h) = self.hover else { return (help, None) };
@@ -339,10 +425,29 @@ impl Game {
                 help = format!("{help} Pincel: {} m ([ y ] lo cambian).", self.brush as i32);
                 (None, None)
             }
+            Tool::Service => match self.service {
+                Placeable::Building(k) => {
+                    let (c, f) = self.city.service_site(k, h);
+                    let i = services::info(k);
+                    help = format!("{help}\nCosto: {} pesos{}{}", fmt_thousands(i.cost), if i.ladrillos > 0.0 { format!(" · {} ladrillos", i.ladrillos as i32) } else { String::new() }, if i.piedra > 0.0 { format!(" · {} de piedra", i.piedra as i32) } else { String::new() });
+                    (None, self.city.service_problem(t, k, c, f))
+                }
+                Placeable::Muelle => (Some(services::port::PIER_COST), self.city.pier_problem(t, h)),
+                Placeable::Muralla if self.stage == 1 => {
+                    let cost = (self.p0.distance(h) * services::works::WALL_COST_PER_M as f32) as i64;
+                    help = format!("{help}\n{} m · {} de piedra en la obra", self.p0.distance(h) as i32, (self.p0.distance(h) * services::works::WALL_STONE_PER_M) as i32);
+                    (Some(cost), self.city.wall_problem(t, self.p0, h))
+                }
+                Placeable::Muralla => (None, None),
+            },
             _ => (None, None),
         };
         if let Some(c) = cost {
-            help = format!("{help}\n{} · costo: {} pesos", self.kind.name(), fmt_thousands(c));
+            if self.tool == Tool::Service {
+                help = format!("{help}\nCosto: {} pesos", fmt_thousands(c));
+            } else {
+                help = format!("{help}\n{} · costo: {} pesos", self.kind.name(), fmt_thousands(c));
+            }
         }
         (help, err)
     }
@@ -350,6 +455,24 @@ impl Game {
     /// Avanza la simulación. Devuelve ediciones si algo creció.
     pub fn update(&mut self, t: &TerrainGen, dt: f32) -> Option<Edits> {
         let mut e = Edits::default();
+        for o in std::mem::take(&mut self.orders) {
+            let r = match o {
+                Order::FundChurch => self.city.start_church_phase(t).map(|(ed, m)| {
+                    e.extend(ed);
+                    m
+                }),
+                Order::Demolish(id) => self.city.demolish_service(t, id).map(|ed| {
+                    e.extend(ed);
+                    "Servicio demolido".to_string()
+                }),
+            };
+            match r {
+                Ok(m) | Err(m) => self.say(m),
+            }
+            if matches!(o, Order::Demolish(_)) {
+                self.inspected = None;
+            }
+        }
         let news = self.city.tick(t, dt * self.speed, &mut e);
         for n in news {
             self.say(n);
@@ -394,9 +517,22 @@ impl Game {
             };
             quad(&mut out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
+        // Capa de datos (o la que corresponde al servicio que se está colocando).
+        let layer = self.layer.or(match (self.tool, self.service) {
+            (Tool::Service, Placeable::Building(Kind::Pozo | Kind::Aljibe | Kind::Aguadores)) => Some(Layer::Agua),
+            (Tool::Service, Placeable::Building(Kind::Serenos)) => Some(Layer::Serenos),
+            _ => None,
+        });
+        if let Some(layer) = layer {
+            self.layer_overlay(&mut out, t, layer);
+        }
         // Lo inspeccionado queda marcado mientras la ficha está abierta.
         if let Some(p) = self.inspected {
-            if let Some(id) = self.city.lots.lot_at(p) {
+            if let Some(id) = self.city.services.at(p) {
+                let b = &self.city.services.buildings[&id];
+                outline(&mut out, t, &b.corners(), 1.6, [1.0, 0.85, 0.3, 0.95]);
+                circle(&mut out, t, b.c, b.info().radius, [1.0, 0.85, 0.3, 0.7]);
+            } else if let Some(id) = self.city.lots.lot_at(p) {
                 let l = &self.city.lots.lots[&id];
                 outline(&mut out, t, &corners_of(l.c, l.f, W, D), 1.6, [1.0, 0.85, 0.3, 0.95]);
             } else if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
@@ -426,6 +562,7 @@ impl Game {
                 let pts: Vec<Vec2> = (0..=48).map(|i| h + Vec2::from_angle(i as f32 / 48.0 * std::f32::consts::TAU) * self.brush).collect();
                 ribbon(&mut out, t, &pts, 2.0, if self.tool == Tool::Zone { [0.5, 0.9, 0.4, 0.8] } else { [1.0, 0.45, 0.35, 0.8] });
             }
+            Tool::Service => self.service_preview(&mut out, t, h),
             Tool::Demolish => {
                 if let Some(e) = self.city.net.nearest_edge(h, 10.0) {
                     let ed = &self.city.net.edges[&e.edge];
@@ -444,10 +581,96 @@ impl Game {
         out
     }
 
+    /// Vista previa del servicio a colocar: huella, alcance y, para la muralla, el tramo.
+    fn service_preview(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, h: Vec2) {
+        let ok = [0.45, 0.95, 0.45, 0.55];
+        let bad = [1.0, 0.35, 0.3, 0.55];
+        match self.service {
+            Placeable::Building(k) => {
+                let (c, f) = self.city.service_site(k, h);
+                let i = services::info(k);
+                let good = self.city.service_problem(t, k, c, f).is_none();
+                quad(out, t, &corners_of(c, f, i.size.0, i.size.1), 1.0, if good { ok } else { bad });
+                if i.radius > 0.0 {
+                    circle(out, t, c, i.radius, [0.35, 0.65, 1.0, 0.8]);
+                }
+            }
+            Placeable::Muelle => {
+                let good = self.city.pier_problem(t, h).is_none();
+                let dir = services::port::find_sea(t, h).map_or(Vec2::Y * 40.0, |(d, dist)| d * (dist + 25.0));
+                ribbon(out, t, &line(h, h + dir), 6.0, if good { ok } else { bad });
+            }
+            Placeable::Muralla if self.stage == 1 => {
+                let good = self.city.wall_problem(t, self.p0, h).is_none();
+                ribbon(out, t, &line(self.p0, h), services::works::WALL_THICK, if good { [0.75, 0.72, 0.65, 0.7] } else { bad });
+                for (g, w) in self.city.wall_gates(self.p0, h) {
+                    let d = (h - self.p0).normalize_or_zero();
+                    let p = self.p0 + d * g;
+                    ribbon(out, t, &line(p - d * w * 0.5, p + d * w * 0.5), services::works::WALL_THICK + 1.0, [1.0, 0.85, 0.3, 0.8]);
+                }
+            }
+            Placeable::Muralla => circle(out, t, h, 3.0, [1.0, 1.0, 1.0, 0.7]),
+        }
+        // Los tramos de muralla ya trazados (lo levantado y lo que falta).
+        if self.service == Placeable::Muralla {
+            for tr in &self.city.services.walls.tramos {
+                let d = (tr.b - tr.a).normalize_or_zero();
+                ribbon(out, t, &line(tr.a, tr.a + d * tr.built), 2.0, [0.45, 0.95, 0.45, 0.6]);
+                ribbon(out, t, &line(tr.a + d * tr.built, tr.b), 2.0, [1.0, 0.85, 0.3, 0.6]);
+            }
+        }
+    }
+
+    /// Colores de una capa de datos sobre los solares edificados.
+    fn layer_overlay(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, layer: Layer) {
+        let s = &self.city.services;
+        for l in self.city.lots.lots.values() {
+            if l.level == 0 && !(layer == Layer::Fuego && s.ruins.contains(&l.id)) {
+                continue;
+            }
+            let col = match layer {
+                Layer::Agua => match s.water_of(l.id) {
+                    w if w <= 0.0 => [0.95, 0.35, 0.25, 0.5],
+                    w if w < 0.6 => [0.85, 0.75, 0.3, 0.5],
+                    w if w < 0.95 => [0.45, 0.75, 0.95, 0.5],
+                    _ => [0.2, 0.45, 0.95, 0.6],
+                },
+                Layer::Serenos if s.watched(l.c) => [1.0, 0.85, 0.35, 0.55],
+                Layer::Serenos => [0.25, 0.25, 0.35, 0.4],
+                Layer::Fuego if s.fires.burning.contains_key(&l.id) => [1.0, 0.3, 0.05, 0.85],
+                Layer::Fuego if s.ruins.contains(&l.id) => [0.2, 0.18, 0.16, 0.7],
+                Layer::Fuego => {
+                    let r = self.city.fire_risk(l);
+                    [0.95, 0.85 - r * 0.6, 0.3, 0.25 + r * 0.4]
+                }
+            };
+            quad(out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
+        }
+        // Alcance de cada fuente o puesto.
+        for b in s.buildings.values() {
+            let show = match layer {
+                Layer::Agua => b.info().cap > 0,
+                Layer::Serenos => b.kind == Kind::Serenos,
+                Layer::Fuego => b.info().fire_reach > 0.0,
+            };
+            if show {
+                let r = if layer == Layer::Fuego { b.info().fire_reach } else { b.info().radius };
+                circle(out, t, b.c, r, [0.35, 0.65, 1.0, 0.7]);
+            }
+        }
+    }
+
     fn road_preview(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, pts: &[Vec2]) {
         let good = self.city.road_problem(t, pts, self.kind).is_none() && City::road_cost(t, pts, self.kind) <= self.city.money;
         ribbon(out, t, pts, self.kind.width(), if good { [0.45, 0.95, 0.45, 0.55] } else { [1.0, 0.35, 0.3, 0.55] });
     }
+}
+
+/// Circunferencia (alcance de un servicio) sobre el terreno.
+fn circle(out: &mut Vec<OverlayVertex>, t: &TerrainGen, c: Vec2, r: f32, color: [f32; 4]) {
+    let n = ((r / 6.0) as usize).clamp(24, 160);
+    let pts: Vec<Vec2> = (0..=n).map(|i| c + Vec2::from_angle(i as f32 / n as f32 * std::f32::consts::TAU) * r).collect();
+    ribbon(out, t, &pts, 2.0, color);
 }
 
 fn y_at(t: &TerrainGen, p: Vec2, lift: f32) -> f32 {

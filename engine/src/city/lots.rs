@@ -180,6 +180,11 @@ pub fn growth_blockers(lots: &Lots, lot: &Lot, net: &RoadNetwork, pool: i32, dem
         _ if demand.of(k) <= 0.0 => why.push(format!("No hay demanda {}: la ciudad no necesita más {}.", if k == ZoneKind::Comercial { "de comercio" } else { "de industria" }, if k == ZoneKind::Comercial { "tiendas" } else { "talleres" })),
         _ => {}
     }
+    match lots.level_cap.get(&lot.id) {
+        Some(&cap) if next > cap && cap <= 1 => why.push("Sin agua: hace falta un pozo, un aljibe o los aguadores cerca.".into()),
+        Some(&cap) if next > cap => why.push("El agua es mala (pozo contaminado): para crecer más necesita agua buena.".into()),
+        _ => {}
+    }
     let min_age = [0, 4, 8, 8][lot.level as usize];
     if lot.level > 0 && lot.age < min_age {
         why.push("El edificio es muy reciente.".into());
@@ -258,6 +263,11 @@ pub struct Lots {
     pub lots: BTreeMap<u32, Lot>,
     pub obstacles: Vec<Obstacle>,
     pub plaza_center: Option<Vec2>,
+    /// Tope de nivel de cada solar que fijan los servicios (sin agua no se pasa del rancho);
+    /// sin entrada, sin tope.
+    pub level_cap: HashMap<u32, u8>,
+    /// Huellas de la muralla: no se generan solares debajo, pero las calles la cruzan (portones).
+    pub walls: Vec<Obstacle>,
     next: u32,
     hash: HashMap<IVec2, Vec<u32>>,
 }
@@ -424,7 +434,7 @@ impl Lots {
                 return false;
             }
         }
-        !self.obstacles.iter().any(|o| polys_overlap(&test, &corners_of(o.c, o.f, o.w, o.d)))
+        !self.obstacles.iter().chain(&self.walls).any(|o| polys_overlap(&test, &corners_of(o.c, o.f, o.w, o.d)))
     }
 
     fn add(&mut self, c: Vec2, f: Vec2) -> u32 {
@@ -514,6 +524,10 @@ impl Lots {
                 continue;
             }
             let next = if l.level == 0 { first } else { l.level + 1 };
+            // Con los servicios en marcha, un solar nuevo (todavía sin repartir) no tiene agua.
+            if !self.level_cap.is_empty() && next > self.level_cap.get(&id).copied().unwrap_or(1) {
+                continue;
+            }
             let value = self.land_value(l);
             let stone = self.frontage(l, net) == Some(RoadKind::Stone);
             let age_ok = l.age >= [0, 4, 8, 8][l.level as usize];
