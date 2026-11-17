@@ -459,20 +459,21 @@ fn layer(depth: i32, soil: i32, surf: Mat) -> Mat {
     }
 }
 
-/// Un árbol ya llevado a vóxeles del nivel: tronco y copa (elipsoide).
+/// Un árbol ya llevado a vóxeles del nivel: tronco y ramas (cilindros que se afinan) y una
+/// copa de varias masas de follaje (ver [`crate::trees`]).
 struct VoxTree {
-    /// Centro del tronco en vóxeles (x, z), suelo (y del primer vóxel de tronco).
-    cx: f32,
-    cz: f32,
-    ground: i32,
-    trunk_top: i32,
-    trunk_r: f32,
-    /// Centro y radios de la copa en vóxeles.
-    cy: f32,
-    rh: f32,
-    rv: f32,
+    /// Caja del árbol en vóxeles (inclusive).
+    lo: IVec3,
+    hi: IVec3,
+    /// Tramos de tronco y rama: puntas (vóxeles) y radios (vóxeles).
+    limbs: Vec<(Vec3, Vec3, f32, f32)>,
+    /// Masas de follaje: centro (vóxeles), 1/rh², 1/rv² y si cuelga (sauce).
+    blobs: Vec<(Vec3, f32, f32, bool)>,
     top: i32,
     leaf: Mat,
+    bark: Mat,
+    holes: u32,
+    flower: Option<(Mat, u32)>,
     seed: u32,
 }
 
@@ -494,6 +495,12 @@ fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, 
     t.trees_in(x0 - r - vs, z0 - r - vs, x1 + r + vs, z1 + r + vs, &mut trees);
     for tr in trees {
         let (gx, gz) = ((tr.x / vs).floor() as i32, (tr.z / vs).floor() as i32);
+        let shape = crate::trees::shape(&tr.spec());
+        let (reach, height) = crate::trees::extent(&shape);
+        // ¿La copa alcanza la columna? (descarte antes de mirar las obras)
+        if tr.x + reach < x0 - vs || tr.x - reach > x1 + vs || tr.z + reach < z0 - vs || tr.z - reach > z1 + vs {
+            continue;
+        }
         // ¿Obras cerca del tronco? (superficie pintada o vóxeles editados en el chunk).
         // Si la copa toca una obra (calle, plaza), el árbol se taló: se mira el tronco y ocho
         // puntos alrededor, a la distancia del radio de la copa.
@@ -513,33 +520,65 @@ fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, 
         if (-1..=1).any(|dy| ls.voxels.contains_key(&IVec3::new(ck.x, cy + dy, ck.y))) {
             continue;
         }
-        let rh = (tr.radius / vs).max(0.8);
-        let rv = (tr.radius * 0.72 / vs).max(0.7);
-        let c_y = ground as f32 + (tr.height - tr.radius * 0.72) / vs;
+        // De metros (pie del tronco en el origen) a vóxeles del nivel. El pie se hunde medio
+        // vóxel para que el tronco no flote en las laderas.
+        let base = Vec3::new(tr.x / vs, ground as f32 - 0.5, tr.z / vs);
+        let to_vox = |p: Vec3| base + p / vs;
+        let mut limbs = Vec::with_capacity(shape.limbs.len());
+        for l in &shape.limbs {
+            // El tronco siempre tiene al menos un vóxel de grueso; las ramas finas, solo de cerca.
+            let (r0, r1) = if l.main {
+                ((l.r0 / vs).max(0.55), (l.r1 / vs).max(0.5))
+            } else if vs <= 1.0 {
+                ((l.r0 / vs).max(0.45), (l.r1 / vs).max(0.42))
+            } else {
+                continue;
+            };
+            limbs.push((to_vox(l.a), to_vox(l.b), r0, r1));
+        }
+        let blobs: Vec<(Vec3, f32, f32, bool)> = shape
+            .blobs
+            .iter()
+            .map(|b| {
+                let (rh, rv) = ((b.rh / vs).max(0.8), (b.rv / vs).max(0.7));
+                (to_vox(b.c), 1.0 / (rh * rh), 1.0 / (rv * rv), b.droop)
+            })
+            .collect();
+        let rv = reach / vs + 1.0;
+        let top = (base.y + height / vs + 1.0).ceil() as i32;
         out.push(VoxTree {
-            cx: tr.x / vs,
-            cz: tr.z / vs,
-            ground,
-            trunk_top: c_y as i32,
-            trunk_r: (tr.trunk / vs).max(0.55),
-            cy: c_y,
-            rh,
-            rv,
-            top: (c_y + rv).ceil() as i32,
-            leaf: tr.leaf,
+            lo: IVec3::new((base.x - rv).floor() as i32, ground - 1, (base.z - rv).floor() as i32),
+            hi: IVec3::new((base.x + rv).ceil() as i32, top, (base.z + rv).ceil() as i32),
+            limbs,
+            blobs,
+            top,
+            leaf: shape.leaf,
+            bark: shape.bark,
+            // De lejos (2 y 4 m por vóxel) los huecos del borde de la copa solo agregan caras.
+            holes: if vs >= 2.0 { shape.holes / 4 } else { shape.holes },
+            flower: shape.flower,
             seed: (gx as u32).wrapping_mul(73_856_093) ^ (gz as u32).wrapping_mul(19_349_663),
         });
     }
     out
 }
 
+/// ¿El punto `p` está dentro del tramo de tronco (a, b, r0, r1)?
+#[inline]
+fn in_limb(p: Vec3, l: &(Vec3, Vec3, f32, f32)) -> bool {
+    let ab = l.1 - l.0;
+    let t = ((p - l.0).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+    let r = l.2 + (l.3 - l.2) * t;
+    (p - (l.0 + ab * t)).length_squared() <= r * r
+}
+
 /// Escribe un árbol en el bloque `pad` (Q³ desde `lo`); solo ocupa aire y columnas presentes.
 /// Devuelve los vóxeles puestos.
 fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
     let mut n = 0;
-    let (u0, u1) = (((tr.cx - tr.rh).floor() as i32 - lo.x).max(0), ((tr.cx + tr.rh).ceil() as i32 - lo.x).min(Q - 1));
-    let (w0, w1) = (((tr.cz - tr.rh).floor() as i32 - lo.z).max(0), ((tr.cz + tr.rh).ceil() as i32 - lo.z).min(Q - 1));
-    let (y0, y1) = ((tr.ground - lo.y).max(0), (tr.top - lo.y).min(Q - 1));
+    let (u0, u1) = ((tr.lo.x - lo.x).max(0), (tr.hi.x - lo.x).min(Q - 1));
+    let (w0, w1) = ((tr.lo.z - lo.z).max(0), (tr.hi.z - lo.z).min(Q - 1));
+    let (y0, y1) = ((tr.lo.y - lo.y).max(0), (tr.top - lo.y).min(Q - 1));
     if u0 > u1 || w0 > w1 || y0 > y1 {
         return 0;
     }
@@ -548,25 +587,48 @@ fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
             if top[(u + w * Q) as usize] == i32::MIN {
                 continue;
             }
-            let (dx, dz) = ((u + lo.x) as f32 + 0.5 - tr.cx, (w + lo.z) as f32 + 0.5 - tr.cz);
-            let d2 = dx * dx + dz * dz;
+            let (gx, gz) = (u + lo.x, w + lo.z);
+            let col_h = tr.seed ^ (gx as u32).wrapping_mul(2_654_435_761) ^ (gz as u32).wrapping_mul(97_331);
             for y in y0..=y1 {
                 let gy = y + lo.y;
                 let k = (u + w * Q + y * Q * Q) as usize;
                 if pad[k] != AIR {
                     continue;
                 }
-                let m = if gy <= tr.trunk_top && d2 <= tr.trunk_r * tr.trunk_r {
-                    TRUNK
+                let p = Vec3::new(gx as f32 + 0.5, gy as f32 + 0.5, gz as f32 + 0.5);
+                let m = if tr.limbs.iter().any(|l| in_limb(p, l)) {
+                    tr.bark
                 } else {
-                    let dy = gy as f32 + 0.5 - tr.cy;
-                    let e = d2 / (tr.rh * tr.rh) + dy * dy / (tr.rv * tr.rv);
-                    // Borde de la copa irregular: algunos vóxeles del contorno faltan.
-                    let hh = (tr.seed ^ ((u + lo.x) as u32).wrapping_mul(2_654_435_761) ^ (gy as u32).wrapping_mul(40_503) ^ ((w + lo.z) as u32).wrapping_mul(97_331)) % 100;
-                    if e <= 1.0 && (e < 0.6 || hh > 35) {
-                        tr.leaf
-                    } else {
+                    // La masa de follaje más "adentro" decide.
+                    let mut best = f32::MAX;
+                    let mut droop = false;
+                    for b in &tr.blobs {
+                        let d = p - b.0;
+                        // Las ramas colgantes alargan la masa hacia abajo.
+                        let iv = if b.3 && d.y < 0.0 { b.2 * 0.45 } else { b.2 };
+                        let e = (d.x * d.x + d.z * d.z) * b.1 + d.y * d.y * iv;
+                        if e < best {
+                            best = e;
+                            droop = b.3;
+                        }
+                    }
+                    if best > 1.0 {
                         continue;
+                    }
+                    // Borde de la copa irregular: algunos vóxeles del contorno faltan. Las ramas
+                    // colgantes se cortan por columnas (hebras verticales).
+                    let hh = if droop {
+                        (col_h ^ ((gy / 3) as u32).wrapping_mul(40_503)) % 100
+                    } else {
+                        (col_h ^ (gy as u32).wrapping_mul(40_503)) % 100
+                    };
+                    let inner = if droop { 0.35 } else { 0.55 };
+                    if best >= inner && hh < tr.holes {
+                        continue;
+                    }
+                    match tr.flower {
+                        Some((f, pct)) if best > 0.5 && (hh * 7 + 13) % 100 < pct => f,
+                        _ => tr.leaf,
                     }
                 };
                 pad[k] = m;
@@ -610,6 +672,8 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     let present = |gx: i32, gz: i32| ring.contains(&IVec2::new(gx >> 5, gz >> 5));
     let mut top = vec![i32::MIN; (Q * Q) as usize];
     let mut surf = vec![AIR; (Q * Q) as usize];
+    // Columnas de suelo natural (sin calle, plaza ni suelo nivelado): ahí crece la flora baja.
+    let mut natural = vec![false; (Q * Q) as usize];
     let (mut tmin, mut tmax, mut pmin) = (i32::MAX, i32::MIN, i32::MAX);
     for j in 0..Q {
         for i in 0..Q {
@@ -629,7 +693,9 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
             top[k] = ty;
             let x = (gx as f32 + 0.5) * vs;
             let z = (gz as f32 + 0.5) * vs;
-            surf[k] = ls.surface.get(&IVec2::new(gx, gz)).copied().unwrap_or_else(|| t.surface_material(x, z, h, slope));
+            let painted = ls.surface.get(&IVec2::new(gx, gz)).copied();
+            natural[k] = painted.is_none() && !ls.ground.contains_key(&IVec2::new(gx, gz));
+            surf[k] = painted.unwrap_or_else(|| t.surface_material(x, z, h, slope));
             pmin = pmin.min(ty);
             if i >= 1 && i <= N && j >= 1 && j <= N {
                 tmin = tmin.min(ty);
@@ -652,6 +718,24 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     let edit_top = ls.max_y.get(&col).copied().unwrap_or(i32::MIN);
     let trees = column_trees(t, ls, spec, col);
     let tree_top = trees.iter().map(|tr| tr.top).max().unwrap_or(i32::MIN);
+    // Flora baja (matas, juncos, flores) de cada columna natural, por encima del agua.
+    let mut plants: Vec<(usize, i32, [Mat; 4], usize)> = Vec::new();
+    if t.is_real() && vs <= crate::trees::PLANT_MAX_VOXEL {
+        for j in 0..Q {
+            for i in 0..Q {
+                let k = (i + j * Q) as usize;
+                if !natural[k] || top[k] == i32::MIN || (top[k] as f32 + 1.0) * vs < 0.4 {
+                    continue;
+                }
+                let mut m = [AIR; 4];
+                let n = crate::trees::ground_plant(surf[k], base.x + i - 1, base.y + j - 1, vs, &mut m);
+                if n > 0 {
+                    plants.push((k, top[k], m, n));
+                }
+            }
+        }
+    }
+    let tree_top = tree_top.max(plants.iter().map(|p| p.1 + p.3 as i32).max().unwrap_or(i32::MIN));
     let y0 = (tmin - 1).div_euclid(N);
     let y1 = tmax.max(edit_top).max(tree_top).div_euclid(N);
     // Origen de la malla de la columna: esquina inferior del chunk más bajo.
@@ -698,6 +782,18 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         // Árboles del paisaje (antes que las ediciones: una obra los tapa).
         for tr in &trees {
             solid += raster_tree(tr, lo, &top, &mut pad);
+        }
+        for &(k, ty, m, n) in &plants {
+            for (d, &mat) in m.iter().take(n).enumerate() {
+                let y = ty + 1 + d as i32 - lo.y;
+                if (0..Q).contains(&y) {
+                    let idx = k + (y * Q * Q) as usize;
+                    if pad[idx] == AIR {
+                        pad[idx] = mat;
+                        solid += 1;
+                    }
+                }
+            }
         }
         if any_edit {
             // Ediciones del propio chunk: se recorren todas.

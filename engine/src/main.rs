@@ -33,6 +33,7 @@ mod store;
 mod stream;
 mod structures;
 mod terrain;
+mod trees;
 mod tour;
 mod ui;
 mod world;
