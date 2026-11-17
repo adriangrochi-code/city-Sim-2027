@@ -27,6 +27,8 @@ pub struct TerrainGen {
     n_dune: FastNoiseLite,
     seg_a: Vec<Vec2>,
     seg_b: Vec<Vec2>,
+    /// Medio ancho del agua de cada tramo (m): de una cañada (≈1,3 m) al Miguelete (≈9 m).
+    seg_hw: Vec<f32>,
     seg_hash: HashMap<(i32, i32), Vec<u32>>,
     /// La misma tabla de segmentos en una grilla densa (más rápida que el HashMap).
     seg_grid: Vec<Vec<u32>>,
@@ -43,19 +45,29 @@ pub struct TerrainGen {
 const ALTURA_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/altura.bin");
 const CONTEXTO_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/contexto.bin");
 const ARROYOS_JSON: &str = include_str!("../../assets/mapas/montevideo/arroyos.json");
-/// Mismos valores que `meta.json`.
+const META_JSON: &str = include_str!("../../assets/mapas/montevideo/meta.json");
 const MAIN_N: usize = 1201;
 const MAIN_STEP: f32 = 20.0;
-const CTX_N: usize = 361;
-const CTX_STEP: f32 = 100.0;
-const CTX_FROM: f32 = -6000.0;
+
+/// Número que sigue a `"clave":` a partir de `desde` en el texto de `meta.json`.
+fn meta_num(txt: &str, desde: &str, clave: &str) -> f32 {
+    let base = txt.find(desde).unwrap_or(0);
+    let rest = &txt[base..];
+    let k = rest.find(&format!("\"{clave}\"")).expect("meta.json sin la clave");
+    let after = &rest[k + clave.len() + 2..];
+    let num: String = after.chars().skip_while(|c| !(c.is_ascii_digit() || *c == '-')).take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '.').collect();
+    num.parse().expect("número de meta.json")
+}
 /// Sitio de la fundación (Ciudad Vieja, junto a la Plaza Matriz) y cumbre del Cerro.
 pub const FOUNDING_REAL: Vec2 = Vec2::new(11097.7, 14308.9);
 pub const CERRO_REAL: Vec2 = Vec2::new(5923.7, 12269.8);
-/// Cauce de los arroyos: se hunde el terreno y el centro es agua.
-const CAUCE_PROFUNDIDAD: f32 = 1.6;
-const CAUCE_ANCHO: f32 = 30.0;
+/// Medio ancho del agua de los arroyos del mapa ficticio (los reales traen el suyo).
 pub const ARROYO_AGUA: f32 = 5.0;
+
+/// Cauce de un arroyo de medio ancho `hw`: profundidad (m) y distancia hasta donde se hunde.
+fn cauce(hw: f32) -> (f32, f32) {
+    (0.3 + 0.18 * hw, hw + 4.0 + hw * 1.5)
+}
 
 /// Grilla regular de valores (alturas o distancias), con muestreo suave.
 struct Grid {
@@ -148,9 +160,9 @@ struct RealMap {
 
 /// Lee `{"arroyos": [[[x, z], ...], ...]}` sin dependencias: cada `[x, z]` es un punto y cada
 /// lista de puntos, un arroyo.
-fn parse_arroyos(txt: &str) -> Vec<Vec<Vec2>> {
-    // Profundidad de corchetes: 1 = lista de arroyos, 2 = un arroyo, 3 = un punto.
-    let mut out: Vec<Vec<Vec2>> = Vec::new();
+fn parse_arroyos(txt: &str) -> Vec<Vec<(Vec2, f32)>> {
+    // Profundidad de corchetes: 1 = lista de arroyos, 2 = un arroyo, 3 = un punto [x, z, ancho].
+    let mut out: Vec<Vec<(Vec2, f32)>> = Vec::new();
     let mut depth = 0;
     let mut num = String::new();
     let mut pair: Vec<f32> = Vec::new();
@@ -169,8 +181,9 @@ fn parse_arroyos(txt: &str) -> Vec<Vec<Vec2>> {
                 }
                 if ch == ']' {
                     if depth == 3 {
-                        if pair.len() == 2 {
-                            out.last_mut().unwrap().push(Vec2::new(pair[0], pair[1]));
+                        if pair.len() >= 2 {
+                            let w = pair.get(2).copied().unwrap_or(ARROYO_AGUA * 2.0);
+                            out.last_mut().unwrap().push((Vec2::new(pair[0], pair[1]), w));
                         }
                         pair.clear();
                     }
@@ -252,6 +265,7 @@ impl TerrainGen {
             },
             seg_a: Vec::new(),
             seg_b: Vec::new(),
+            seg_hw: Vec::new(),
             seg_hash: HashMap::new(),
             seg_grid: Vec::new(),
             grid_min: (0, 0),
@@ -276,14 +290,19 @@ impl TerrainGen {
         let mut t = TerrainGen::new(1726);
         t.seg_a.clear();
         t.seg_b.clear();
+        t.seg_hw.clear();
         t.seg_hash.clear();
         t.arroyos.clear();
         let main = Grid::from_u16(ALTURA_BIN, MAIN_N, MAIN_STEP, 0.0);
-        let ctx = Grid::from_u16(CONTEXTO_BIN, CTX_N, CTX_STEP, CTX_FROM);
+        let ctx_n = meta_num(META_JSON, "\"contexto\"", "muestras") as usize;
+        let ctx_step = meta_num(META_JSON, "\"contexto\"", "paso_m");
+        let ctx_from = meta_num(META_JSON, "\"contexto\"", "desde_m");
+        let ctx = Grid::from_u16(CONTEXTO_BIN, ctx_n, ctx_step, ctx_from);
         let (sea_main, sea_ctx) = (main.sea_distance(), ctx.sea_distance());
         t.real = Some(Box::new(RealMap { main, ctx, sea_main, sea_ctx }));
         for a in parse_arroyos(ARROYOS_JSON) {
-            t.add_arroyo_raw(a);
+            let (pts, widths): (Vec<Vec2>, Vec<f32>) = a.into_iter().unzip();
+            t.add_arroyo_raw(pts, widths);
         }
         t.build_grid();
         t
@@ -362,9 +381,10 @@ impl TerrainGen {
         if h > 0.3 {
             // Ondulación fina (±0,35 m) para que la ladera no sea una superficie de vidrio.
             h += self.n_detail.get_noise_2d(x, z) * 0.35 * smoothstep(0.5, 3.0, h);
-            let da = self.arroyo_distance(x, z);
-            if da < CAUCE_ANCHO {
-                h -= CAUCE_PROFUNDIDAD * (1.0 - smoothstep(ARROYO_AGUA, CAUCE_ANCHO, da));
+            let (da, hw) = self.arroyo_query(x, z);
+            let (depth, reach) = cauce(hw);
+            if da < reach {
+                h -= depth * (1.0 - smoothstep(hw, reach, da));
             }
         }
         h
@@ -437,10 +457,17 @@ impl TerrainGen {
     }
 
     pub fn arroyo_distance(&self, x: f32, z: f32) -> f32 {
+        self.arroyo_query(x, z).0
+    }
+
+    /// Distancia al arroyo más cercano y el medio ancho del agua de ese tramo.
+    pub fn arroyo_query(&self, x: f32, z: f32) -> (f32, f32) {
         let p = Vec2::new(x, z);
         let cx = (x / HASH_CELL).floor() as i32;
         let cz = (z / HASH_CELL).floor() as i32;
-        let mut best = 1e9f32;
+        // Se elige el tramo cuyo borde de agua está más cerca (no su eje): así un arroyo
+        // ancho "gana" a una cañada que le desemboca al lado.
+        let (mut best, mut best_edge, mut best_hw) = (1e9f32, 1e9f32, ARROYO_AGUA);
         let (gx0, gz0) = self.grid_min;
         let (gw, gh) = self.grid_size;
         for dz in -1..=1 {
@@ -453,16 +480,19 @@ impl TerrainGen {
                 if gx < 0 || gx >= gw {
                     continue;
                 }
-                {
-                    let list = &self.seg_grid[(gx + gz * gw) as usize];
-                    for &si in list {
-                        let q = closest_on_segment(p, self.seg_a[si as usize], self.seg_b[si as usize]);
-                        best = best.min(p.distance(q));
+                for &si in &self.seg_grid[(gx + gz * gw) as usize] {
+                    let q = closest_on_segment(p, self.seg_a[si as usize], self.seg_b[si as usize]);
+                    let d = p.distance(q);
+                    let hw = self.seg_hw[si as usize];
+                    if d - hw < best_edge {
+                        best_edge = d - hw;
+                        best = d;
+                        best_hw = hw;
                     }
                 }
             }
         }
-        best
+        (best, best_hw)
     }
 
     /// Material de la superficie según altura, pendiente y cercanía al agua.
@@ -500,12 +530,12 @@ impl TerrainGen {
             return if h > -2.5 { SAND_WET } else { MUD };
         }
         let sd = self.sea_distance(x, z);
-        let da = self.arroyo_distance(x, z);
-        // Arroyos: agua en el centro del cauce y barro en las orillas.
-        if da < ARROYO_AGUA {
+        let (da, hw) = self.arroyo_query(x, z);
+        // Arroyos y cañadas: agua en el centro del cauce y barro en las orillas.
+        if da < hw {
             return STREAM;
         }
-        if da < ARROYO_AGUA + 3.5 + fine * 1.5 {
+        if da < hw + 1.0 + hw * 0.3 + fine * 1.2 {
             return MUD;
         }
         // Costa: puntas de piedra donde es empinada; si no, playa (húmeda junto al agua),
@@ -529,11 +559,11 @@ impl TerrainGen {
             return ROCK;
         }
         // Bañados: bajos llanos junto a los arroyos y en sus desembocaduras.
-        if slope < 0.05 && h < 5.0 + blot * 2.0 && (da < 200.0 || (da < 700.0 && sd < 350.0)) && fine > -0.35 {
+        if slope < 0.05 && h < 5.0 + blot * 2.0 && (da < 25.0 + hw * 22.0 || (da < 700.0 && hw > 5.0 && sd < 350.0)) && fine > -0.35 {
             return MARSH;
         }
         // Monte ribereño: suelo de hojarasca bajo los árboles.
-        if da < 38.0 + blot * 18.0 {
+        if da < 4.0 + hw * 4.5 + blot * (2.0 + hw * 1.5) {
             return FOREST_FLOOR;
         }
         // Pradera: más verde y húmeda en los bajos, seca y amarillenta en las cuchillas.
@@ -542,7 +572,7 @@ impl TerrainGen {
         let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain;
         if dry > 0.45 {
             GRASS_DRY
-        } else if (h < 18.0 && da < 400.0 && grain > -0.05) || dry < -0.45 {
+        } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05) || dry < -0.45 {
             GRASS_LUSH
         } else {
             GRASS
@@ -568,8 +598,9 @@ impl TerrainGen {
                 }
                 let roll = hashf(i, j, 3);
                 // Descarte barato antes de calcular alturas: casi toda la pradera no tiene árboles.
-                let da = self.arroyo_distance(x, z);
-                let p_max = if da < 70.0 { 0.8 } else { 0.025 };
+                let (da, hw) = self.arroyo_query(x, z);
+                let (dense, open) = (2.0 + hw * 4.0, 4.0 + hw * 7.5);
+                let p_max = if da < open { 0.8 } else { 0.025 };
                 if roll >= p_max {
                     continue;
                 }
@@ -577,11 +608,11 @@ impl TerrainGen {
                 if h < 1.2 {
                     continue;
                 }
-                let (p, kind) = if da < ARROYO_AGUA + 3.0 {
+                let (p, kind) = if da < hw + 2.0 {
                     (0.0, 0)
-                } else if da < 34.0 {
+                } else if da < dense {
                     (0.8, 1) // monte ribereño cerrado
-                } else if da < 70.0 {
+                } else if da < open {
                     (0.3, 1)
                 } else {
                     let sd = self.sea_distance(x, z);
@@ -616,16 +647,18 @@ impl TerrainGen {
     fn add_arroyo(&mut self, raw: &[(f32, f32)]) {
         let raw: Vec<Vec2> = raw.iter().map(|&(x, z)| Vec2::new(x, z)).collect();
         let pts = self.smooth_path(&raw, 40.0);
-        self.add_arroyo_raw(pts);
+        let w = vec![ARROYO_AGUA * 2.0; pts.len()];
+        self.add_arroyo_raw(pts, w);
     }
 
     /// Registra un arroyo ya muestreado (los del mapa real vienen con meandros).
-    fn add_arroyo_raw(&mut self, pts: Vec<Vec2>) {
-        for w in pts.windows(2) {
+    fn add_arroyo_raw(&mut self, pts: Vec<Vec2>, widths: Vec<f32>) {
+        for (k, w) in pts.windows(2).enumerate() {
             let (a, b) = (w[0], w[1]);
             let si = self.seg_a.len() as u32;
             self.seg_a.push(a);
             self.seg_b.push(b);
+            self.seg_hw.push((widths[k] + widths[k + 1]) * 0.25);
             let (x0, x1) = ((a.x.min(b.x) / HASH_CELL).floor() as i32, (a.x.max(b.x) / HASH_CELL).floor() as i32);
             let (z0, z1) = ((a.y.min(b.y) / HASH_CELL).floor() as i32, (a.y.max(b.y) / HASH_CELL).floor() as i32);
             for cz in z0..=z1 {

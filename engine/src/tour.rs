@@ -42,7 +42,7 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 7] = [
+    let views: [(&'static str, [f32; 5]); 10] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
         ("paisaje-ciudad-vieja", [11300.0, 14350.0, 900.0, 200.0, 38.0]),
         ("paisaje-medanos-carrasco", [22000.0, 13100.0, 520.0, 200.0, 30.0]),
@@ -50,6 +50,9 @@ pub fn landscape_steps() -> Vec<Act> {
         ("paisaje-arroyo-monte", [12752.5, 5055.0, 260.0, 200.0, 38.0]),
         ("paisaje-cerro", [5924.0, 12270.0, 1600.0, 200.0, 32.0]),
         ("paisaje-ladera-cerca", [9000.0, 9000.0, 120.0, 200.0, 30.0]),
+        ("paisaje-isla-ratas", [8294.0, 12280.0, 420.0, 200.0, 32.0]),
+        ("paisaje-isla-flores", [24000.0, 16500.0, 9000.0, 270.0, 22.0]),
+        ("paisaje-cenital-este", [21500.0, 13000.0, 14000.0, 230.0, 85.0]),
     ];
     let mut out = vec![Hour(10.5)];
     for (name, cam) in views {

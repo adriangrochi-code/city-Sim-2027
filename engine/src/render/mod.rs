@@ -546,7 +546,14 @@ impl Renderer {
             },
             fragment: Some(wgpu::FragmentState { module: &water_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[blend_target.clone()] }),
             primitive: Default::default(),
-            depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::Greater)),
+            // El agua gana el empate con la tierra que queda justo al nivel del mar (en los niveles
+            // de detalle lejanos la cara de arriba de un vóxel grande cae en y = 0): sin este
+            // sesgo, la costa baja se ve con rayas que titilan. Con profundidad invertida, un
+            // sesgo positivo acerca el agua a la cámara.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                bias: wgpu::DepthBiasState { constant: 8, slope_scale: 2.0, clamp: 0.0 },
+                ..reverse_depth(false, wgpu::CompareFunction::Greater)
+            }),
             multisample: ms,
             multiview: None,
             cache: None,
