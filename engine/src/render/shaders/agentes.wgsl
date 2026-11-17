@@ -14,8 +14,7 @@ struct Globals {
     extra: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> g: Globals;
-@group(0) @binding(1) var shadow_map: texture_depth_2d;
-@group(0) @binding(2) var shadow_sampler: sampler_comparison;
+// Mapa de sombras en cascadas y `shadow()`: sombras.wgsl (se antepone a este archivo).
 
 struct VIn {
     @location(0) pos: vec3<f32>,
@@ -70,21 +69,6 @@ fn vs_main(v: VIn, @builtin(vertex_index) vi: u32) -> VOut {
     return o;
 }
 
-fn shadow(world: vec3<f32>, n: vec3<f32>) -> f32 {
-    let lp = g.light_view_proj * vec4(world + n * 0.1, 1.0);
-    let uv = vec2(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
-    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || lp.z >= 1.0) {
-        return 1.0;
-    }
-    let texel = 1.0 / 4096.0;
-    var sum = 0.0;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            sum += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + vec2(f32(x), f32(y)) * texel, lp.z - 0.0008);
-        }
-    }
-    return sum / 9.0;
-}
 
 @fragment
 fn fs_main(v: VOut) -> @location(0) vec4<f32> {

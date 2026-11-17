@@ -315,6 +315,10 @@ pub struct Settings {
     /// para ver igual de lejos.
     #[serde(default = "voxel_cm_viejo")]
     pub voxel_cm: u32,
+    /// Sombras: cantidad de cascadas (2 a 4) y resolución de cada una (1024, 2048 o 4096).
+    /// Se aplican enseguida.
+    pub sombras_cascadas: u32,
+    pub sombras_resolucion: u32,
 }
 
 fn voxel_cm_viejo() -> u32 {
@@ -327,7 +331,8 @@ fn voxel_cm() -> u32 {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm() }
+        let q = crate::render::ShadowQuality::DEFAULT;
+        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm(), sombras_cascadas: q.cascades, sombras_resolucion: q.resolution }
     }
 }
 
@@ -351,7 +356,13 @@ impl Settings {
         if !matches!(self.msaa, 0 | 1 | 4) {
             self.msaa = 0;
         }
+        let q = self.shadow_quality();
+        (self.sombras_cascadas, self.sombras_resolucion) = (q.cascades, q.resolution);
         self
+    }
+
+    pub fn shadow_quality(&self) -> crate::render::ShadowQuality {
+        crate::render::ShadowQuality { cascades: self.sombras_cascadas, resolution: self.sombras_resolucion }.sanitized()
     }
 
     pub fn load(base: &Path) -> Settings {
@@ -447,9 +458,10 @@ mod tests {
         let s = Settings { escala_interfaz: 1.25, mostrar_fps: true, niveles: 6, ..Default::default() };
         s.store(&d).unwrap();
         assert_eq!(Settings::load(&d), s);
-        std::fs::write(d.join("opciones.json"), r#"{"escala_interfaz": 9, "msaa": 3}"#).unwrap();
+        std::fs::write(d.join("opciones.json"), r#"{"escala_interfaz": 9, "msaa": 3, "sombras_cascadas": 7, "sombras_resolucion": 100}"#).unwrap();
         let s = Settings::load(&d);
         assert_eq!((s.escala_interfaz, s.msaa, s.niveles), (1.5, 0, crate::lod::LEVELS));
+        assert_eq!((s.sombras_cascadas, s.sombras_resolucion), (4, 2048));
         // Opciones de antes del vóxel de 25 cm: "media" (7 niveles de 0,5 m) sigue siendo media.
         std::fs::write(d.join("opciones.json"), r#"{"niveles": 7}"#).unwrap();
         assert_eq!(Settings::load(&d).niveles, crate::lod::LEVELS - 1);

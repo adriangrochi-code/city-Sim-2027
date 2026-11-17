@@ -13,8 +13,7 @@ struct Globals {
     extra: vec4<f32>, // x: suavizado de escalones del terreno (1 = activo)
 };
 @group(0) @binding(0) var<uniform> g: Globals;
-@group(0) @binding(1) var shadow_map: texture_depth_2d;
-@group(0) @binding(2) var shadow_sampler: sampler_comparison;
+// Mapa de sombras en cascadas y `shadow()`: sombras.wgsl (se antepone a este archivo).
 
 // Cara voraz compacta (20 bytes, ver mesher::Quad), una instancia por cara. El vertex shader
 // arma sus 2 triángulos con `vertex_index` (*vertex pulling*, idea de Tisma engine:
@@ -113,9 +112,15 @@ fn vs_main(v: VIn) -> VOut {
     return o;
 }
 
+// Pase de sombras: la matriz de la cascada que se está dibujando (desplazamiento dinámico).
+struct CascadaVp {
+    m: mat4x4<f32>,
+};
+@group(0) @binding(6) var<uniform> cascada: CascadaVp;
+
 @vertex
 fn vs_shadow(v: VIn) -> @builtin(position) vec4<f32> {
-    return g.light_view_proj * vec4(corner(v).pos, 1.0);
+    return cascada.m * vec4(corner(v).pos, 1.0);
 }
 
 // Azar con aritmética entera (no con sin(), que en las placas NVIDIA pierde precisión con
@@ -161,21 +166,6 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return pow(c, vec3(2.2));
 }
 
-fn shadow(world: vec3<f32>, n: vec3<f32>) -> f32 {
-    let lp = g.light_view_proj * vec4(world + n * 0.15, 1.0);
-    let uv = vec2(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
-    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || lp.z >= 1.0) {
-        return 1.0;
-    }
-    let texel = 1.0 / 4096.0;
-    var sum = 0.0;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            sum += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + vec2(f32(x), f32(y)) * texel, lp.z - 0.0008);
-        }
-    }
-    return sum / 9.0;
-}
 
 // Números de material (deben coincidir con palette.rs).
 const M_WINDOW: u32 = 14u;

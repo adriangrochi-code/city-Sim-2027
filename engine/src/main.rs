@@ -13,6 +13,7 @@
 //! Opciones: --mapa real (Montevideo, sin la escena), --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
 //!   --hour 10.5, --size 1600x900, --levels 9, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
 //!   --sin-suavizar (sin el suavizado de los escalones del terreno)
+//!   --draw directo|indirecto|gpu (modo de dibujo), --hiz 0|1 (descarte de lo tapado; por omisión, sí con descarte en GPU)
 
 mod app;
 mod bench;
@@ -153,6 +154,8 @@ fn parse_args() -> Args {
                 };
                 render::DRAW_OVERRIDE.store(m, std::sync::atomic::Ordering::Relaxed);
             }
+            // Descarte de lo tapado (Hi-Z): 1 lo fuerza (si el adaptador puede), 0 lo apaga.
+            "--hiz" => render::HIZ_OVERRIDE.store(if next == "1" { 2 } else { 1 }, std::sync::atomic::Ordering::Relaxed),
             "--gpu-cull" => render::DRAW_OVERRIDE.store(if next == "1" { 3 } else { 2 }, std::sync::atomic::Ordering::Relaxed),
             "--window" => {
                 a.window = true;

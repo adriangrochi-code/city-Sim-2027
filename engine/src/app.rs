@@ -276,9 +276,11 @@ impl App {
         }
         if self.perfil && frame_gap > 25.0 {
             println!(
-                "Cuadro lento: {frame_gap:.1} ms entre cuadros · trabajo {total:.1} ms (simulación {ms_sim:.1}, subir mallas {ms_upload:.1}, selección {ms_pick:.1}, interfaz {:.1}, dibujo {ms_render:.1}) · pendientes {}",
+                "Cuadro lento: {frame_gap:.1} ms entre cuadros · trabajo {total:.1} ms (simulación {ms_sim:.1}, subir mallas {ms_upload:.1}, selección {ms_pick:.1}, interfaz {:.1}, dibujo {ms_render:.1}) · pendientes {} · cascadas de sombra dibujadas {} · Hi-Z {}",
                 cpu_ui,
-                s.streamer.pending()
+                s.streamer.pending(),
+                renderer.last_shadow_passes,
+                if renderer.hiz && renderer.draw_mode == crate::render::DrawMode::GpuCull { "sí" } else { "no" }
             );
         }
         if has_ui {
@@ -329,6 +331,7 @@ impl App {
             Outcome::Quit => el.exit(),
             Outcome::Settings => {
                 if let Some(gpu) = self.gpu.as_mut() {
+                    gpu.renderer.set_shadow_quality(self.menu.settings.shadow_quality());
                     let mode = if self.menu.settings.sincronizacion_vertical { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
                     if gpu.config.present_mode != mode {
                         gpu.config.present_mode = mode;
@@ -439,6 +442,9 @@ impl ApplicationHandler for App {
         let msaa = if self.opts.msaa == 0 { self.menu.settings.msaa } else { self.opts.msaa };
         match Renderer::for_window(window.clone(), msaa) {
             Ok((mut renderer, surface, mut config)) => {
+                // En la ventana, a lo sumo 2 cascadas de sombra por cuadro (las lejanas esperan).
+                renderer.shadow_budget = crate::render::SHADOW_BUDGET_WINDOW;
+                renderer.set_shadow_quality(self.menu.settings.shadow_quality());
                 if !self.menu.settings.sincronizacion_vertical {
                     config.present_mode = wgpu::PresentMode::AutoNoVsync;
                     renderer.configure(&surface, &config);

@@ -808,6 +808,21 @@ impl Menu {
                     }
                 });
                 ui.end_row();
+                ui.label("Sombras");
+                ui.horizontal(|ui| {
+                    // Cascadas × resolución: memoria de los mapas (Depth32: 4 bytes por texel).
+                    for (c, r, name, tip) in [
+                        (2, 1024, "Baja", "2 cascadas de 1024² (8 MB): sombras borrosas de cerca"),
+                        (3, 2048, "Media", "3 cascadas de 2048² (48 MB)"),
+                        (4, 2048, "Alta", "4 cascadas de 2048² (64 MB): nítidas de cerca y hasta los cerros"),
+                        (4, 4096, "Muy alta", "4 cascadas de 4096² (256 MB): para pantallas grandes"),
+                    ] {
+                        if ui.selectable_label(d.sombras_cascadas == c && d.sombras_resolucion == r, name).on_hover_text(tip).clicked() {
+                            (d.sombras_cascadas, d.sombras_resolucion) = (c, r);
+                        }
+                    }
+                });
+                ui.end_row();
                 ui.label("Autoguardado");
                 ui.horizontal(|ui| {
                     for (v, name) in [(0, "Nunca"), (6, "6 meses"), (12, "12 meses"), (24, "24 meses")] {

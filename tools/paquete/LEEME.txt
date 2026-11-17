@@ -41,12 +41,15 @@ Contiene dos programas:
    1-9/Tab estructura · R rotar · [ ] hora · P pausar día · F12 captura
 
    TIRONES: ./medir-tirones.sh (Windows: medir-tirones.bat) abre el juego y anota
-   cada cuadro lento y en qué se fue el tiempo en tirones.txt. En Opciones,
-   "Mostrar FPS" muestra también el peor cuadro del último medio segundo.
+   cada cuadro lento y en qué se fue el tiempo en tirones.txt (también cuántas
+   cascadas de sombra se dibujaron y si estaba el descarte de lo tapado, Hi-Z).
+   En Opciones, "Mostrar FPS" muestra también el peor cuadro del último medio
+   segundo, y "Sombras" elige la calidad (Baja a Muy alta).
 
    MEDIR FPS EN TU EQUIPO:  ./motor-voxel.sh --bench salida/
                             (Windows: medir-fps.bat)
-   y enviar el archivo salida/bench.md.
+   y enviar el archivo salida/bench.md (y las capturas bench-*.png). Incluye
+   cuánto descarta el Hi-Z con la placa de video y si la imagen cambia.
 
 Requisitos en Linux: x86_64, controlador gráfico con Vulkan (Mesa o el
 del fabricante) y libxkbcommon-x11 (para la ventana del motor).

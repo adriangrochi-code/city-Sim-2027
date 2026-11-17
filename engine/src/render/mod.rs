@@ -3,17 +3,20 @@
 //! capturas sin pantalla.
 
 mod alloc;
+pub mod cascades;
+pub mod hiz;
 
 use crate::camera::OrbitCamera;
 use crate::mesher::{Mesh, Quad};
 use alloc::Buddy;
+use cascades::{Placement, ViewFrame, MAX_CASCADES};
+pub use cascades::ShadowQuality;
 use bytemuck::{Pod, Zeroable};
 use glam::{IVec2, Mat4, Vec3, Vec4};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-const SHADOW_SIZE: u32 = 4096;
 /// Vértices de resaltado por cuadro (vistas previas de calles y solares del modo juego).
 pub const OVERLAY_MAX: usize = 196_608;
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -38,6 +41,16 @@ const SHADOW_MAX_LOD: u32 = {
     }
     l
 };
+
+/// Las cascadas grandes (más de 1 km de medio lado: cerros y montes lejanos) dibujan además
+/// los niveles de 8 y 16 m.
+const SHADOW_FAR_LOD: u32 = SHADOW_MAX_LOD + 2;
+/// Cascadas que se pueden volver a dibujar en un cuadro de la ventana; las demás esperan (y se
+/// usan con la matriz con la que se dibujaron). Una cascada que esperó 2 cuadros pasa adelante.
+pub const SHADOW_BUDGET_WINDOW: usize = 2;
+
+/// Descarte de lo tapado (Hi-Z): 0 = automático (si el modo de dibujo es GPU), 1 = no, 2 = sí.
+pub static HIZ_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 /// Modo de dibujo elegido por línea de comandos (0 = automático, 1 = directo,
 /// 2 = indirecto con descarte en CPU, 3 = indirecto con descarte en GPU).
@@ -74,7 +87,7 @@ struct ColGpu {
     g: [u32; 7],
 }
 
-/// Parámetros del descarte en GPU (128 bytes, igual que `Params` en cull.wgsl).
+/// Parámetros del descarte en GPU (208 bytes, igual que `Params` en cull.wgsl).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CullParams {
@@ -83,7 +96,55 @@ struct CullParams {
     count: u32,
     shadow: u32,
     max_lod: u32,
-    _pad: u32,
+    /// 0 = solo volumen de visión, 1 y 2 = pasadas del Hi-Z (ver cull.wgsl).
+    phase: u32,
+    view_proj: [[f32; 4]; 4],
+    /// Ancho y alto en píxeles, niveles de la pirámide, plano cercano.
+    screen: [f32; 4],
+}
+
+/// Cascadas de sombra para los shaders (igual que `Sombras` en sombras.wgsl).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SombrasGpu {
+    vp: [[[f32; 4]; 4]; MAX_CASCADES],
+    info: [[f32; 4]; MAX_CASCADES],
+    misc: [f32; 4],
+}
+
+/// Estado de las cascadas entre cuadros: dónde se quiere cada una (con histéresis), con qué
+/// lugar y sol está dibujado su mapa, si la geometría la ensució y cuántos cuadros esperó.
+#[derive(Default)]
+struct CascState {
+    sun: Vec3,
+    want: [Option<Placement>; MAX_CASCADES],
+    drawn: [Option<(Placement, Vec3)>; MAX_CASCADES],
+    dirty: [bool; MAX_CASCADES],
+    planes: [Option<[Vec4; 6]>; MAX_CASCADES],
+    waited: [u32; MAX_CASCADES],
+    /// Rehacer todas en el próximo cuadro, sin límite (banco de pruebas, cambio de calidad).
+    force: bool,
+    /// Quedaron cascadas esperando (límite por cuadro): hay que dibujar otro cuadro aunque la
+    /// cámara no se mueva.
+    pending: bool,
+}
+
+/// Recursos del Hi-Z que dependen del tamaño de la imagen.
+struct HizTargets {
+    levels: u32,
+    reduce_bg: wgpu::BindGroup,
+    /// Uno por nivel desde el 1 (lee el anterior, escribe este).
+    down_bg: Vec<wgpu::BindGroup>,
+    sizes: Vec<(u32, u32)>,
+    /// Descarte de la segunda pasada (lee la pirámide).
+    cull_bg: wgpu::BindGroup,
+}
+
+struct HizPipes {
+    reduce: wgpu::ComputePipeline,
+    down: wgpu::ComputePipeline,
+    reduce_bgl: wgpu::BindGroupLayout,
+    down_bgl: wgpu::BindGroupLayout,
 }
 
 /// Argumentos de dibujo indexado indirecto (20 bytes, como `VkDrawIndexedIndirectCommand`).
@@ -182,6 +243,22 @@ fn sun_dirs(sun: Vec3) -> [bool; 6] {
     [sun.y > 0.0, sun.x > 0.0, sun.x < 0.0, sun.z > 0.0, sun.z < 0.0, sun.y < 0.0]
 }
 
+/// Agrega los tramos contiguos de los grupos de caras visibles de una columna.
+fn push_groups(out: &mut Vec<DrawArgs>, b: &Batch, vis: &[bool; 6]) {
+    let mut g = 0;
+    while g < 6 {
+        if !vis[g] || b.groups[g] == b.groups[g + 1] {
+            g += 1;
+            continue;
+        }
+        let start = b.groups[g];
+        while g < 6 && (vis[g] || b.groups[g] == b.groups[g + 1]) {
+            g += 1;
+        }
+        out.push(draw_args(b.start + start, b.groups[g] - start));
+    }
+}
+
 /// Medición de un cuadro para el banco de pruebas.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct FrameStats {
@@ -193,6 +270,17 @@ pub struct FrameStats {
     pub draws_shadow: u32,
     /// Tiempo de GPU del cuadro medido con marcas de tiempo (si el adaptador las tiene), en ms.
     pub gpu_ms: Option<f64>,
+    /// Cascadas de sombra dibujadas en este cuadro.
+    pub shadow_passes: u32,
+    /// Columnas y caras dibujadas en la vista principal (en modo GPU, solo si se pidió leerlas).
+    pub cols_main: u32,
+    pub quads_main: u64,
+    /// De esas, las de la segunda pasada del Hi-Z (lo que no se vio en el cuadro anterior).
+    pub quads_phase2: u64,
+    /// Caras dibujadas en los pases de sombra.
+    pub quads_shadow: u64,
+    /// Se usó el descarte de lo tapado.
+    pub hiz: bool,
 }
 
 struct Targets {
@@ -200,6 +288,7 @@ struct Targets {
     height: u32,
     msaa: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
+    hiz: Option<HizTargets>,
 }
 
 pub struct Renderer {
@@ -209,8 +298,20 @@ pub struct Renderer {
     msaa: u32,
     globals: wgpu::Buffer,
     main_bg: wgpu::BindGroup,
+    main_bgl: wgpu::BindGroupLayout,
     shadow_bg: wgpu::BindGroup,
+    shadow_sampler: wgpu::Sampler,
+    palette: wgpu::Buffer,
+    /// Mapas de sombra: una capa por cascada (vista de todo el arreglo y una por capa).
     shadow_view: wgpu::TextureView,
+    shadow_layers: Vec<wgpu::TextureView>,
+    quality: ShadowQuality,
+    /// Matrices de las cascadas para los shaders y para el pase de sombras (256 bytes c/u).
+    sombras: wgpu::Buffer,
+    cascade_vp: wgpu::Buffer,
+    casc: std::cell::RefCell<CascState>,
+    /// Cascadas que puede rehacer un cuadro de la ventana (la captura y el banco, todas).
+    pub shadow_budget: usize,
     voxel_pipe: wgpu::RenderPipeline,
     shadow_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
@@ -243,13 +344,23 @@ pub struct Renderer {
     /// Tabla de columnas para el descarte en GPU y sus argumentos de dibujo.
     cols: wgpu::Buffer,
     args_main: wgpu::Buffer,
-    args_shadow: wgpu::Buffer,
+    args_main2: wgpu::Buffer,
+    args_shadow: Vec<wgpu::Buffer>,
     args_cpu: wgpu::Buffer,
     cull_pipe: Option<wgpu::ComputePipeline>,
+    cull_bgl: wgpu::BindGroupLayout,
     cull_params_main: wgpu::Buffer,
-    cull_params_shadow: wgpu::Buffer,
+    cull_params_main2: wgpu::Buffer,
+    cull_params_shadow: Vec<wgpu::Buffer>,
     cull_bg_main: wgpu::BindGroup,
-    cull_bg_shadow: wgpu::BindGroup,
+    cull_bg_shadow: Vec<wgpu::BindGroup>,
+    /// Marca por columna: se vio en el último cuadro con Hi-Z (primera pasada).
+    visible: wgpu::Buffer,
+    hiz_pipes: Option<HizPipes>,
+    /// El adaptador puede hacer el Hi-Z (compute, texturas de almacenamiento R32Float).
+    pub hiz_supported: bool,
+    /// Descarte de lo tapado activado (solo actúa en el modo de dibujo GPU).
+    pub hiz: bool,
     pub draw_mode: DrawMode,
     pub can_indirect: bool,
     timestamps: Option<(wgpu::QuerySet, wgpu::Buffer, wgpu::Buffer, f32)>,
@@ -260,6 +371,8 @@ pub struct Renderer {
     overlay_key: u64,
     /// Llamadas de dibujo del último cuadro de la ventana (principal, sombras).
     pub last_draws: (u32, u32),
+    /// Cascadas de sombra dibujadas en el último cuadro de la ventana.
+    pub last_shadow_passes: u32,
     /// Bytes de caras subidos en el último cuadro de la ventana.
     pub upload_frame: u64,
     upload_mark: u64,
@@ -271,13 +384,7 @@ pub struct Renderer {
     overlay_count: u32,
     targets: Option<Targets>,
     bench_out: Option<(u32, u32, wgpu::TextureView)>,
-    /// Caché del mapa de sombras: se rehace solo si cambió la luz o la geometría.
-    shadow_key: std::cell::Cell<Option<[f32; 16]>>,
-    shadow_dirty: std::cell::Cell<bool>,
-    /// Planos de la caja de luz del último mapa de sombras: un cambio de geometría solo
-    /// invalida la sombra si cae dentro (clave de sombra, técnica de Tisma engine).
-    shadow_planes: std::cell::Cell<Option<[Vec4; 6]>>,
-    /// Veces que se rehízo el mapa de sombras (para el banco de pruebas).
+    /// Pases de sombra (cascadas) dibujados en total (para el banco de pruebas).
     pub shadow_redraws: std::cell::Cell<u32>,
     pub adapter_name: String,
     /// Suaviza el sombreado de los escalones del terreno (evita las líneas oscuras de lejos).
@@ -295,9 +402,13 @@ pub struct Renderer {
 /// Matrices del cuadro, para descartar lo que no se ve.
 struct View {
     eye: Vec3,
-    sun: Vec3,
     view_proj: Mat4,
-    light_vp: Mat4,
+    /// Plano cercano de la cámara (para la prueba del Hi-Z).
+    near: f32,
+    /// Sol de las sombras (cuantizado) y cascadas a dibujar en este cuadro: (índice, matriz,
+    /// nivel de detalle máximo).
+    sun: Vec3,
+    cascades: Vec<(usize, Mat4, u32)>,
 }
 
 /// Luz del día según la hora (0–24). Sol del norte: estamos en el hemisferio sur.
@@ -356,6 +467,69 @@ fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     limits.max_buffer_size = adapter.limits().max_buffer_size.min(1 << 30);
     limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
     limits
+}
+
+/// Mapas de sombra: un arreglo de texturas de profundidad, una capa por cascada.
+fn make_shadow_maps(device: &wgpu::Device, q: ShadowQuality) -> (wgpu::TextureView, Vec<wgpu::TextureView>) {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sombras"),
+        size: wgpu::Extent3d { width: q.resolution, height: q.resolution, depth_or_array_layers: q.cascades },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let all = tex.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+    let layers = (0..q.cascades)
+        .map(|i| tex.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2), base_array_layer: i, array_layer_count: Some(1), ..Default::default() }))
+        .collect();
+    (all, layers)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(shadow) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
+            wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: palette.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: sombras.as_entire_binding() },
+        ],
+    })
+}
+
+fn make_cull_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, cols: &wgpu::Buffer, args: &wgpu::Buffer, params: &wgpu::Buffer, visible: &wgpu::Buffer, hiz: &wgpu::TextureView) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: cols.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: args.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: params.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: visible.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(hiz) },
+        ],
+    })
+}
+
+/// Suma de argumentos indirectos (6 por columna): (columnas con algo, caras).
+fn sum_args(args: &[DrawArgs]) -> (u32, u64) {
+    let mut cols = 0;
+    let mut quads = 0u64;
+    for c in args.chunks(6) {
+        let n: u64 = c.iter().map(|a| a.instance_count as u64).sum();
+        if n > 0 {
+            cols += 1;
+        }
+        quads += n;
+    }
+    (cols, quads)
 }
 
 impl Renderer {
@@ -434,17 +608,6 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("sombras"),
-            size: wgpu::Extent3d { width: SHADOW_SIZE, height: SHADOW_SIZE, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let shadow_view = shadow_tex.create_view(&Default::default());
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -465,7 +628,7 @@ impl Renderer {
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2Array, multisampled: false },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison), count: None },
@@ -476,9 +639,32 @@ impl Renderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
             ],
         });
-        let shadow_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("sombras"), entries: &[uniform_entry, storage_entry(3, wgpu::ShaderStages::VERTEX, true)] });
+        // Pase de sombras: orígenes de las columnas y la matriz de la cascada (desplazamiento
+        // dinámico de 256 bytes por cascada).
+        let shadow_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("sombras"),
+            entries: &[
+                storage_entry(3, wgpu::ShaderStages::VERTEX, true),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: true, min_binding_size: wgpu::BufferSize::new(64) },
+                    count: None,
+                },
+            ],
+        });
+        let sombras = device.create_buffer(&wgpu::BufferDescriptor { label: Some("cascadas"), size: std::mem::size_of::<SombrasGpu>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let cascade_vp = device.create_buffer(&wgpu::BufferDescriptor { label: Some("matrices de cascada"), size: 256 * MAX_CASCADES as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let quality = ShadowQuality::DEFAULT;
+        let (shadow_view, shadow_layers) = make_shadow_maps(&device, quality);
         let origins = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("orígenes"),
             size: ORIGIN_SLOTS as u64 * 16,
@@ -492,21 +678,14 @@ impl Renderer {
         }
         let palette = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("paleta"), contents: bytemuck::cast_slice(&pal), usage: wgpu::BufferUsages::UNIFORM });
         let simple_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("solo globales"), entries: &[uniform_entry] });
-        let main_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &main_bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
-                wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: palette.as_entire_binding() },
-            ],
-        });
+        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras);
         let shadow_vox_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &shadow_bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }, wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() }],
+            entries: &[
+                wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &cascade_vp, offset: 0, size: wgpu::BufferSize::new(64) }) },
+            ],
         });
         let shadow_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -515,7 +694,8 @@ impl Renderer {
         });
 
         let shader = |label, src: &str| device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(src.into()) });
-        let voxel_mod = shader("voxel", include_str!("shaders/voxel.wgsl"));
+        let with_shadows = |src: &str| format!("{}\n{}", include_str!("shaders/sombras.wgsl"), src);
+        let voxel_mod = shader("voxel", &with_shadows(include_str!("shaders/voxel.wgsl")));
         let sky_mod = shader("cielo", include_str!("shaders/sky.wgsl"));
         let water_mod = shader("agua", include_str!("shaders/water.wgsl"));
         let overlay_mod = shader("resaltado", include_str!("shaders/overlay.wgsl"));
@@ -600,7 +780,7 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
-        let detail_mod = shader("flora", include_str!("shaders/detail.wgsl"));
+        let detail_mod = shader("flora", &with_shadows(include_str!("shaders/detail.wgsl")));
         let detail_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("flora"),
             layout: Some(&main_layout),
@@ -622,7 +802,7 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
-        let agent_mod = shader("agentes", include_str!("shaders/agentes.wgsl"));
+        let agent_mod = shader("agentes", &with_shadows(include_str!("shaders/agentes.wgsl")));
         let agent_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("agentes"),
             layout: Some(&main_layout),
@@ -684,11 +864,23 @@ impl Renderer {
         let buf = |label: &str, size: u64, usage| device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
         let cols = buf("columnas", ORIGIN_SLOTS as u64 * 64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
         let args_size = ORIGIN_SLOTS as u64 * 6 * std::mem::size_of::<DrawArgs>() as u64;
-        let args_main = buf("args principal", args_size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT);
-        let args_shadow = buf("args sombras", args_size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT);
+        let indirect_usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_SRC;
+        let args_main = buf("args principal", args_size, indirect_usage);
+        let args_main2 = buf("args principal (Hi-Z)", args_size, indirect_usage);
+        let args_shadow: Vec<wgpu::Buffer> = (0..MAX_CASCADES).map(|_| buf("args sombras", args_size, indirect_usage)).collect();
         let args_cpu = buf("args cpu", args_size * 2, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
-        let cull_params_main = buf("descarte principal", 128, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
-        let cull_params_shadow = buf("descarte sombras", 128, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
+        let params_size = std::mem::size_of::<CullParams>() as u64;
+        let params_usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
+        let cull_params_main = buf("descarte principal", params_size, params_usage);
+        let cull_params_main2 = buf("descarte principal (Hi-Z)", params_size, params_usage);
+        let cull_params_shadow: Vec<wgpu::Buffer> = (0..MAX_CASCADES).map(|_| buf("descarte sombras", params_size, params_usage)).collect();
+        let visible = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("visibles"), contents: bytemuck::cast_slice(&vec![1u32; ORIGIN_SLOTS as usize]), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
+        let float_tex = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+            count: None,
+        };
         let cull_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("descarte"),
             entries: &[
@@ -700,21 +892,25 @@ impl Renderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
+                storage_entry(3, wgpu::ShaderStages::COMPUTE, false),
+                float_tex(4),
             ],
         });
-        let cull_bg = |args: &wgpu::Buffer, params: &wgpu::Buffer| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &cull_bgl,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: cols.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: args.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: params.as_entire_binding() },
-                ],
+        // Pirámide vacía para los descartes que no la leen (el shader declara la textura).
+        let dummy_hiz = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("hi-z vacío"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             })
-        };
-        let cull_bg_main = cull_bg(&args_main, &cull_params_main);
-        let cull_bg_shadow = cull_bg(&args_shadow, &cull_params_shadow);
+            .create_view(&Default::default());
+        let cull_bg_main = make_cull_bg(&device, &cull_bgl, &cols, &args_main, &cull_params_main, &visible, &dummy_hiz);
+        let cull_bg_shadow: Vec<wgpu::BindGroup> = (0..MAX_CASCADES).map(|i| make_cull_bg(&device, &cull_bgl, &cols, &args_shadow[i], &cull_params_shadow[i], &visible, &dummy_hiz)).collect();
         let cull_pipe = if can_indirect {
             let module = shader("descarte", include_str!("shaders/cull.wgsl"));
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[&cull_bgl], push_constant_ranges: &[] });
@@ -722,6 +918,41 @@ impl Renderer {
         } else {
             None
         };
+        // Hi-Z: hace falta el descarte en GPU, compute y escribir texturas R32Float. Si falta
+        // algo, se queda el descarte por volumen de visión solo.
+        let hiz_supported = cull_pipe.is_some()
+            && adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
+            && adapter.get_texture_format_features(wgpu::TextureFormat::R32Float).allowed_usages.contains(wgpu::TextureUsages::STORAGE_BINDING);
+        let hiz_pipes = hiz_supported.then(|| {
+            let src = include_str!("shaders/hiz.wgsl")
+                .replace("SRC_TYPE", if msaa > 1 { "texture_depth_multisampled_2d" } else { "texture_depth_2d" })
+                .replace("SAMPLES", if msaa > 1 { "textureNumSamples(src)" } else { "1u" });
+            let module = shader("hi-z", &src);
+            let storage = wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::R32Float, view_dimension: wgpu::TextureViewDimension::D2 },
+                count: None,
+            };
+            let reduce_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("hi-z nivel 0"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: msaa > 1 },
+                        count: None,
+                    },
+                    storage,
+                ],
+            });
+            let down_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("hi-z niveles"), entries: &[float_tex(2), storage] });
+            let pipe = |bgl: &wgpu::BindGroupLayout, entry| {
+                let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[bgl], push_constant_ranges: &[] });
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("hi-z"), layout: Some(&layout), module: &module, entry_point: entry, compilation_options: Default::default(), cache: None })
+            };
+            HizPipes { reduce: pipe(&reduce_bgl, "reduce"), down: pipe(&down_bgl, "down"), reduce_bgl, down_bgl }
+        });
         let timestamps = if features.contains(wgpu::Features::TIMESTAMP_QUERY) {
             let set = device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("tiempos"), ty: wgpu::QueryType::Timestamp, count: 2 });
             let resolve = buf("tiempos", 16, wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC);
@@ -749,6 +980,11 @@ impl Renderer {
                 DrawMode::Direct
             }
         };
+        let hiz = match HIZ_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => false,
+            2 => hiz_supported,
+            _ => hiz_supported && draw_mode == DrawMode::GpuCull,
+        };
         let overlay = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("resaltado"),
             size: (std::mem::size_of::<OverlayVertex>() * OVERLAY_MAX) as u64,
@@ -763,8 +999,17 @@ impl Renderer {
             msaa,
             globals,
             main_bg,
+            main_bgl,
             shadow_bg,
+            shadow_sampler,
+            palette,
             shadow_view,
+            shadow_layers,
+            quality,
+            sombras,
+            cascade_vp,
+            casc: std::cell::RefCell::new(CascState::default()),
+            shadow_budget: usize::MAX,
             voxel_pipe,
             shadow_pipe,
             sky_pipe,
@@ -796,6 +1041,13 @@ impl Renderer {
             cull_params_shadow,
             cull_bg_main,
             cull_bg_shadow,
+            hiz,
+            hiz_supported,
+            hiz_pipes,
+            visible,
+            cull_bgl,
+            args_main2,
+            cull_params_main2,
             draw_mode,
             can_indirect,
             timestamps,
@@ -803,6 +1055,7 @@ impl Renderer {
             scene_version: 0,
             overlay_key: 0,
             last_draws: (0, 0),
+            last_shadow_passes: 0,
             upload_frame: 0,
             upload_mark: 0,
             free_slots: Vec::new(),
@@ -813,9 +1066,6 @@ impl Renderer {
             overlay_count: 0,
             targets: None,
             bench_out: None,
-            shadow_key: std::cell::Cell::new(None),
-            shadow_dirty: std::cell::Cell::new(true),
-            shadow_planes: std::cell::Cell::new(None),
             shadow_redraws: std::cell::Cell::new(0),
             adapter_name,
             smooth_terrain: true,
@@ -878,10 +1128,11 @@ impl Renderer {
 
     fn make_batch(&mut self, m: &Mesh, lod: u32) -> Option<Batch> {
         self.scene_version += 1;
-        self.shadow_dirty_if(m);
         if m.is_empty() {
             return None;
         }
+        let (lo, hi) = m.bounds();
+        self.shadow_dirty_box(lo, hi);
         let (mut quads, groups) = m.quads_grouped();
         let slot = self.alloc_slot();
         for q in quads.iter_mut() {
@@ -893,22 +1144,22 @@ impl Renderer {
         self.uploaded_bytes += bytes.len() as u64;
         let origin = [m.origin.x, m.origin.y, m.origin.z, m.voxel];
         self.queue.write_buffer(&self.origins, slot as u64 * 16, bytemuck::cast_slice(&origin));
-        let (lo, hi) = m.bounds();
+        // Columna nueva: se dibuja en la primera pasada del Hi-Z (seguramente tapa algo).
+        self.queue.write_buffer(&self.visible, slot as u64 * 4, bytemuck::bytes_of(&1u32));
         let col = ColGpu { lo: [lo.x, lo.y, lo.z, lod as f32], hi: [hi.x, hi.y, hi.z, 1.0], start, g: [groups[0], groups[1], groups[2], groups[3], groups[4], groups[5], groups[6]] };
         self.queue.write_buffer(&self.cols, slot as u64 * 64, bytemuck::bytes_of(&col));
         Some(Batch { start, order, groups, quads: quads.len() as u32, lod, slot, lo, hi })
     }
 
-    /// Un cambio de geometría solo obliga a rehacer la sombra si cae dentro de la caja de luz
-    /// del último mapa (o si es de un nivel que no proyecta sombra, no la toca).
-    fn shadow_dirty_if(&self, m: &Mesh) {
-        if m.is_empty() {
-            return;
-        }
-        let (lo, hi) = m.bounds();
-        match self.shadow_planes.get() {
-            Some(p) if !box_visible(&p, lo, hi) => {}
-            _ => self.shadow_dirty.set(true),
+    /// Un cambio de geometría solo obliga a rehacer una cascada si cae dentro de su caja de luz
+    /// (clave de sombra por cascada, técnica de Tisma engine).
+    fn shadow_dirty_box(&self, lo: Vec3, hi: Vec3) {
+        let mut st = self.casc.borrow_mut();
+        for i in 0..MAX_CASCADES {
+            match st.planes[i] {
+                Some(p) if !box_visible(&p, lo, hi) => {}
+                _ => st.dirty[i] = true,
+            }
         }
     }
 
@@ -921,9 +1172,7 @@ impl Renderer {
             None => self.columns.remove(&key),
         };
         if let Some(b) = old {
-            if self.shadow_planes.get().map_or(true, |p| box_visible(&p, b.lo, b.hi)) {
-                self.shadow_dirty.set(true);
-            }
+            self.shadow_dirty_box(b.lo, b.hi);
             self.free_batch(b);
         }
     }
@@ -1002,9 +1251,7 @@ impl Renderer {
     pub fn remove_column(&mut self, key: (u32, IVec2)) {
         self.set_detail(key, &[]);
         if let Some(b) = self.columns.remove(&key) {
-            if self.shadow_planes.get().map_or(true, |p| box_visible(&p, b.lo, b.hi)) {
-                self.shadow_dirty.set(true);
-            }
+            self.shadow_dirty_box(b.lo, b.hi);
             self.free_batch(b);
         }
     }
@@ -1029,14 +1276,35 @@ impl Renderer {
         self.quads.size() as f64 / 1048576.0
     }
 
-    /// Obliga a rehacer el mapa de sombras en el próximo cuadro.
+    /// Obliga a rehacer todas las cascadas de sombra en el próximo cuadro (sin límite).
     pub fn invalidate_shadows(&self) {
-        self.shadow_dirty.set(true);
+        let mut st = self.casc.borrow_mut();
+        st.dirty = [true; MAX_CASCADES];
+        st.force = true;
+    }
+
+    /// Calidad de las sombras (opciones gráficas): rehace los mapas y vuelve a dibujarlos.
+    pub fn set_shadow_quality(&mut self, q: ShadowQuality) {
+        let q = q.sanitized();
+        if q == self.quality {
+            return;
+        }
+        self.quality = q;
+        let (all, layers) = make_shadow_maps(&self.device, q);
+        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras);
+        self.shadow_view = all;
+        self.shadow_layers = layers;
+        *self.casc.borrow_mut() = CascState { force: true, dirty: [true; MAX_CASCADES], ..Default::default() };
+        self.scene_version += 1;
+    }
+
+    pub fn shadow_quality(&self) -> ShadowQuality {
+        self.quality
     }
 
     /// Quita todas las mallas (banco de pruebas).
     pub fn clear_columns(&mut self) {
-        self.shadow_dirty.set(true);
+        self.invalidate_shadows();
         self.columns.clear();
         self.detail_cols.clear();
         self.detail_static.clear();
@@ -1078,10 +1346,10 @@ impl Renderer {
             self.bench_out = Some((width, height, tex.create_view(&Default::default())));
         }
         let t0 = std::time::Instant::now();
-        let view = self.write_globals(cam, hour, width as f32 / height as f32);
+        let view = self.write_globals(cam, hour, width as f32 / height as f32, self.shadow_budget);
         let mut enc = self.device.create_command_encoder(&Default::default());
         let ts = self.timestamps.as_ref().map(|t| &t.0);
-        let (dm, ds) = self.encode(&mut enc, self.targets.as_ref().unwrap(), &self.bench_out.as_ref().unwrap().2, &view, ts);
+        let mut st = self.encode(&mut enc, self.targets.as_ref().unwrap(), &self.bench_out.as_ref().unwrap().2, &view, ts);
         if let Some((set, resolve, read, _)) = &self.timestamps {
             enc.resolve_query_set(set, 0..2, resolve, 0);
             enc.copy_buffer_to_buffer(resolve, 0, read, 0, 16);
@@ -1100,9 +1368,37 @@ impl Renderer {
             read.unmap();
             (v[1] > v[0]).then(|| (v[1] - v[0]) as f64 * *period as f64 / 1e6)
         });
+        // En modo GPU, lo dibujado se cuenta leyendo los argumentos indirectos.
+        if self.draw_mode == DrawMode::GpuCull && self.cull_pipe.is_some() {
+            let n = self.next_slot;
+            let (c1, q1) = self.read_args(&self.args_main, n);
+            let (c2, q2) = if st.hiz { self.read_args(&self.args_main2, n) } else { (0, 0) };
+            st.cols_main = c1 + c2;
+            st.quads_main = q1 + q2;
+            st.quads_phase2 = q2;
+            st.quads_shadow = view.cascades.iter().map(|(i, _, _)| self.read_args(&self.args_shadow[*i], n).1).sum();
+        }
         self.frame += 1;
         self.alloc.collect(self.frame, FRAMES_IN_FLIGHT);
-        FrameStats { cpu_ms: cpu.as_secs_f64() * 1000.0, total_ms, draws_main: dm, draws_shadow: ds, gpu_ms }
+        FrameStats { cpu_ms: cpu.as_secs_f64() * 1000.0, total_ms, gpu_ms, ..st }
+    }
+
+    /// Lee un búfer de argumentos indirectos (banco de pruebas): (columnas, caras).
+    fn read_args(&self, buf: &wgpu::Buffer, slots: u32) -> (u32, u64) {
+        let size = slots as u64 * 6 * std::mem::size_of::<DrawArgs>() as u64;
+        if size == 0 {
+            return (0, 0);
+        }
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.copy_buffer_to_buffer(buf, 0, &staging, 0, size);
+        self.queue.submit([enc.finish()]);
+        let slice = staging.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        self.device.poll(wgpu::Maintain::Wait);
+        let r = sum_args(bytemuck::cast_slice(&slice.get_mapped_range()));
+        staging.unmap();
+        r
     }
 
     pub fn column_count(&self) -> usize {
@@ -1139,28 +1435,125 @@ impl Renderer {
         for v in c {
             std::hash::Hasher::write_u32(&mut h, v.to_bits());
         }
-        [std::hash::Hasher::finish(&h), self.scene_version, size.0 as u64, size.1 as u64]
+        // Con cascadas de sombra esperando, el cuadro siguiente no es igual aunque nada cambie.
+        let pending = if self.casc.borrow().pending { self.frame } else { 0 };
+        [std::hash::Hasher::finish(&h), self.scene_version + (pending << 32), size.0 as u64, size.1 as u64]
     }
 
-    fn write_globals(&self, cam: &OrbitCamera, hour: f32, aspect: f32) -> View {
+    /// Franja de alturas donde puede haber algo que reciba sombra: del río (−6 m) al techo más
+    /// alto de lo cargado en los niveles que proyectan sombra.
+    fn shadow_band(&self) -> (f32, f32) {
+        let mut ymax = f32::NEG_INFINITY;
+        for b in self.batches.iter().chain(self.columns.values()) {
+            if b.lod <= SHADOW_FAR_LOD {
+                ymax = ymax.max(b.hi.y);
+            }
+        }
+        if !ymax.is_finite() {
+            ymax = 60.0;
+        }
+        (-6.0, ymax.max(10.0) + 2.0)
+    }
+
+    /// Ubica las cascadas para esta cámara y decide cuáles se vuelven a dibujar: las que
+    /// cambiaron de lugar o de sol, o cuya geometría cambió; a lo sumo `budget` por cuadro
+    /// (salvo que se haya pedido rehacer todo). Las que esperan se siguen usando con la matriz
+    /// con la que se dibujaron, así lo que se lee es coherente.
+    fn plan_cascades(&self, cam: &OrbitCamera, aspect: f32, sun: Vec3, budget: usize) -> (SombrasGpu, Vec<(usize, Mat4, u32)>) {
+        let q = self.quality;
+        let n = q.cascades as usize;
+        let res = q.resolution;
+        let rot = cascades::light_rotation(sun);
+        let (ymin, ymax) = self.shadow_band();
+        let eye = cam.eye();
+        let frame = ViewFrame::new(eye, cam.target, cam.fov_y, aspect);
+        let half = cam.fov_y.to_radians() * 0.5;
+        let pitch = cam.pitch.to_radians();
+        let near = (cam.distance * 0.002).clamp(0.1, 20.0);
+        let a_bot = (pitch + half).min(89f32.to_radians());
+        let a_top = pitch - half;
+        // La primera cascada empieza donde puede empezar a verse algo (debajo del techo más
+        // alto) y termina un poco más allá del objetivo de la cámara; la última, donde se deja
+        // de ver el suelo o a la distancia de sombra (8 veces la de la cámara, 1,5 a 8 km, y
+        // siempre más allá del objetivo).
+        let n0 = if eye.y > ymax { ((eye.y - ymax) / a_bot.sin() * half.cos() * 0.9).max(near) } else { near };
+        let cap = (cam.distance * 8.0).clamp(1500.0, 8000.0).max(cam.distance * 2.5);
+        let far = if a_top > 0.03 { ((eye.y - ymin) / a_top.sin() * half.cos()).min(cap) } else { cap };
+        let sp = cascades::splits(n0, cam.distance * 1.2, far, n);
+        // Hacia el sol, la caja llega hasta donde puede haber algo que dé sombra.
+        let reach = ((ymax - ymin) / sun.y.max(0.05)).min(6000.0) + 10.0;
+        let mut st = self.casc.borrow_mut();
+        if st.sun != sun {
+            st.want = [None; MAX_CASCADES];
+            st.sun = sun;
+        }
+        for i in 0..MAX_CASCADES {
+            st.want[i] = if i < n {
+                let pts: Vec<Vec3> = cascades::slice_points(&frame, sp[i], sp[i + 1], ymin, ymax).into_iter().map(|p| rot.transform_point3(p)).collect();
+                cascades::Need::from_points(&pts, reach).map(|nd| cascades::fit(st.want[i], &nd, res))
+            } else {
+                None
+            };
+        }
+        let mut todo: Vec<usize> = (0..n).filter(|&i| st.want[i].is_some_and(|p| st.dirty[i] || st.drawn[i] != Some((p, sun)))).collect();
+        for i in 0..MAX_CASCADES {
+            if !todo.contains(&i) {
+                st.waited[i] = 0;
+            }
+        }
+        if !st.force && todo.len() > budget {
+            // Primero las que ya esperaron 2 cuadros; después, de la más cercana a la más lejana.
+            todo.sort_by_key(|&i| (st.waited[i] < 2, i));
+            for &i in &todo[budget..] {
+                st.waited[i] += 1;
+            }
+            todo.truncate(budget);
+        }
+        st.force = false;
+        st.pending = (0..n).any(|i| st.waited[i] > 0 && !todo.contains(&i));
+        let mut draw = Vec::with_capacity(todo.len());
+        for &i in &todo {
+            let p = st.want[i].unwrap();
+            let m = p.matrix(rot);
+            st.drawn[i] = Some((p, sun));
+            st.dirty[i] = false;
+            st.waited[i] = 0;
+            st.planes[i] = Some(frustum_planes(m));
+            let max_lod = if p.half() < 1000.0 { SHADOW_MAX_LOD } else { SHADOW_FAR_LOD };
+            draw.push((i, m, max_lod));
+        }
+        let mut g = SombrasGpu::zeroed();
+        for i in 0..n {
+            if let (Some(_), Some((p, s))) = (st.want[i], st.drawn[i]) {
+                g.vp[i] = p.matrix(cascades::light_rotation(s)).to_cols_array_2d();
+                g.info[i] = cascades::shader_info(&p, res).into();
+            }
+        }
+        g.misc = [n as f32, 1.0 / res as f32, 0.0, 0.0];
+        (g, draw)
+    }
+
+    /// Lugares de las cascadas (para el banco de pruebas): medio lado en metros y texel en cm.
+    pub fn cascade_sizes(&self) -> Vec<(f32, f32)> {
+        let st = self.casc.borrow();
+        st.drawn.iter().take(self.quality.cascades as usize).flatten().map(|(p, _)| (p.half(), p.texel(self.quality.resolution) * 100.0)).collect()
+    }
+
+    fn write_globals(&self, cam: &OrbitCamera, hour: f32, aspect: f32, budget: usize) -> View {
         let l = lighting(hour);
+        // El sol de las sombras se mueve de a un minuto de juego (0,25°): con el día corriendo
+        // no hay que rehacer las cascadas en cada cuadro.
+        let sun = lighting((hour * 60.0).round() / 60.0).sun_dir;
         let view_proj = cam.proj(aspect) * cam.view();
-        // Cámara de sombras: ortográfica desde el sol, centrada en el objetivo.
-        let half = (cam.distance * 0.9).clamp(120.0, 1500.0);
-        let light_up = if l.sun_dir.y.abs() > 0.95 { Vec3::Z } else { Vec3::Y };
-        let light_view = Mat4::look_at_rh(cam.target + l.sun_dir * 3000.0, cam.target, light_up);
-        let light_proj = Mat4::orthographic_rh(-half, half, -half, half, 10.0, 6000.0);
-        // Se ajusta la caja de luz a la grilla de texels del mapa de sombras: las sombras no
-        // "titilan" al mover la cámara y, si la cámara apenas se movió, el mapa no cambia.
-        let raw = light_proj * light_view;
-        let o = raw * Vec4::new(0.0, 0.0, 0.0, 1.0);
-        let texel = 2.0 / SHADOW_SIZE as f32;
-        let snap = Mat4::from_translation(Vec3::new((o.x / texel).round() * texel - o.x, (o.y / texel).round() * texel - o.y, 0.0));
-        let light_vp = snap * raw;
+        let (sg, draw) = self.plan_cascades(cam, aspect, sun, budget);
+        self.queue.write_buffer(&self.sombras, 0, bytemuck::bytes_of(&sg));
+        for (i, m, _) in &draw {
+            self.queue.write_buffer(&self.cascade_vp, *i as u64 * 256, bytemuck::cast_slice(&m.to_cols_array()));
+        }
         let g = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
-            light_view_proj: light_vp.to_cols_array_2d(),
+            light_view_proj: sg.vp[0],
             cam_pos: cam.eye().extend(1.0).into(),
             sun_dir: l.sun_dir.extend(0.0).into(),
             sun_color: l.sun_color.extend(0.0).into(),
@@ -1172,7 +1565,7 @@ impl Renderer {
             extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, self.water_level, self.moon, self.wind.0.rem_euclid(360.0).round() * 100.0 + self.wind.1.clamp(0.0, 99.0)],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
-        View { eye: cam.eye(), sun: l.sun_dir, view_proj, light_vp }
+        View { eye: cam.eye(), view_proj, near: (cam.distance * 0.002).clamp(0.1, 20.0), sun, cascades: draw }
     }
 
     fn make_targets(&self, width: u32, height: u32) -> Targets {
@@ -1183,13 +1576,49 @@ impl Renderer {
                 .create_view(&Default::default())
         };
         let msaa = if self.msaa > 1 { Some(make(self.format, wgpu::TextureUsages::RENDER_ATTACHMENT)) } else { None };
-        Targets { width, height, msaa, depth: make(DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT) }
+        // Con Hi-Z, la profundidad se lee después en un compute shader.
+        let depth_usage = if self.hiz_pipes.is_some() { wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::RENDER_ATTACHMENT };
+        let depth = make(DEPTH_FORMAT, depth_usage);
+        let hiz = self.hiz_pipes.as_ref().map(|hp| {
+            let sizes = hiz::level_sizes(width, height);
+            let levels = sizes.len() as u32;
+            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("hi-z"),
+                size: wgpu::Extent3d { width: sizes[0].0, height: sizes[0].1, depth_or_array_layers: 1 },
+                mip_level_count: levels,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let mip = |i: u32| tex.create_view(&wgpu::TextureViewDescriptor { base_mip_level: i, mip_level_count: Some(1), ..Default::default() });
+            let reduce_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &hp.reduce_bgl,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&depth) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&mip(0)) }],
+            });
+            let down_bg = (1..levels)
+                .map(|i| {
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &hp.down_bgl,
+                        entries: &[wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&mip(i - 1)) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&mip(i)) }],
+                    })
+                })
+                .collect();
+            let all = tex.create_view(&Default::default());
+            let cull_bg = make_cull_bg(&self.device, &self.cull_bgl, &self.cols, &self.args_main2, &self.cull_params_main2, &self.visible, &all);
+            HizTargets { levels, reduce_bg, down_bg, sizes, cull_bg }
+        });
+        Targets { width, height, msaa, depth, hiz }
     }
 
     /// Tramos de caras a dibujar en la vista principal: descarte por frustum, orden de cerca a
     /// lejos y solo los grupos de caras que miran a la cámara, unidos en tramos contiguos
-    /// (unión de rangos contiguos, como `preview_draws()` de Tisma engine).
-    fn main_ranges(&self, view: &View) -> Vec<DrawArgs> {
+    /// (unión de rangos contiguos, como `preview_draws()` de Tisma engine). Devuelve también
+    /// cuántas columnas pasaron.
+    fn main_ranges(&self, view: &View) -> (Vec<DrawArgs>, u32) {
         let vp = frustum_planes(view.view_proj);
         let mut list: Vec<(f32, &Batch)> = self
             .batches
@@ -1208,107 +1637,129 @@ impl Renderer {
                 .then(a.1.lo.x.partial_cmp(&b.1.lo.x).unwrap_or(std::cmp::Ordering::Equal))
                 .then(a.1.lo.z.partial_cmp(&b.1.lo.z).unwrap_or(std::cmp::Ordering::Equal))
         });
+        let cols = list.len() as u32;
         let mut out = Vec::with_capacity(list.len() * 2);
         for (_, b) in list {
             let vis = visible_dirs(view.eye, b.lo, b.hi);
-            let mut g = 0;
-            while g < 6 {
-                if !vis[g] || b.groups[g] == b.groups[g + 1] {
-                    g += 1;
-                    continue;
-                }
-                let start = b.groups[g];
-                while g < 6 && (vis[g] || b.groups[g] == b.groups[g + 1]) {
-                    g += 1;
-                }
-                out.push(draw_args(b.start + start, b.groups[g] - start));
-            }
+            push_groups(&mut out, b, &vis);
         }
-        out
+        (out, cols)
     }
 
-    /// Tramos del pase de sombras: niveles finos dentro de la caja de luz, y solo los grupos
-    /// de caras que miran al sol. En volúmenes cerrados de vóxeles la superficie más cercana a
-    /// la luz siempre es una cara que la mira, así que el mapa de profundidad no cambia.
-    fn shadow_ranges(&self, light_vp: Mat4, sun: Vec3) -> Vec<DrawArgs> {
+    /// Tramos de un pase de sombras: niveles hasta `max_lod` dentro de la caja de luz, y solo
+    /// los grupos de caras que miran al sol. En volúmenes cerrados de vóxeles la superficie más
+    /// cercana a la luz siempre es una cara que la mira, así que el mapa no cambia.
+    fn shadow_ranges(&self, light_vp: Mat4, sun: Vec3, max_lod: u32) -> Vec<DrawArgs> {
         let lp = frustum_planes(light_vp);
         let vis = sun_dirs(sun);
         let mut out = Vec::new();
-        for b in self.batches.iter().chain(self.columns.values()).filter(|b| b.lod <= SHADOW_MAX_LOD && box_visible(&lp, b.lo, b.hi)) {
-            let mut g = 0;
-            while g < 6 {
-                if !vis[g] || b.groups[g] == b.groups[g + 1] {
-                    g += 1;
-                    continue;
-                }
-                let start = b.groups[g];
-                while g < 6 && (vis[g] || b.groups[g] == b.groups[g + 1]) {
-                    g += 1;
-                }
-                out.push(draw_args(b.start + start, b.groups[g] - start));
-            }
+        for b in self.batches.iter().chain(self.columns.values()).filter(|b| b.lod <= max_lod && box_visible(&lp, b.lo, b.hi)) {
+            push_groups(&mut out, b, &vis);
         }
         out
     }
 
-    fn cull_params(&self, m: Mat4, eye: Vec3, shadow: bool) -> CullParams {
-        let pl = frustum_planes(m);
+    fn cull_params(&self, m: Mat4, eye: Vec3, shadow: bool, max_lod: u32, phase: u32, screen: [f32; 4]) -> CullParams {
         CullParams {
-            planes: pl.map(|p| p.into()),
+            planes: frustum_planes(m).map(|p| p.into()),
             eye: eye.extend(1.0).into(),
             count: self.next_slot,
             shadow: shadow as u32,
-            max_lod: SHADOW_MAX_LOD,
-            _pad: 0,
+            max_lod,
+            phase,
+            view_proj: m.to_cols_array_2d(),
+            screen,
         }
     }
 
-    /// Graba los pases de sombras y principal. `out` es la imagen final (o el destino del
-    /// resolve si hay MSAA). Devuelve las llamadas de dibujo (principal, sombras).
-    fn encode(&self, enc: &mut wgpu::CommandEncoder, targets: &Targets, out: &wgpu::TextureView, view: &View, timestamps: Option<&wgpu::QuerySet>) -> (u32, u32) {
-        let (mut dm, mut ds) = (0u32, 0u32);
-        let key = view.light_vp.to_cols_array();
-        let redraw = self.shadow_dirty.get() || self.shadow_key.get() != Some(key);
+    /// Dibuja las caras de los vóxeles en un pase: con argumentos de la GPU (`gpu_args`),
+    /// con los tramos de la CPU en el búfer indirecto (desde `cpu_off`), o uno por uno.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_voxels(&self, pass: &mut wgpu::RenderPass, gpu_args: Option<&wgpu::Buffer>, slots: u32, indirect: bool, cpu: &[DrawArgs], cpu_off: usize) -> u32 {
+        if let Some(a) = gpu_args {
+            if slots > 0 {
+                pass.multi_draw_indexed_indirect(a, 0, slots * 6);
+                return 1;
+            }
+            return 0;
+        }
+        if indirect {
+            if !cpu.is_empty() {
+                pass.multi_draw_indexed_indirect(&self.args_cpu, (cpu_off * std::mem::size_of::<DrawArgs>()) as u64, cpu.len() as u32);
+                return 1;
+            }
+            return 0;
+        }
+        for a in cpu {
+            pass.draw_indexed(0..6, 0, a.first_instance..a.first_instance + a.instance_count);
+        }
+        cpu.len() as u32
+    }
+
+    /// Graba las cascadas de sombra que tocan y la vista principal. `out` es la imagen final (o
+    /// el destino del resolve si hay MSAA).
+    ///
+    /// Con Hi-Z (modo GPU) la vista principal va en dos pases: (A) lo visible en el cuadro
+    /// anterior; con esa profundidad se arma la pirámide y se prueba todo lo demás; (B) lo que
+    /// resultó visible y faltaba, la flora, los vecinos, el agua y el resaltado.
+    fn encode(&self, enc: &mut wgpu::CommandEncoder, targets: &Targets, out: &wgpu::TextureView, view: &View, timestamps: Option<&wgpu::QuerySet>) -> FrameStats {
+        let mut st = FrameStats::default();
         let gpu = self.draw_mode == DrawMode::GpuCull && self.cull_pipe.is_some();
         let slots = self.next_slot;
+        let hz = if gpu && self.hiz && slots > 0 { targets.hiz.as_ref() } else { None };
+        st.hiz = hz.is_some();
+        let screen = [targets.width as f32, targets.height as f32, hz.map_or(0.0, |h| h.levels as f32), view.near];
         if gpu && slots > 0 {
             // Descarte en la GPU: un compute shader llena los argumentos indirectos.
-            self.queue.write_buffer(&self.cull_params_main, 0, bytemuck::bytes_of(&self.cull_params(view.view_proj, view.eye, false)));
-            if redraw {
+            let phase = if hz.is_some() { 1 } else { 0 };
+            self.queue.write_buffer(&self.cull_params_main, 0, bytemuck::bytes_of(&self.cull_params(view.view_proj, view.eye, false, 0, phase, screen)));
+            if hz.is_some() {
+                self.queue.write_buffer(&self.cull_params_main2, 0, bytemuck::bytes_of(&self.cull_params(view.view_proj, view.eye, false, 0, 2, screen)));
+            }
+            for (i, m, lod) in &view.cascades {
                 // En el pase de sombras "eye" lleva la dirección del sol (w = 0).
-                self.queue.write_buffer(&self.cull_params_shadow, 0, bytemuck::bytes_of(&self.cull_params(view.light_vp, view.sun, true)));
+                self.queue.write_buffer(&self.cull_params_shadow[*i], 0, bytemuck::bytes_of(&self.cull_params(*m, view.sun, true, *lod, 0, screen)));
             }
             let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("descarte"), timestamp_writes: None });
             cp.set_pipeline(self.cull_pipe.as_ref().unwrap());
             cp.set_bind_group(0, &self.cull_bg_main, &[]);
             cp.dispatch_workgroups(slots.div_ceil(64), 1, 1);
-            if redraw {
-                cp.set_bind_group(0, &self.cull_bg_shadow, &[]);
+            for (i, _, _) in &view.cascades {
+                cp.set_bind_group(0, &self.cull_bg_shadow[*i], &[]);
                 cp.dispatch_workgroups(slots.div_ceil(64), 1, 1);
             }
         }
-        // Rangos de la CPU (modos directo e indirecto). En indirecto se escriben en un solo
-        // búfer: primero los de sombra y después los principales.
-        let shadow_cpu = if redraw && !gpu { self.shadow_ranges(view.light_vp, view.sun) } else { Vec::new() };
-        let main_cpu = if !gpu { self.main_ranges(view) } else { Vec::new() };
+        // Tramos de la CPU (modos directo e indirecto). En indirecto se escriben en un solo
+        // búfer: primero los de cada cascada y después los principales.
+        let shadow_cpu: Vec<Vec<DrawArgs>> = if gpu { Vec::new() } else { view.cascades.iter().map(|(_, m, lod)| self.shadow_ranges(*m, view.sun, *lod)).collect() };
+        let (main_cpu, cols_cpu) = if gpu { (Vec::new(), 0) } else { self.main_ranges(view) };
         let indirect = self.draw_mode == DrawMode::Indirect && self.can_indirect;
-        if indirect {
-            let mut all = shadow_cpu.clone();
-            all.extend_from_slice(&main_cpu);
-            if !all.is_empty() {
-                self.queue.write_buffer(&self.args_cpu, 0, bytemuck::cast_slice(&all));
+        let mut offsets = Vec::with_capacity(shadow_cpu.len());
+        let mut main_off = 0;
+        if !gpu {
+            for s in &shadow_cpu {
+                offsets.push(main_off);
+                main_off += s.len();
+            }
+            st.cols_main = cols_cpu;
+            st.quads_main = main_cpu.iter().map(|a| a.instance_count as u64).sum();
+            st.quads_shadow = shadow_cpu.iter().flatten().map(|a| a.instance_count as u64).sum();
+            if indirect {
+                let mut all: Vec<DrawArgs> = shadow_cpu.iter().flatten().copied().collect();
+                all.extend_from_slice(&main_cpu);
+                if !all.is_empty() {
+                    self.queue.write_buffer(&self.args_cpu, 0, bytemuck::cast_slice(&all));
+                }
             }
         }
-        if redraw {
-            self.shadow_dirty.set(false);
-            self.shadow_key.set(Some(key));
-            self.shadow_planes.set(Some(frustum_planes(view.light_vp)));
+        for (k, (i, _, _)) in view.cascades.iter().enumerate() {
             self.shadow_redraws.set(self.shadow_redraws.get() + 1);
+            st.shadow_passes += 1;
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sombras"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.shadow_view,
+                    view: &self.shadow_layers[*i],
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
@@ -1316,45 +1767,32 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.shadow_pipe);
-            pass.set_bind_group(0, &self.shadow_vox_bg, &[]);
+            pass.set_bind_group(0, &self.shadow_vox_bg, &[(*i * 256) as u32]);
             pass.set_vertex_buffer(0, self.quads.slice(..));
             pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
-            if gpu {
-                if slots > 0 {
-                    pass.multi_draw_indexed_indirect(&self.args_shadow, 0, slots * 6);
-                    ds = 1;
-                }
-            } else if indirect {
-                if !shadow_cpu.is_empty() {
-                    pass.multi_draw_indexed_indirect(&self.args_cpu, 0, shadow_cpu.len() as u32);
-                    ds = 1;
-                }
-            } else {
-                for a in &shadow_cpu {
-                    pass.draw_indexed(0..6, 0, a.first_instance..a.first_instance + a.instance_count);
-                    ds += 1;
-                }
-            }
+            let cpu: &[DrawArgs] = if gpu { &[] } else { &shadow_cpu[k] };
+            st.draws_shadow += self.draw_voxels(&mut pass, gpu.then(|| &self.args_shadow[*i]), slots, indirect, cpu, if gpu { 0 } else { offsets[k] });
         }
         let (view_tex, resolve) = match &targets.msaa {
             Some(m) => (m, Some(out)),
             None => (out, None),
         };
+        let last = hz.is_none();
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("principal"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: view_tex,
-                resolve_target: resolve,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: if resolve.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &targets.depth,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: timestamps.map(|q| wgpu::RenderPassTimestampWrites { query_set: q, beginning_of_pass_write_index: Some(0), end_of_pass_write_index: Some(1) }),
-            occlusion_query_set: None,
-        });
+                label: Some("principal"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: view_tex,
+                    resolve_target: if last { resolve } else { None },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: if last && resolve.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &targets.depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: if last { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: timestamps.map(|q| wgpu::RenderPassTimestampWrites { query_set: q, beginning_of_pass_write_index: Some(0), end_of_pass_write_index: if last { Some(1) } else { None } }),
+                occlusion_query_set: None,
+            });
         pass.set_pipeline(&self.sky_pipe);
         pass.set_bind_group(0, &self.shadow_bg, &[]);
         pass.draw(0..3, 0..1);
@@ -1362,22 +1800,45 @@ impl Renderer {
         pass.set_bind_group(0, &self.main_bg, &[]);
         pass.set_vertex_buffer(0, self.quads.slice(..));
         pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
-        if gpu {
-            if slots > 0 {
-                pass.multi_draw_indexed_indirect(&self.args_main, 0, slots * 6);
-                dm = 1;
+        st.draws_main += self.draw_voxels(&mut pass, gpu.then_some(&self.args_main), slots, indirect, &main_cpu, main_off);
+        if let Some(h) = hz {
+            drop(pass);
+            // Pirámide de profundidad con lo dibujado y segunda pasada del descarte.
+            let hp = self.hiz_pipes.as_ref().unwrap();
+            let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("hi-z"), timestamp_writes: None });
+            cp.set_pipeline(&hp.reduce);
+            cp.set_bind_group(0, &h.reduce_bg, &[]);
+            cp.dispatch_workgroups(h.sizes[0].0.div_ceil(8), h.sizes[0].1.div_ceil(8), 1);
+            cp.set_pipeline(&hp.down);
+            for (l, bg) in h.down_bg.iter().enumerate() {
+                let (w, hh) = h.sizes[l + 1];
+                cp.set_bind_group(0, bg, &[]);
+                cp.dispatch_workgroups(w.div_ceil(8), hh.div_ceil(8), 1);
             }
-        } else if indirect {
-            if !main_cpu.is_empty() {
-                let off = (shadow_cpu.len() * std::mem::size_of::<DrawArgs>()) as u64;
-                pass.multi_draw_indexed_indirect(&self.args_cpu, off, main_cpu.len() as u32);
-                dm = 1;
-            }
-        } else {
-            for a in &main_cpu {
-                pass.draw_indexed(0..6, 0, a.first_instance..a.first_instance + a.instance_count);
-                dm += 1;
-            }
+            cp.set_pipeline(self.cull_pipe.as_ref().unwrap());
+            cp.set_bind_group(0, &h.cull_bg, &[]);
+            cp.dispatch_workgroups(slots.div_ceil(64), 1, 1);
+            drop(cp);
+            pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("principal (Hi-Z)"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: view_tex,
+                    resolve_target: resolve,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: if resolve.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &targets.depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: timestamps.map(|q| wgpu::RenderPassTimestampWrites { query_set: q, beginning_of_pass_write_index: None, end_of_pass_write_index: Some(1) }),
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.voxel_pipe);
+            pass.set_bind_group(0, &self.main_bg, &[]);
+            pass.set_vertex_buffer(0, self.quads.slice(..));
+            pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
+            st.draws_main += self.draw_voxels(&mut pass, Some(&self.args_main2), slots, indirect, &[], 0);
         }
         self.refresh_detail();
         let detail = self.detail_buf.borrow();
@@ -1397,16 +1858,16 @@ impl Renderer {
         pass.set_bind_group(0, &self.shadow_bg, &[]);
         pass.set_vertex_buffer(0, self.water.slice(..));
         pass.draw(0..(self.water.size() / 20) as u32, 0..1);
-        if let Some(st) = &self.streams {
-            pass.set_vertex_buffer(0, st.slice(..));
-            pass.draw(0..(st.size() / 20) as u32, 0..1);
+        if let Some(stb) = &self.streams {
+            pass.set_vertex_buffer(0, stb.slice(..));
+            pass.draw(0..(stb.size() / 20) as u32, 0..1);
         }
         if self.overlay_count > 0 {
             pass.set_pipeline(&self.overlay_pipe);
             pass.set_vertex_buffer(0, self.overlay.slice(..));
             pass.draw(0..self.overlay_count, 0..1);
         }
-        (dm, ds)
+        st
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -1435,14 +1896,15 @@ impl Renderer {
         if self.targets.as_ref().map(|t| (t.width, t.height)) != Some((w, h)) {
             self.targets = Some(self.make_targets(w, h));
         }
-        let v = self.write_globals(cam, hour, w as f32 / h as f32);
+        let v = self.write_globals(cam, hour, w as f32 / h as f32, self.shadow_budget);
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let draws = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, None);
+        let st = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, None);
         if let Some(ui) = ui {
             ui(&self.device, &self.queue, &mut enc, &view, (w, h));
         }
-        self.last_draws = draws;
+        self.last_draws = (st.draws_main, st.draws_shadow);
+        self.last_shadow_passes = st.shadow_passes;
         self.upload_frame = self.uploaded_bytes - self.upload_mark;
         self.upload_mark = self.uploaded_bytes;
         self.queue.submit([enc.finish()]);
@@ -1459,7 +1921,12 @@ impl Renderer {
 
     /// Como `capture`, con la interfaz pintada encima.
     pub fn capture_with(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, path: &str, ui: Option<UiHook>) -> Result<(), String> {
-        let v = self.write_globals(cam, hour, width as f32 / height as f32);
+        self.capture_image(cam, hour, width, height, ui).save(path).map_err(|e| format!("no se pudo guardar {path}: {e}"))
+    }
+
+    /// Dibuja la escena (y la interfaz, si hay) y devuelve la imagen.
+    pub fn capture_image(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, ui: Option<UiHook>) -> image::RgbImage {
+        let v = self.write_globals(cam, hour, width as f32 / height as f32, usize::MAX);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let targets = self.make_targets(width, height);
         let resolve = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -1501,7 +1968,7 @@ impl Renderer {
         }
         drop(data);
         out.unmap();
-        img.save(path).map_err(|e| format!("no se pudo guardar {path}: {e}"))
+        img
     }
 }
 
@@ -1550,5 +2017,35 @@ mod tests {
         let (clo, chi) = curved_box(eye, lo, hi);
         assert!(box_visible(&planes, clo, chi), "la caja curvada debería verse");
         assert!(clo.y < lo.y - 10.0);
+    }
+
+    /// Caché y límite de las cascadas: la primera vez hay que dibujar todas, pero la ventana
+    /// dibuja a lo sumo 2 por cuadro y las demás esperan (y piden otro cuadro); con la cámara
+    /// quieta no se rehace ninguna; moverse un poco no las mueve todas; la geometría nueva solo
+    /// ensucia las cascadas que la contienen. Necesita un adaptador (lavapipe sirve).
+    #[test]
+    fn las_cascadas_se_rehacen_solo_cuando_hace_falta() {
+        let Ok(r) = Renderer::new_msaa(1) else {
+            eprintln!("sin adaptador gráfico: prueba salteada");
+            return;
+        };
+        let mut cam = OrbitCamera { target: Vec3::new(13500.0, 20.0, 16300.0), yaw: 200.0, pitch: 35.0, distance: 200.0, fov_y: 50.0 };
+        let passes = |r: &Renderer, cam: &OrbitCamera, budget: usize| r.write_globals(cam, 10.5, 16.0 / 9.0, budget).cascades.len();
+        assert_eq!(passes(&r, &cam, 2), 2, "límite de 2 por cuadro");
+        assert!(r.casc.borrow().pending, "quedaron cascadas esperando: hace falta otro cuadro");
+        assert_eq!(passes(&r, &cam, 2), 2);
+        assert!(!r.casc.borrow().pending);
+        assert_eq!(passes(&r, &cam, 2), 0, "con la cámara quieta no se rehace nada");
+        // Un paso de 20 cm: a lo sumo alguna cascada cambia (histéresis).
+        cam.pan(0.2, 0.0);
+        assert!(passes(&r, &cam, usize::MAX) <= 1);
+        // Algo nuevo lejos de todo (a 20 km) no ensucia ninguna cascada; algo en el centro, sí.
+        r.shadow_dirty_box(Vec3::new(-20000.0, 0.0, -20000.0), Vec3::new(-19990.0, 10.0, -19990.0));
+        assert_eq!(passes(&r, &cam, usize::MAX), 0);
+        r.shadow_dirty_box(cam.target - Vec3::splat(2.0), cam.target + Vec3::splat(2.0));
+        assert!(passes(&r, &cam, usize::MAX) >= 1);
+        // Pedir rehacer todo ignora el límite.
+        r.invalidate_shadows();
+        assert_eq!(passes(&r, &cam, 2), ShadowQuality::DEFAULT.cascades as usize);
     }
 }
