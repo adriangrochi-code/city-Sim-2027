@@ -361,22 +361,16 @@ Un recorte mínimo para validar lo esencial de esta época:
 
 1. **¿Parcela inicial libre o fija?** ¿El jugador elige la parcela inicial entre varias de la
    costa, o cada mapa trae la península de inicio ya definida?
-2. ~~**Población indígena y esclavitud**~~ **Decidido: representación cuidadosa.** Las personas
-   africanas y afrodescendientes (esclavizadas, libertas y libres) y las indígenas existen como
-   personas con nombre, familia e historia; la desigualdad legal es una restricción sobre sus
-   vidas, nunca una mercancía (no se compran, venden ni alquilan personas, nadie tiene precio ni
-   dueño en el modelo, y el jugador no gana nada con la esclavitud); pueden obtener la libertad
-   (ahorro, familia, cofradía, armas, testamento, leyes), formar familia y ascender. La crónica
-   narra con respeto la trata, el Caserío de los Negros (1788), las cofradías y salas de nación,
-   la leva de 1816, Salsipuedes (1831) y los «colonos» (1832–1835). En el modo fiel, las leyes
-   llegan con sus fechas reales en Montevideo: la ley de la Florida (1825) no rige en la ciudad
-   ocupada; libertad de vientres desde enero de 1830 (Constitución, art. 131); abolición del
-   12 de diciembre de 1842 con leva de los varones aptos y patronato para los demás, hasta la
-   ley de 1853. Investigación, fuentes, auditoría y preguntas abiertas en
-   [sistemas/esclavitud-y-pueblos-originarios.md](../sistemas/esclavitud-y-pueblos-originarios.md);
-   implementación en [sistemas/poblacion.md](../sistemas/poblacion.md), sección 5. Pendiente de
-   decidir: cómo convive esto con la afirmación de arriba de que «todos los nombres y
-   acontecimientos son ficticios» (el modo fiel usa los reales).
+2. ~~**Población indígena y esclavitud**~~ **Decidido (17 de noviembre de 2026): el juego no
+   representa la esclavitud.** Reemplaza a la decisión anterior de "representación cuidadosa".
+   Todas las personas son libres: no hay condición legal, personas sujetas a otro hogar,
+   caminos de liberación, patronato, leyes u ordenanzas sobre el tema, llegadas forzadas ni
+   hechos de la crónica sobre la trata. Las personas africanas y afrodescendientes existen como
+   vecinas y vecinos libres (llegan con su familia, sus bienes y su oficio) y las indígenas
+   también (las cuadrillas guaraníes de la obra del fuerte y pocas familias después), sin
+   ninguna mecánica coercitiva. Detalle en [sistemas/poblacion.md](../sistemas/poblacion.md),
+   sección 5, y la nota de
+   [sistemas/esclavitud-y-pueblos-originarios.md](../sistemas/esclavitud-y-pueblos-originarios.md).
 3. **¿Cuánto control rural?** ¿El jugador zonifica chacras y estancias, o el campo crece solo
    según la demanda del puerto?
 4. **El fuerte y la ciudadela sin guerras**: ¿su papel es solo administrativo y de prestigio, o

@@ -46,9 +46,9 @@ Se cuentan desde la población cada mes (`City::desarrollo_tras_poblacion`):
 
 Formarse cambia a la persona: pasa a ser artesana (o marinero, el piloto), con «aprendió» en su
 historia de vida, y cobra el salario del oficio: la educación se vuelve ingreso del hogar. Si no
-hay jóvenes que lean, las plazas quedan vacías (el panel lo avisa). Las personas esclavizadas no
-eligen escuela ni patrón (restricción de la época del modelo de población), así que no se forman
-ni se contratan en estos establecimientos.
+hay jóvenes que lean, las plazas quedan vacías (el panel lo avisa). Cualquier joven de la
+ciudad puede formarse y cualquier persona puede trabajar en estos establecimientos (el juego no
+representa la esclavitud, ver [poblacion.md](poblacion.md), sección 5).
 
 ## 2. Tecnologías
 
@@ -115,7 +115,7 @@ venden en la ciudad.
   hogar si es de una familia (desigualdad), o se va de la ciudad si es de un comerciante de
   afuera («remesas»).
 
-Los **peones** son personas de la población: libres o libertas, de 15 a 60 años, sin trabajo y sin
+Los **peones** son personas de la población: de 15 a 60 años, sin trabajo y sin
 oficio o peones. El establecimiento completa su jornal (el modelo de población ya les paga el
 75 % de su oficio por cuenta propia). Si consiguen trabajo en un solar, dejan el establecimiento.
 

@@ -428,7 +428,8 @@ fn barrio_con_curtiembre(t: &TerrainGen) -> (City, u32, u32) {
     let plaza = city.plaza.unwrap().0;
     let lejos = *casas.iter().max_by(|a, b| city.lots.lots[a].c.distance(plaza).total_cmp(&city.lots.lots[b].c.distance(plaza)).then(a.cmp(b))).unwrap();
     let pos = city.lots.lots[&lejos].c;
-    let vecina = *casas.iter().filter(|&&id| id != lejos).min_by(|a, b| city.lots.lots[a].c.distance(pos).total_cmp(&city.lots.lots[b].c.distance(pos)).then(a.cmp(b))).unwrap();
+    // La vecina: la casa edificada más cercana.
+    let vecina = *casas.iter().filter(|&&id| id != lejos && city.lots.lots[&id].level > 0).min_by(|a, b| city.lots.lots[a].c.distance(pos).total_cmp(&city.lots.lots[b].c.distance(pos)).then(a.cmp(b))).unwrap();
     {
         let l = city.lots.lots.get_mut(&lejos).unwrap();
         l.zone = zone_code(ZoneKind::Industrial, Density::Media);

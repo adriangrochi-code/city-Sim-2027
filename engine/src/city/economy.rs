@@ -174,16 +174,6 @@ pub enum Ordinance {
     HospitalCaridad,
     EscuelasPrimerasLetras,
     PrestamosCabildo,
-    FondoManumision,
-    LibertadVientres,
-    Abolicion,
-}
-
-impl Ordinance {
-    /// Las leyes de libertad no se derogan.
-    pub fn irrevocable(self) -> bool {
-        matches!(self, Ordinance::LibertadVientres | Ordinance::Abolicion)
-    }
 }
 
 pub struct OrdInfo {
@@ -215,9 +205,6 @@ pub const ORDINANCES: &[OrdInfo] = &[
     OrdInfo { id: Ordinance::HospitalCaridad, name: "Hospital de caridad y asistencia a pobres", desc: "El cabildo paga la cama, el médico y la botica de pobres y modestos: con hospital, médico o botica cerca, se atienden como los demás. 20 pesos más 30 por cada 1.000 habitantes.", opinion: [6, 0, 0], monthly: 20 },
     OrdInfo { id: Ordinance::EscuelasPrimerasLetras, name: "Escuelas de primeras letras", desc: "El cabildo paga al maestro y los niños pobres van gratis a la escuela de su barrio: más lectura, oficios letrados y movilidad. Hacen falta escuelas. 15 pesos más un cuarto por niño.", opinion: [5, 2, 0], monthly: 15 },
     OrdInfo { id: Ordinance::PrestamosCabildo, name: "Préstamos del cabildo", desc: "El cabildo presta barato a pobres y modestos en los meses malos; pierde parte de lo prestado.", opinion: [6, -4, 0], monthly: 10 },
-    OrdInfo { id: Ordinance::FondoManumision, name: "Fondo de manumisión", desc: "El cabildo completa la suma de la carta de libertad a quienes ya juntaron buena parte. No existió en el Montevideo colonial (allí ayudaban las familias y las cofradías): es un camino posible. 40 pesos por mes.", opinion: [3, -2, -8], monthly: 40 },
-    OrdInfo { id: Ordinance::LibertadVientres, name: "Libertad de vientres", desc: "Quien nace en la ciudad nace libre y se prohíbe el tráfico de personas (en la historia: ley de la Florida de 1825, vigente en Montevideo desde 1830). No se puede derogar.", opinion: [4, -4, -8], monthly: 0 },
-    OrdInfo { id: Ordinance::Abolicion, name: "Abolición de la esclavitud", desc: "Todas las personas esclavizadas recuperan la libertad, sin leva ni patronato (en la historia: 1842, con leva de los varones y patronato para los demás). No se puede derogar.", opinion: [5, -5, -12], monthly: 0 },
 ];
 
 pub fn ord_info(o: Ordinance) -> &'static OrdInfo {
@@ -406,9 +393,6 @@ impl Economy {
     pub fn toggle(&mut self, o: Ordinance, money: &mut i64) -> Result<String, String> {
         if *money < TOGGLE_COST {
             return Err(format!("Cambiar una ordenanza cuesta {TOGGLE_COST} pesos"));
-        }
-        if o.irrevocable() && self.is_on(o) {
-            return Err("Esa ley no se deroga: la libertad no tiene vuelta atrás".into());
         }
         *money -= TOGGLE_COST;
         let name = ord_info(o).name.to_lowercase();

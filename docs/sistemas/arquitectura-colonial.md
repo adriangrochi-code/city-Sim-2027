@@ -98,8 +98,7 @@ Todo en vóxeles de diseño de 0,5 m. Los pesos son los de la guía (§6) salvo 
 
 El estilo también depende del origen del hogar que levanta la casa (el hogar principal del
 solar, el de más clase e ingresos; si todavía no vive nadie, un origen sorteado con el peso de
-cada origen en las llegadas de la época, más los nacidos en la ciudad, sin contar las llegadas
-forzadas por la trata). No son tipologías aparte sino **ajustes de pesos** sobre la variante,
+cada origen en las llegadas de la época, más los nacidos en la ciudad). No son tipologías aparte sino **ajustes de pesos** sobre la variante,
 guardados como datos en `structures::estilo::RASGOS` para extenderlos a las épocas siguientes
 (cada fila tiene `desde` y `hasta`).
 
@@ -113,7 +112,7 @@ guardados como datos en `structures::estilo::RASGOS` para extenderlos a las épo
 | Lusa | Portugal, Brasil | Azotea ×0,45 (prefieren teja); alero de 1 m (80 %); colores fuertes (ocre, almagre, rosado, celeste) | F: casas de piedra portuguesas con techo a dos y cuatro aguas frente a las españolas de ladrillo y azotea en Colonia del Sacramento (guía §4.1). E: alero y colores. Los azulejos de fachada son del siglo XIX: quedan para la época siguiente |
 | Guaraní | Pueblos de las misiones | Galería al frente o enramada +50 % | E: los corredores son propios de las casas de los pueblos de misiones; no verificado en Montevideo |
 | Italiana | Italia | Molduras, cornisas, balaustradas y colores "pompeyanos" — **solo desde 1830** | E. En la colonia casi no hubo italianos: antes de 1830 no se aplica (la casa es la de la época) |
-| Sin rasgos | África (las tres regiones de la trata), pueblos de la región, Francia, islas británicas y los orígenes de épocas posteriores | Ninguno | No se encontraron rasgos documentados para la ciudad colonial. Las personas africanas y afrodescendientes vivían en general en las casas de sus dueños, en ranchos o en cuartos (guía §5.2): no se inventa un estilo |
+| Sin rasgos | África (Congo y Angola, Costa da Mina, Mozambique), pueblos de la región, Francia, islas británicas y los orígenes de épocas posteriores | Ninguno | No se encontraron rasgos documentados para la ciudad colonial: no se inventa un estilo |
 
 La ficha del solar muestra el tipo de casa y el año, y una línea con el origen cuando hay
 rasgos: «Casa de azotea con zaguán, dos patios y aljibe, levantada en 1805» y «Casa de familia

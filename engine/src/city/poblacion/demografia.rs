@@ -123,9 +123,6 @@ impl Poblacion {
                 f *= 1.0 - 0.3 * sv.salud * acceso;
                 f *= 1.0 + sv.insalubre * if edad < 5 { 1.3 } else { 0.35 };
             }
-            if p.condicion == Condicion::Esclavizada {
-                f *= 1.3;
-            }
             if ent.epidemia {
                 f *= if edad < 5 || edad > 60 { 2.2 } else { 1.6 };
             }
@@ -207,8 +204,6 @@ impl Poblacion {
                 self.hogares[h as usize].ahorro += r;
                 if self.hogares[h as usize].jefe == id {
                     self.heredar(id, h, noticias);
-                } else if self.hogares[h as usize].miembros.iter().all(|&m| self.personas[m as usize].sujeta()) {
-                    self.heredar(id, h, noticias);
                 }
             }
         }
@@ -277,7 +272,7 @@ impl Poblacion {
     /// quinto de libre disposición se deja en misas y obras pías si el difunto era devoto (o
     /// se suma a la legítima). Los herederos que viven en otra casa cobran en efectivo (lo que
     /// falta se vuelve deuda: de ahí los pleitos); los que viven en la casa, conservan su parte
-    /// en ella. Si no queda nadie libre en la casa, el hogar se disuelve y todo se reparte:
+    /// en ella. Si no queda nadie en la casa, el hogar se disuelve y todo se reparte:
     /// solares, ganado y dinero. La riqueza se conserva exactamente (prueba
     /// `la_herencia_conserva_la_riqueza`).
     pub(crate) fn heredar(&mut self, id: PersonaId, h: HogarId, noticias: &mut Vec<String>) {
@@ -285,23 +280,12 @@ impl Poblacion {
         let devoto = self.personas[id as usize].rasgos.devocion() > 0.55;
         let conyuge = self.personas[id as usize].conyuge.filter(|&c| self.personas[c as usize].viva() && self.personas[c as usize].hogar == Some(h));
         let herederos = self.herederos(id);
-        // Libertad por testamento de quienes vivían sometidos en la casa.
-        let sometidas: Vec<PersonaId> = self.hogares[h as usize].miembros.iter().copied().filter(|&m| self.personas[m as usize].condicion == Condicion::Esclavizada).collect();
-        let p_testamento = 0.02 + 0.1 * self.personas[id as usize].rasgos.devocion();
-        let mut rng = Rng::from_state(self.azar ^ 0x5eed ^ id as u64);
-        for &s in &sometidas {
-            if rng.f() < p_testamento {
-                self.liberar(s, ViaLibertad::Testamento, noticias);
-            }
-        }
-        // Quienes quedan libres en la casa (contando a quienes se acaba de liberar y siguen en
-        // ella, como los niños; no quienes están bajo patronato).
-        let libres: Vec<PersonaId> = self.hogares[h as usize].miembros.iter().copied().filter(|&m| !self.personas[m as usize].sujeta()).collect();
-        let patrocinadas: Vec<PersonaId> = self.hogares[h as usize].miembros.iter().copied().filter(|&m| self.personas[m as usize].patronato.is_some()).collect();
-        let continua = !libres.is_empty();
+        // Quienes quedan en la casa.
+        let quedan: Vec<PersonaId> = self.hogares[h as usize].miembros.clone();
+        let continua = !quedan.is_empty();
         if continua {
             // La casa sigue: nuevo jefe y la parte de los herederos de afuera.
-            let nuevo = conyuge.unwrap_or_else(|| *libres.iter().max_by_key(|&&m| (self.personas[m as usize].edad(mes), std::cmp::Reverse(m))).unwrap());
+            let nuevo = conyuge.unwrap_or_else(|| *quedan.iter().max_by_key(|&&m| (self.personas[m as usize].edad(mes), std::cmp::Reverse(m))).unwrap());
             self.hogares[h as usize].jefe = nuevo;
             let pat = self.hogares[h as usize].ahorro - self.hogares[h as usize].deuda;
             // Se reparte el efectivo neto y el ganado (la casa queda en la familia, que compensa
@@ -342,7 +326,7 @@ impl Poblacion {
             }
             return;
         }
-        // Nadie libre en la casa: se disuelve y se reparte todo.
+        // No queda nadie en la casa: se disuelve y se reparte todo.
         let destinos: Vec<HogarId> = herederos.iter().filter_map(|&x| self.personas[x as usize].hogar).filter(|&hx| hx != h && self.hogares[hx as usize].activo).collect();
         let hg = std::mem::replace(&mut self.hogares[h as usize].solares, Vec::new());
         let ganado = std::mem::take(&mut self.hogares[h as usize].ganado);
@@ -357,20 +341,6 @@ impl Poblacion {
                 self.legados_solar(l);
             }
             self.legados += (neto + ganado as f32 * economia::PRECIO_GANADO) as f64;
-            for s in sometidas {
-                // Sin herederos, quedan libres.
-                self.liberar(s, ViaLibertad::SinHerederos, noticias);
-            }
-            for s in patrocinadas {
-                // Sin herederos, el patronato se termina.
-                self.terminar_patronato(s);
-            }
-            // Los niños liberados siguen juntos en la casa, sin bienes.
-            if let Some(&mayor) = self.hogares[h as usize].miembros.iter().max_by_key(|&&m| (self.personas[m as usize].edad(mes), std::cmp::Reverse(m))) {
-                let hg = &mut self.hogares[h as usize];
-                hg.activo = true;
-                hg.jefe = mayor;
-            }
             return;
         }
         let n = destinos.len();
@@ -393,21 +363,6 @@ impl Poblacion {
         for &x in &herederos {
             self.personas[x as usize].evento(mes, TipoEvento::Heredo((neto / n as f32).max(0.0) as u32), id);
         }
-        // Quienes seguían bajo patronato pasan con los herederos (el patronato se traspasaba).
-        for s in patrocinadas {
-            if self.personas[s as usize].patronato.is_some() {
-                self.unir_a_hogar(s, destinos[0]);
-            }
-        }
-        // Quienes seguían sometidas pasan a la casa de los herederos: la injusticia sigue.
-        for s in sometidas {
-            if self.personas[s as usize].condicion == Condicion::Esclavizada {
-                let d = destinos[0];
-                self.unir_a_hogar(s, d);
-                let t = format!("Tras la muerte de {}, {} sigue sin libertad y pasa a vivir con la familia {}", self.nombre_completo(id), self.nombre_completo(s), self.apellido_hogar(d));
-                self.anotar(mes, t);
-            }
-        }
     }
 
     /// El valor de un solar que vuelve al cabildo sale del patrimonio de las familias.
@@ -420,7 +375,6 @@ impl Poblacion {
 
     pub(crate) fn nacimientos(&mut self, rng: &mut Rng, ent: &Entorno) {
         let mes = ent.mes;
-        let vientres = self.leyes.vientres.is_some() || self.leyes.abolicion.is_some();
         let madres: Vec<PersonaId> = self
             .idx
             .vivos
@@ -447,13 +401,8 @@ impl Poblacion {
             let ap_p = self.personas[padre as usize].apellidos[0];
             let ap_m = p.apellidos[0];
             let apellidos = if ap_p != NADIE { [ap_p, ap_m] } else { [ap_m, NADIE] };
-            let esclava = p.condicion == Condicion::Esclavizada;
-            let condicion = if esclava && !vientres { Condicion::Esclavizada } else { Condicion::Libre };
             let hogar = p.hogar;
-            let c = self.crear_persona(rng, sexo, mes, Origen::Montevideo, condicion, apellidos, Some(padre), Some(m));
-            if esclava && vientres {
-                self.personas[c as usize].evento(mes, TipoEvento::Libertad(ViaLibertad::Vientres), NADIE);
-            }
+            let c = self.crear_persona(rng, sexo, mes, Origen::Montevideo, apellidos, Some(padre), Some(m));
             self.personas[m as usize].hijos.push(c);
             self.personas[padre as usize].hijos.push(c);
             self.personas[m as usize].evento(mes, TipoEvento::NacioHijo, c);
@@ -495,12 +444,6 @@ impl Poblacion {
             0 => 1.8,
             1 => 1.0,
             _ => 0.35,
-        };
-        let esc = |p: &Persona| p.condicion == Condicion::Esclavizada;
-        s *= match (esc(mujer), esc(hombre)) {
-            (true, true) => 1.5,
-            (false, false) => 1.0,
-            _ => 0.15,
         };
         if hombre.oficio != Oficio::Ninguno {
             s *= 1.5;
@@ -563,27 +506,16 @@ impl Poblacion {
     fn formar_pareja(&mut self, rng: &mut Rng, mujer: PersonaId, hombre: PersonaId, mes: i32, noticias: &mut Vec<String>) {
         let clase = |s: &Self, p: PersonaId| s.personas[p as usize].hogar.map_or(Clase::Pobre, |h| s.hogares[h as usize].clase);
         let cl = clase(self, hombre).max(clase(self, mujer));
-        let alguna_esclava = !self.personas[mujer as usize].libre() || !self.personas[hombre as usize].libre();
-        let alguna_sujeta = self.personas[mujer as usize].sujeta() || self.personas[hombre as usize].sujeta();
-        let p_formal = if alguna_esclava {
-            0.5
-        } else {
-            match cl {
-                Clase::Principal | Clase::Acomodada => 0.97,
-                Clase::Modesta => 0.8,
-                Clase::Pobre => 0.6,
-            }
+        let p_formal = match cl {
+            Clase::Principal | Clase::Acomodada => 0.97,
+            Clase::Modesta => 0.8,
+            Clase::Pobre => 0.6,
         };
         let formal = rng.f() < p_formal;
         self.casar(mujer, hombre, formal, mes);
         self.mes_actual.casamientos += 1;
         let hm = self.personas[mujer as usize].hogar;
         let hh = self.personas[hombre as usize].hogar;
-        // Las personas esclavizadas o bajo patronato no pueden mudarse por su cuenta: la pareja
-        // vive separada hasta que las dos sean libres (salvo que vivan en la misma casa).
-        if alguna_sujeta {
-            return;
-        }
         let jefe_de = |s: &Self, p: PersonaId, h: Option<HogarId>| h.filter(|&h| s.hogares[h as usize].jefe == p && !Self::colectivo(&s.hogares[h as usize]));
         let destino = match (jefe_de(self, hombre, hh), jefe_de(self, mujer, hm)) {
             (Some(a), Some(b)) => {
@@ -630,7 +562,7 @@ impl Poblacion {
             // Los hijos chicos de una viuda van con ella.
             for c in self.personas[mujer as usize].hijos.clone() {
                 let cp = &self.personas[c as usize];
-                if cp.viva() && cp.edad(mes) < 14 && cp.hogar == Some(a) && cp.libre() {
+                if cp.viva() && cp.edad(mes) < 14 && cp.hogar == Some(a) {
                     self.unir_a_hogar(c, destino);
                 }
             }
@@ -664,7 +596,6 @@ impl Poblacion {
             });
             let sv = ent.servicios_hogar(hogar.map(|h| &self.hogares[h as usize]));
             let padre_oficio = self.personas[id as usize].padre.map(|f| self.personas[f as usize].oficio);
-            let afro_colonial = edad == 15 && cumple && self.epoca == Epoca::Colonial && self.personas[id as usize].oficio == Oficio::Ninguno && self.afrodescendiente(id);
             let p = &mut self.personas[id as usize];
             p.duelo = p.duelo.saturating_sub(1);
             // Salud: tiende a un valor según la edad, la comida y la casa.
@@ -683,9 +614,6 @@ impl Poblacion {
                 meta += 0.08 * sv.salud * acceso - 0.15 * sv.insalubre;
             } else if hospital && clase <= Clase::Modesta {
                 meta += 0.05;
-            }
-            if p.condicion == Condicion::Esclavizada {
-                meta -= 0.08;
             }
             p.salud = (p.salud + (meta.clamp(0.1, 1.0) - p.salud) * 0.08).clamp(0.05, 1.0);
             if !cumple {
@@ -714,10 +642,6 @@ impl Poblacion {
                 if tardia {
                     chance += 0.3;
                 }
-                if p.sujeta() {
-                    // Restricción de la época: casi sin acceso a la escuela.
-                    chance = if escuelas && (!ent.con_servicios || sv.escuela > 0.0) { 0.04 } else { 0.0 };
-                }
                 if rng.f() < chance {
                     p.educacion += 1;
                     p.evento(mes, TipoEvento::Aprendio, NADIE);
@@ -728,12 +652,12 @@ impl Poblacion {
                 if p.sexo == Sexo::Mujer && rng.f() > 0.4 {
                     continue;
                 }
-                let of = elegir_oficio(rng, p, padre_oficio, clase, tardia, afro_colonial);
+                let of = elegir_oficio(rng, p, padre_oficio, clase, tardia);
                 p.oficio = of;
                 p.evento(mes, TipoEvento::Oficio(of), NADIE);
             }
             // Movilidad: un adulto ambicioso que sabe leer puede cambiar de oficio.
-            if (20..45).contains(&edad) && !p.sujeta() && p.educacion >= 2 && matches!(p.oficio, Oficio::Peon | Oficio::Servicio | Oficio::Artesano | Oficio::Marinero) && rng.f() < 0.03 * p.rasgos.ambicion() {
+            if (20..45).contains(&edad) && p.educacion >= 2 && matches!(p.oficio, Oficio::Peon | Oficio::Servicio | Oficio::Artesano | Oficio::Marinero) && rng.f() < 0.03 * p.rasgos.ambicion() {
                 let of = if rng.f() < 0.6 { Oficio::Pulpero } else if tardia { Oficio::Empleado } else { Oficio::Comerciante };
                 p.oficio = of;
                 p.trabajo = None;
@@ -784,9 +708,6 @@ impl Poblacion {
                     // Sin casa en la ciudad: los de oficios del campo se van a las chacras y
                     // estancias de la campaña (siguen siendo vecinos de la jurisdicción); los
                     // demás, después de un tiempo, se van.
-                    if hg.miembros.iter().any(|&m| self.personas[m as usize].sujeta()) {
-                        continue;
-                    }
                     let campo = matches!(self.personas[hg.jefe as usize].oficio, Oficio::Labrador | Oficio::Hacendado | Oficio::Peon);
                     if campo && rng.f() < 0.06 {
                         al_campo.push(hg.id);
@@ -800,10 +721,7 @@ impl Poblacion {
                     }
                 }
                 _ => {
-                    // Emigran hogares libres descontentos (los que tienen bienes, menos).
-                    if hg.miembros.iter().any(|&m| self.personas[m as usize].sujeta()) {
-                        continue;
-                    }
+                    // Emigran hogares descontentos (los que tienen bienes, menos).
                     let fel = hg.miembros.iter().map(|&m| self.personas[m as usize].felicidad).sum::<f32>() / hg.miembros.len() as f32;
                     let jefe = &self.personas[hg.jefe as usize];
                     let mut p = 0.0006 + (0.4 - fel).max(0.0) * 0.03 * (1.3 - jefe.rasgos.prudencia());
@@ -825,8 +743,8 @@ impl Poblacion {
             if self.personas[m as usize].oficio == Oficio::Soldado && rng.f() < 0.5 {
                 self.personas[m as usize].oficio = Oficio::Labrador;
             }
-            // Si está en pareja, la pareja (libre) se suma a su casa.
-            if let Some(c) = self.personas[m as usize].conyuge.filter(|&c| self.personas[c as usize].viva() && self.personas[c as usize].libre()) {
+            // Si está en pareja, la pareja se suma a su casa.
+            if let Some(c) = self.personas[m as usize].conyuge.filter(|&c| self.personas[c as usize].viva()) {
                 let hm = self.personas[m as usize].hogar.unwrap();
                 let hc = self.personas[c as usize].hogar;
                 if hc.is_none_or(|x| self.hogares[x as usize].jefe != c) {
@@ -874,7 +792,7 @@ impl Poblacion {
                 let o = [Origen::Andalucia, Origen::Galicia, Origen::BuenosAires, Origen::Cantabrico][rng.range(0, 3) as usize];
                 let ap = [self.apellido_al_azar(rng, o.cultura()), self.apellido_al_azar(rng, o.cultura())];
                 let edad = 18 + rng.range(0, 14);
-                let p = self.crear_persona(rng, Sexo::Hombre, mes - edad * 12, o, Condicion::Libre, ap, None, None);
+                let p = self.crear_persona(rng, Sexo::Hombre, mes - edad * 12, o, ap, None, None);
                 let pp = &mut self.personas[p as usize];
                 pp.oficio = Oficio::Soldado;
                 pp.estamento = Estamento::Militar;
@@ -911,7 +829,7 @@ impl Poblacion {
             }
             let id = self.idx.vivos[i];
             let p = &self.personas[id as usize];
-            let solo = p.hogar.is_some_and(|h| self.hogares[h as usize].miembros.len() == 1) && p.hijos.is_empty() && p.padre.is_none() && !p.sujeta();
+            let solo = p.hogar.is_some_and(|h| self.hogares[h as usize].miembros.len() == 1) && p.hijos.is_empty() && p.padre.is_none();
             if !solo {
                 continue;
             }
@@ -949,26 +867,7 @@ impl Poblacion {
 
 /// Oficio al llegar a los 15: casi siempre el del padre o uno parecido; la escuela y la
 /// ambición abren otros caminos (la movilidad social).
-///
-/// Restricciones de la época para las personas afrodescendientes libres (`afro_colonial`): la
-/// "limpieza de sangre" les cerraba el clero, las escribanías y los oficios reales; las
-/// compañías de pardos y morenos (desde 1760) eran, en cambio, un camino de ascenso.
-fn elegir_oficio(rng: &mut Rng, p: &Persona, padre: Option<Oficio>, clase: Clase, tardia: bool, afro_colonial: bool) -> Oficio {
-    if p.sujeta() {
-        return if p.sexo == Sexo::Mujer || rng.f() < 0.4 { Oficio::Servicio } else if rng.f() < 0.5 { Oficio::Peon } else { Oficio::Artesano };
-    }
-    let of = elegir_oficio_libre(rng, p, padre, clase, tardia, afro_colonial);
-    if afro_colonial && matches!(of, Oficio::Clerigo | Oficio::Funcionario) {
-        return if p.educacion >= 2 && rng.f() < 0.3 { Oficio::Maestro } else { Oficio::Artesano };
-    }
-    of
-}
-
-fn elegir_oficio_libre(rng: &mut Rng, p: &Persona, padre: Option<Oficio>, clase: Clase, tardia: bool, afro_colonial: bool) -> Oficio {
-    if afro_colonial && p.sexo == Sexo::Hombre && rng.f() < 0.12 {
-        // Las milicias de pardos y morenos.
-        return Oficio::Soldado;
-    }
+fn elegir_oficio(rng: &mut Rng, p: &Persona, padre: Option<Oficio>, clase: Clase, tardia: bool) -> Oficio {
     if p.sexo == Sexo::Mujer {
         return match rng.range(0, 9) {
             0..=3 => Oficio::Servicio,

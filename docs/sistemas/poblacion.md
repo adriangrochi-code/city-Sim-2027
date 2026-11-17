@@ -7,7 +7,7 @@
 ## 1. Qué hace
 
 Cada habitante es una **persona** con nombre, apellidos, sexo, fecha de nacimiento, padres,
-cónyuge, hijos, hogar, lugar de nacimiento, condición legal, estamento, oficio, educación,
+cónyuge, hijos, hogar, lugar de nacimiento, estamento, oficio, educación,
 salud, riqueza propia, personalidad, felicidad y una **historia de vida**. Las personas viven
 en **hogares** con su propia economía (ingresos, gastos, ahorro, deuda, solares, ganado). Mes a
 mes nacen, mueren, se casan, heredan, aprenden a leer, eligen oficio, trabajan, se mudan,
@@ -36,7 +36,7 @@ La población se conecta con la ciudad por dos estructuras planas (`Entorno` e `
 - `Evento`: mes, tipo y persona relacionada (12 bytes); el texto se arma al mostrarlo.
 - Personalidad (`Rasgos`, 5 bytes): **laboriosidad, ambición, devoción, sociabilidad y
   prudencia**. Pesan en el trabajo (productividad), el ahorro, la compra de solares y mejoras,
-  los casamientos, la emigración, los legados piadosos y las libertades por testamento, y en
+  los casamientos, la emigración y los legados piadosos, y en
   cuánto le importa a cada uno cada causa de felicidad.
 - Índices derivados (no se guardan): personas vivas, hogares por solar, trabajadores por solar
   (índices compactos en tres vectores, búsqueda binaria).
@@ -47,29 +47,28 @@ La población se conecta con la ciudad por dos estructuras planas (`Entorno` e `
 ## 3. Demografía (mensual)
 
 - **Muertes**: probabilidad anual por edad (`q_anual`) × salud × clase (pobres ×1,25,
-  principales ×0,75) × sin casa × hambre × condición (esclavizadas ×1,3) × epidemia; el
+  principales ×0,75) × sin casa × hambre × epidemia; el
   hospital de caridad baja la de pobres y modestos.
 - **Nacimientos**: mujeres en pareja de 15 a 49 años, fecundidad por edad (`fecundidad`) ×
   salud × felicidad; al menos 15 meses entre partos; mortalidad materna ~1 %.
 - **Casamientos y uniones**: las solteras y viudas se casan según la edad
   (`nupcialidad`); se elige entre 16 candidatos con puntaje: diferencia de edad cercana a 8
   años, mismo grupo de origen (×2), misma raíz (×1,5), misma clase (×1,8; dos clases de
-  distancia ×0,35), condición legal, oficio y casa. La **mezcla es posible** (solo pesa
+  distancia ×0,35), oficio y casa. La **mezcla es posible** (solo pesa
   menos). Las uniones pueden ser casamiento en la iglesia o **unión consensual** (más
   frecuentes en los sectores populares). Dote: 8–20 % del ahorro de la familia de la novia.
 - **Hogares**: los recién casados arman casa (y buscan solar) salvo que el novio ya sea jefe;
-  dos jefes juntan sus casas. Las personas esclavizadas no pueden mudarse: la pareja vive
-  separada hasta que las dos sean libres.
+  dos jefes juntan sus casas.
 - **Herencia** (derecho castellano): la mitad de los gananciales es del cónyuge que sigue al
   frente de la casa; de la otra mitad, **cuatro quintos son la legítima** de los hijos por
   partes iguales y **el quinto de libre disposición** va a misas y obras pías si el difunto era
   devoto. Los herederos que viven en otra casa cobran en efectivo (lo que falta es deuda: de
-  ahí los **pleitos** que cuenta la crónica). Sin nadie libre en la casa, el hogar se
+  ahí los **pleitos** que cuenta la crónica). Si no queda nadie en la casa, el hogar se
   disuelve y todo se reparte (solares, ganado, dinero); sin herederos, los solares vuelven al
   cabildo. **La riqueza se conserva exactamente** (prueba `la_herencia_conserva_la_riqueza`).
 - **Migraciones**: la guarnición rota y se completa; las cuadrillas guaraníes de la obra
-  vuelven a sus pueblos (algunos se quedan como vecinos); los hogares libres descontentos se
-  van (menos si tienen bienes).
+  vuelven a sus pueblos (algunos se quedan como vecinos); los hogares descontentos se van
+  (menos si tienen bienes).
 - **Crecer**: escuela de primeras letras (6–12 años) según la clase y las escuelas del cabildo;
   oficio a los 15 (el del padre o, si sabe leer y es ambicioso, uno letrado: comercio,
   escribanía, magisterio); a lo largo de la vida, un peón o artesano que sabe leer puede pasar
@@ -98,26 +97,33 @@ Montos en pesos de plata por mes (estimaciones de orden de magnitud, ver §8):
 - **Clase**: pobre, modesta, acomodada o principal según patrimonio e ingreso por adulto.
   **Estamento**: vecino (jefe con casa propia poblada), morador, militar, clero.
 
-## 5. Representación cuidadosa de la esclavitud y de los pueblos indígenas (decisión tomada)
+## 5. Decisión: el juego no representa la esclavitud
 
-**Decisión del usuario**: las personas africanas y afrodescendientes (esclavizadas y libres) y
-las indígenas (guaraníes de las misiones, minuanes y charrúas) existen en la simulación como
-**personas con nombre, familia e historia**. La desigualdad legal de la época es una
-**restricción** sobre sus vidas, **nunca una mercancía**.
+**Decisión del usuario (17 de noviembre de 2026)**: para evitar problemas, el juego **no
+representa la esclavitud**. Reemplaza a la decisión anterior de "representación cuidadosa".
 
-Cómo está implementado:
-
-| Principio | Implementación |
-|---|---|
-| Ninguna persona tiene precio | `Persona` no tiene campos de precio, valor ni dueño (la prueba `no_hay_forma_de_comerciar_personas` lo verifica en el código fuente). El patrimonio de los hogares no incluye personas |
-| No hay comercio de personas | No existe ninguna función para comprar, vender, subastar ni transferir personas, ni ninguna ordenanza o tarjeta de la interfaz que lo haga. Las llegadas por la trata son un **flujo del mundo** que el juego narra: no lo decide el jugador, nadie paga ni cobra en el modelo (la prueba verifica que la riqueza no cambia) |
-| La esclavitud es una restricción | Condición legal `Esclavizada`: no puede tener solares, no elige patrón (trabaja donde lo manda el hogar), no se muda por su cuenta; su trabajo suma al ingreso del hogar donde vive; casi sin acceso a la escuela; más mortalidad. Pesa como ninguna otra causa en su felicidad ("vive sin libertad") |
-| El patronato también | `Persona::patronato` (mes en que vence): libre por ley pero obligada a servir en la casa donde vive (colonos de 1832–1835, ley de 1837, abolición de 1842, prisioneros de 1831). Las mismas restricciones de trabajo, casa y escuela (`Persona::sujeta()`); vence sola o con la ley de 1853 ("vive bajo patronato") |
-| Son personas | Nombre cristiano impuesto, como en los registros, y su "nación" ("Rosa, de nación Benguela": Congo, Angola, Benguela, Mina, Calabarí, Mozambique); llegan sin apellido y lo toman al ser libres, muchas veces el de la casa donde vivieron (sus hijos también). Forman pareja, tienen hijos, ahorran un **peculio** (también con su trabajo de los domingos y días de fiesta), tienen oficio, personalidad e historia |
-| Caminos a la libertad | **Ahorro** (carta de libertad: la suma exigida sale del peculio y no la cobra ningún hogar del modelo), **familia** (el hogar libre del cónyuge pone lo que falta: primero la esposa y madre), **colecta** de la cofradía o la sala de nación, **carta otorgada** en vida por quien la sometía, **testamento**, muerte **sin herederos**, **las armas** (leva de 1816 y de 1842; milicias de pardos y morenos), **fondo de manumisión** del cabildo (política sin antecedente histórico), **libertad de vientres** y **abolición**. Al ser libre: toma apellido, arma su hogar o se reúne con su familia y busca casa y trabajo; puede ascender (en la colonia, la "limpieza de sangre" le cierra el clero y las escribanías) |
-| Las leyes históricas | En el modo fiel a la historia: la ley de la Florida (7 de setiembre de **1825**) se cuenta pero **no rige en Montevideo**, ocupada por el Brasil; la libertad de vientres y la prohibición del tráfico rigen desde el **20 de enero de 1830** (Constitución de julio de 1830, art. 131); abolición del Gobierno de la Defensa el **12 de diciembre de 1842**, con leva de los varones aptos y patronato para los demás; la del Cerrito (28 de octubre de **1846**) rige fuera de la ciudad; fin del patronato en **1853**. El jugador puede adelantar las leyes por ordenanza (abolición plena, sin leva ni patronato); **no se pueden derogar**. En la historia alternativa llegan con la época de la Ciudad Nueva. Detalle y fuentes en [esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md) |
-| La crónica narra con respeto | Sin insultos ni caricaturas: "Llegan en un barco 12 personas del Congo y Angola traídas por la trata, arrancadas de sus pueblos y sometidas a la esclavitud"; "Rosa, de nación Benguela, lavandera, obtiene su carta de libertad con lo que ahorró durante 23 años"; "Tras la muerte de X, Y sigue sin libertad y pasa a vivir con la familia Z"; las cofradías, las salas de nación y el Día de Reyes; el Caserío de los Negros (1788); Salsipuedes (1831) |
-| Indígenas | Las cuadrillas guaraníes de las misiones (libres) trabajan en la obra del fuerte en la fundación; la mayoría vuelve a sus pueblos y algunos se quedan como vecinos (las condiciones de su trabajo no están verificadas). Después, pocas llegadas guaraníes, minuanes y charrúas (< 2 % de la población, como a fines de los 1770). En mayo de 1831 llegan los prisioneros de Salsipuedes, mujeres, niñas y niños charrúas repartidos entre familias como sirvientes. Apellidos de raíz guaraní alternados con castellanos, como en los registros |
+- **Todas las personas son libres.** No existe una condición legal: nadie vive sujeto a otro
+  hogar, nadie tiene restricciones para tener casa, elegir trabajo, mudarse, casarse o ir a la
+  escuela, y no hay caminos de liberación, patronato, leyes ni ordenanzas sobre el tema.
+- **Las personas africanas y afrodescendientes existen** como vecinas y vecinos libres:
+  llegan como inmigrantes con su familia, sus bienes y su oficio (artesanos, peones, servicio,
+  marineros, pulperos), con nombre y apellido, y forman familias que se mezclan con las demás.
+  Su peso en la tabla colonial (`origenes.rs`) es una **estimación de diseño**, no una cifra
+  histórica, y no se cuenta ninguna historia de cómo llegaron.
+- **Las personas indígenas** (guaraníes de las misiones, minuanes y charrúas) son libres: las
+  cuadrillas guaraníes trabajan en la obra del fuerte y vuelven a sus pueblos o se quedan como
+  vecinos; después llegan pocas familias (< 2 % de la población, como a fines de los 1770).
+  No hay ningún hecho ni mecánica coercitiva sobre ellas.
+- **Sin crónica de la esclavitud**: no hay hechos históricos sobre la trata, el Caserío, las
+  leyes de libertad, la leva, Salsipuedes ni los colonos. La prueba
+  `los_textos_no_hablan_de_esclavitud` revisa las tablas de textos (ordenanzas, políticas,
+  motivos, factores, orígenes, oficios) y las cadenas de los fuentes de la población; la prueba
+  `nadie_vive_sin_libertad` revisa la crónica, los nombres y las historias de vida de una
+  ciudad de 70 años.
+- **Partidas viejas**: los campos que ya no existen (`condicion`, `patronato`, `leyes`,
+  `fondo_libertad`, `hitos`, contadores) se ignoran al cargar y todas las personas quedan
+  libres; los hechos de la historia de vida que ya no existen se descartan, y una llegada de
+  otro tipo se lee como una llegada (prueba `una_partida_vieja_carga_sin_esclavitud`).
 
 ## 6. Felicidad
 
@@ -125,23 +131,22 @@ Cada persona tiene una felicidad (0 a 1) que sale de once causas, cada una entre
 **comida** (lo que gana el hogar frente al costo de comer, el precio del pan, el hambre),
 **vivienda** (sin casa, cuartel, rancho/azotea/altos, hacinamiento), **agua**, **salud**,
 **trabajo** (desocupado, por cuenta propia), **familia** (pareja, hijos, viudez, duelo por
-muertes recientes, soledad), **libertad** (la esclavitud la hunde, el patronato la baja; la libertad la sube),
-**comparación** con su barrio y con los de su mismo origen (desigualdad percibida), **fe y
-fiestas** (para los devotos; la iglesia matriz; para las personas afrodescendientes, las cofradías y las salas de nación) y **ordenanzas** que la tocan (pan barato,
-hospital, escuelas, reparto, contribución progresiva, préstamos, fondo de manumisión, faroles a
-cargo de los vecinos, prohibición de la paja) y **seguridad** (el barrio: el centro es más seguro
-que las afueras; no tener techo; haber perdido la casa en un incendio o una inundación).
+muertes recientes, soledad), **comparación** con su barrio y con los de su mismo origen
+(desigualdad percibida), **fe y fiestas** (para los devotos; la iglesia matriz), **ordenanzas**
+que la tocan (pan barato, hospital, escuelas, reparto, contribución progresiva, préstamos,
+faroles a cargo de los vecinos, prohibición de la paja), **seguridad** (el barrio: el centro es
+más seguro que las afueras; no tener techo; haber perdido la casa en un incendio o una
+inundación) y **educación** (escuela para los chicos del barrio, con el modelo de servicios).
 
 - La **personalidad** cambia los pesos: la prudencia agranda comida, vivienda y seguridad; la laboriosidad
   y la ambición, el trabajo; la sociabilidad, la familia; la ambición, la comparación; la
   devoción, la fe.
-- Total = 0,65 × media ponderada + 0,35 × la peor causa importante (una sola cosa grave —no
-  ser libre, el hambre, no tener casa— no se compensa con lo demás). Cambia de a poco (35 % por
+- Total = 0,65 × media ponderada + 0,35 × la peor causa importante (una sola cosa grave —el
+  hambre, no tener casa— no se compensa con lo demás). Cambia de a poco (35 % por
   mes hacia el valor nuevo).
 - **Motivos**: las dos causas que más pesan por debajo de lo aceptable ("le preocupa el precio
-  del pan", "vive hacinado", "no tiene casa", "vive sin libertad", "ve que sus vecinos viven
-  mejor"…), en la ficha de cada persona y contados para toda la ciudad.
-- **Agregados** por edad, sexo, origen, clase, condición legal y barrio (centro, intramuros,
+  del pan", "vive hacinado", "no tiene casa", "ve que sus vecinos viven mejor"…), en la ficha de cada persona y contados para toda la ciudad.
+- **Agregados** por edad, sexo, origen, clase y barrio (centro, intramuros,
   afueras, sin casa), con historial mensual.
 - **Consecuencias**: la felicidad media de cada sector se suma a la opinión de
   `economy.rs` (±15 puntos); la felicidad de la ciudad atrae o espanta llegadas (×0,8 a
@@ -152,8 +157,7 @@ que las afueras; no tener techo; haber perdido la casa en un incendio o una inun
 
 **Métricas** (panel *Población → Desigualdad*, con historia anual): Gini de la riqueza y del
 ingreso (entre hogares), parte de la riqueza del 10 % más rico, pobreza (personas en hogares
-pobres) por origen y por condición legal (las personas esclavizadas aparecen como "sin derecho
-a bienes"), riqueza media por origen.
+pobres) por origen, riqueza media por origen, felicidad por clase y por origen.
 
 **Políticas del cabildo** (ordenanzas de `economy.rs`, se aprueban y derogan como las demás;
 el costo real sale en el presupuesto según la población):
@@ -166,9 +170,6 @@ el costo real sale en el presupuesto según la población):
 | Hospital de caridad y asistencia a pobres | Menos muertes y mejor salud de pobres y modestos (en la ciudad del motor: pobres y modestos aprovechan del todo la botica, el médico y el hospital cercanos, ver [educacion-salud-seguridad.md](educacion-salud-seguridad.md)) | 20 + 30 por 1.000 hab. | +6 / 0 / 0 |
 | Escuelas de primeras letras | +20 puntos de chance de aprender a leer por año de niñez: más oficios letrados (en la ciudad del motor: el cabildo paga al maestro y los pobres van gratis a la escuela de su barrio; hacen falta escuelas) | 15 + 0,25 por niño | +5 / +2 / 0 |
 | Préstamos del cabildo | Préstamo barato a pobres y modestos: menos hambre en los meses malos | Intereses y morosidad | +6 / −4 / 0 |
-| Fondo de manumisión | Completa la suma de la carta de libertad a quien juntó más de un tercio (política posible: no existió en el Montevideo colonial) | 40 pesos/mes | +3 / −2 / −8 |
-| Libertad de vientres | Nadie nace esclavizado y se prohíbe el tráfico. No se deroga | — | +4 / −4 / −8 |
-| Abolición de la esclavitud | Todas las personas esclavizadas son libres, sin leva ni patronato (la de 1842 los tuvo). No se deroga | — | +5 / −5 / −12 |
 
 **Épocas siguientes** (como datos en `politicas.rs`, para cuando existan esas épocas): escuela
 pública gratuita, reglamento de conventillos, jornada de ocho horas, salario mínimo,
@@ -190,26 +191,23 @@ de Montevideo*, colección Nuestra Montevideo, fascículo 4 (Intendencia de Mont
 | Montevideo en 1728 | ~350 personas: un centenar de canarios, otro de indios traídos por los jesuitas, cien soldados, ~50 de oficios | Zabala, citado por Pollero y G. D. (verificado) | Guarnición de 100 soldados y cuadrilla de 100 guaraníes de las misiones al fundar |
 | "Mil indios tapes" de las reducciones para el fuerte | Crónica citada en *La Mañana* | (cifra de crónica, no usada) | — |
 | Población hacia 1760 | ~2.000 (1.991 en 1757) | Pollero y G. D. (verificado) | La ciudad sintética llega a ~1.100 en 1756; en el juego depende de lo que zonifique el jugador |
-| Fines del siglo XVIII | "algo menos de diez mil" | Pollero y G. D. | ~4.600 en 1806, ~8.600 en 1826 (sintética) |
-| Tasa bruta de mortalidad | 25 a 35 ‰ | Pollero y G. D. (verificado) | 27–32 ‰ (1746–1816, ciudad sintética) |
+| Fines del siglo XVIII | "algo menos de diez mil" | Pollero y G. D. | ~5.300 en 1806, ~7.000 en 1816 (sintética, con inmigración fija del 2 % anual; en el juego depende de lo que atraiga la ciudad) |
+| Tasa bruta de mortalidad | 25 a 35 ‰ | Pollero y G. D. (verificado) | 21–30 ‰ (1766–1816, ciudad sintética) |
 | Mortalidad infantil | ~1/5 antes del primer año | Pollero y G. D. (verificado) | 200–290 ‰ |
 | Esperanza de vida al nacer | 33 a 41 años | Pollero y G. D. (verificado) | 37,6 años con la tabla `q_anual` (prueba) |
-| Natalidad | > 40 ‰; ~5 hijos por mujer | Pollero y G. D. (verificado) | 28–38 ‰ (población muy masculinizada: algo por debajo) |
+| Natalidad | > 40 ‰; ~5 hijos por mujer | Pollero y G. D. (verificado) | 29–37 ‰ (población muy masculinizada: algo por debajo) |
 | Edad de los esposos | Mujeres jóvenes con hombres mayores; diferencia media ~9 años a mediados del XIX; 20 % de matrimonios de 1812–13 con 20+ años de diferencia | Pollero y G. D. (verificado) | Preferencia por 8 años de diferencia (±7) |
-| Masculinidad | > 150 hombres por 100 mujeres hacia 1760; 124 en 1860 | Pollero y G. D. (verificado) | 340 al fundar (soldados y cuadrillas) → ~140 a fines del XVIII |
+| Masculinidad | > 150 hombres por 100 mujeres hacia 1760; 124 en 1860 | Pollero y G. D. (verificado) | 377 al fundar (soldados y cuadrillas) → ~130 a fines del XVIII |
 | Población joven | > 40 % menor de 20 años | Pollero y G. D. (verificado) | Edad media 25–28 años |
 | Uniones libres | Nacimientos de uniones libres: > 40 % (1780s), ~20 % (fines del XVIII), ~40 % (primeras décadas republicanas), 15 % (1860) | Pollero y G. D. (verificado) | Unión consensual: 40 % en hogares pobres, 20 % en modestos, 3 % en acomodados (estimación) |
-| Población afrodescendiente | > 25 % a fines de la década de 1770; ~1/3 esclavizada en 1805; del 30 % a < 25 % entre 1810 y 1819; 25 % en 1830 (cuatro cuarteles) | Pollero y G. D.; Borucki 2005 (verificado) | Esclavizadas: 9,7 % (1776), 26 % (1806), 19 % (1816), ~15 % (1830); afrodescendientes por ascendencia: 17 % (1776), 43 % (1806) |
-| Trata | ≥ 70.000 personas entraron al Río de la Plata entre 1777 y 1812; libre introducción en 1791; casi cortada en 1811–1816; aumenta con los luso-brasileños (1817–1829); colonos en 1832–1835 | Borucki y Frega et al. 2020 (verificado) | `factor_trata` por período y colonos en el modo fiel (estimación de pesos) |
-| Leyes de libertad | Ley de la Florida (7-IX-1825), sin efecto en Montevideo hasta el 20-I-1830; Constitución art. 131; reglamento de 1837 (patronato); abolición 12-XII-1842 (Defensa) y 28-X-1846 (Cerrito); fin del patronato 1853 | Frega et al. 2020, pp. 136-137 (verificado) | Hechos del modo fiel y ordenanzas (ver [esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md)) |
-| Libertades | 67 % de las compras de libertad de 1790–1820 fueron de mujeres; ~60 % de las personas liberadas, mujeres | Frega et al. 2020, p. 104 (verificado) | ~60 % de las compras (ahorro, familia, colecta) son de mujeres |
+| Población de origen africano | — | El juego no representa la esclavitud (§5): las cifras históricas de esa población no se reproducen | Llegan libres desde África con un peso de diseño en la tabla colonial: 4–6 % de la población con ascendencia africana (1776–1816, sintética) |
 | Indígenas | < 2 % a fines de los 1770s; la mayoría guaraníes de las misiones | Pollero y G. D. (verificado) | Cuadrillas de la fundación; después `factor_origen` (0,3–0,6): 1–2 % desde 1776 |
 | Crisis de mortalidad | 18 entre mediados del XVIII y 1880 (viruela, sarampión, fiebre amarilla 1857, cólera 1868) | Pollero y G. D. (verificado) | Hook `choque_epidemia`; la ciudad sintética tiene una cada 7 años |
-| Orígenes en 1836 | 50 % orientales, 37 % extranjeros: de ellos la mitad europeos (63 % canarios, 13 % portugueses), ~30 % africanos, 15 % de la región | Pollero y G. D. (verificado) | Pesos de la tabla colonial (estimación guiada por estos datos) |
+| Orígenes en 1836 | 50 % orientales, 37 % extranjeros: de ellos la mitad europeos (63 % canarios, 13 % portugueses), 15 % de la región | Pollero y G. D. (verificado) | Pesos de la tabla colonial (estimación guiada por estos datos) |
 | Orígenes en 1860 | 48 % extranjeros; europeos: 1/3 españoles, 1/3 italianos, 27 % franceses | Pollero y G. D. (verificado) | Tabla de la Ciudad Nueva |
 | Inmigración judía | ~50.000 entre fines del XIX y mediados del XX; ~10.000 entre 1933 y 1941 | Resultado de búsqueda (no verificado en la fuente primaria) | Peso de la tabla de Art Déco (estimación) |
 | Herencia | Legítima de cuatro quintos en el derecho castellano histórico (el Código Civil la bajó a dos tercios) | [elderecho.com](https://elderecho.com/) (verificado); la mitad de gananciales del cónyuge: conocimiento general, **no verificado** | 4/5 legítima, 1/5 libre, 1/2 gananciales |
-| Salarios y precios | — | **Estimación** de orden de magnitud: peón 7, artesano 12, pulpero 14, comerciante 32 pesos/mes; subsistencia 2 pesos por adulto; casas 40 / 450 / 1.500 pesos; carta de libertad 200 pesos | — |
+| Salarios y precios | — | **Estimación** de orden de magnitud: peón 7, artesano 12, pulpero 14, comerciante 32 pesos/mes; subsistencia 2 pesos por adulto; casas 40 / 450 / 1.500 pesos | — |
 | Riqueza y oficios por origen | — | **Estimación** (`origenes.rs`) | — |
 | Tablas por edad | — | **Modelo propio** ajustado a las cifras de arriba | `q_anual`, `fecundidad`, `nupcialidad` |
 
@@ -217,15 +215,15 @@ Resultado de la ciudad sintética (`cargo test --release calibracion -- --ignore
 inmigración del 2 % anual, una epidemia cada 7 años), década por década:
 
 ```
-1736 hab    547 TBN 24 TBM 26 TMI 231 edad 26.3 hogar 2.6 h/m 193 esclavizadas  3.7 % afro  3.7 % indíg. 3.5 % Gini 0.61 pobreza 0.10 felicidad 0.57
-1756 hab  1 246 TBN 39 TBM 18 TMI 184 edad 28.5 hogar 2.8 h/m 171 esclavizadas  7.5 % afro 11.8 % indíg. 3.5 % Gini 0.63 pobreza 0.06 felicidad 0.60
-1776 hab  2 270 TBN 36 TBM 25 TMI 160 edad 26.8 hogar 3.1 h/m 142 esclavizadas  9.7 % afro 17.2 % indíg. 2.0 % Gini 0.69 pobreza 0.07 felicidad 0.59
-1796 hab  4 000 TBN 32 TBM 32 TMI 262 edad 26.3 hogar 3.7 h/m 134 esclavizadas 22.6 % afro 36.1 % indíg. 1.2 % Gini 0.71 pobreza 0.08 felicidad 0.56
-1816 hab  6 995 TBN 34 TBM 28 TMI 206 edad 26.3 hogar 3.5 h/m 134 esclavizadas 18.9 % afro 41.2 % indíg. 1.4 % Gini 0.71 pobreza 0.09 felicidad 0.56
+1736 hab    518 TBN 17 TBM 31 TMI 444 edad 26.5 hogar 2.3 h/m 222 afro 3.1 % indíg. 3.7 % Gini 0.61 pobreza 0.09 felicidad 0.55
+1756 hab  1 092 TBN 33 TBM 17 TMI  56 edad 28.8 hogar 2.4 h/m 184 afro 4.2 % indíg. 2.7 % Gini 0.64 pobreza 0.08 felicidad 0.61
+1776 hab  2 162 TBN 29 TBM 21 TMI 111 edad 27.3 hogar 2.8 h/m 145 afro 4.8 % indíg. 2.3 % Gini 0.70 pobreza 0.07 felicidad 0.60
+1796 hab  3 930 TBN 36 TBM 29 TMI 170 edad 25.7 hogar 3.1 h/m 132 afro 5.5 % indíg. 2.4 % Gini 0.73 pobreza 0.09 felicidad 0.59
+1816 hab  7 044 TBN 34 TBM 25 TMI 179 edad 24.8 hogar 3.3 h/m 127 afro 6.0 % indíg. 3.2 % Gini 0.75 pobreza 0.10 felicidad 0.58
 ```
-("afro" e "indíg." cuentan la ascendencia por padre y madre, ver
-[esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md) §4; la baja de 1816 es
-la leva de ese año y el corte de la trata durante la revolución.)
+("afro" e "indíg." cuentan la ascendencia por padre y madre. Antes de quitar la esclavitud, la
+misma ciudad tenía 5.351 habitantes en 1806 y 6.995 en 1816: el total casi no cambia, porque
+las llegadas de cada mes son las mismas y ahora todas son de familias libres.)
 (Los números exactos cambian con los ajustes; la prueba `crece_desde_la_fundacion_a_ritmo_plausible`
 fija los rangos: natalidad 28–50 ‰, mortalidad 18–40 ‰, mortalidad infantil 120–300 ‰,
 edad media 20–33, hogares de 2 a 7 personas, ciudad masculinizada.)
@@ -237,15 +235,14 @@ la riqueza al llegar (mediana y dispersión), la alfabetización y los oficios:
 
 | Época | Orígenes principales |
 |---|---|
-| Colonial | Canarias, Buenos Aires, Galicia, Andalucía, Cantábrico, Cataluña, País Vasco, Portugal, Brasil, misiones guaraníes, minuanes y charrúas, interior; llegadas forzadas por la trata (Congo y Angola, Costa da Mina, Mozambique) |
+| Colonial | Canarias, Buenos Aires, Galicia, Andalucía, Cantábrico, Cataluña, País Vasco, Portugal, Brasil, misiones guaraníes, minuanes y charrúas, interior, África (Congo y Angola, Costa da Mina, Mozambique: familias libres) |
 | Ciudad Nueva | Canarias, Galicia, País Vasco, Francia, Italia, Buenos Aires, Brasil, Portugal, islas británicas, interior |
 | Inmigración | Italia (la mayor), Galicia, País Vasco, Cataluña, Andalucía, Francia, islas británicas, Alemania, Siria y Líbano, comunidades judías, Armenia, Brasil, Buenos Aires, interior |
 | Art Déco | Interior, Galicia, Italia, refugiados judíos, Siria y Líbano, Armenia, Alemania |
 | Modernismo | Sobre todo del interior; Buenos Aires, Brasil, Paraguay |
 | Contemporánea | Interior, América Latina no fronteriza (Perú, Venezuela, Cuba, República Dominicana), Buenos Aires, Brasil, Paraguay, retornados |
 
-La trata solo existe en las dos primeras épocas y se corta con la libertad de vientres; en el modo
-fiel, después llegan los «colonos» africanos (1832–1835), la trata con otro nombre.
+Todas las llegadas son de personas libres (§5).
 
 ## 10. Para los demás sistemas (API)
 
@@ -273,17 +270,17 @@ Banco de pruebas: `cargo test --release banco_poblacion -- --ignored --nocapture
 ## 12. Interfaz
 
 - Ficha **Población** en la barra superior (habitantes y felicidad) → panel con pestañas:
-  *Resumen* (pirámide, nacimientos y muertes del año, orígenes, clases, condición legal,
-  historia anual), *Desigualdad* (Gini, 10 % más rico, pobreza por origen y condición,
+  *Resumen* (pirámide, nacimientos y muertes del año, orígenes, clases, raíces africana e
+  indígena, historia anual), *Desigualdad* (Gini, 10 % más rico, pobreza y riqueza por origen,
   políticas vigentes y futuras), *Felicidad* (por grupo y motivos principales, peso en la
   opinión) y *Crónica*.
 - Ficha de un solar → botón **Vecinos**: las familias de la casa, su economía del mes
   (desglose), dueña o inquilina, y sus miembros.
-- **Ficha de una persona**: datos, felicidad desglosada en sus doce causas (la duodécima, «Educación», con las escuelas del barrio) con los motivos,
+- **Ficha de una persona**: datos, felicidad desglosada en sus once causas (la última, «Educación», con las escuelas del barrio) con los motivos,
   personalidad, familia (abuelos, padres, cónyuge, hermanos, hijos, nietos), linaje con sus
   generaciones y descendientes vivos, e historia de vida.
-- La gaceta recibe las noticias notables (llegadas, libertades, casamientos entre familias
-  principales, pleitos de herencia, leyes, epidemias, protestas).
+- La gaceta recibe las noticias notables (llegadas, casamientos entre familias principales,
+  pleitos de herencia, epidemias, protestas).
 
 ## 13. Pendiente
 
@@ -293,6 +290,5 @@ Banco de pruebas: `cargo test --release banco_poblacion -- --ignored --nocapture
   La escuela, la salud, la insalubridad y el delito ya son por solar (ver
   [educacion-salud-seguridad.md](educacion-salud-seguridad.md)).
 - Épocas 2–6: activar sus políticas (`FUTURAS`), salarios y precios por época, conventillos.
-- El patronato ya está (ver §5). Faltan otros matices jurídicos (capacidad de las mujeres
-  casadas, hijos naturales sin acceso a la educación, la ciudadanía suspendida de 1830) y las
-  preguntas abiertas de [esclavitud-y-pueblos-originarios.md](esclavitud-y-pueblos-originarios.md) §6.
+- Otros matices jurídicos (capacidad de las mujeres casadas, hijos naturales sin acceso a la
+  educación).

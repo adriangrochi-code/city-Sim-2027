@@ -169,7 +169,7 @@ pub fn grow(s: &mut Session) -> String {
 }
 
 /// Cuarenta años de historia (para las capturas de la población: linajes de tres
-/// generaciones, herencias, libertades).
+/// generaciones, herencias, oficios).
 pub fn historia(s: &mut Session) -> String {
     let t = s.terrain.clone();
     let g = s.game.as_mut().unwrap();
