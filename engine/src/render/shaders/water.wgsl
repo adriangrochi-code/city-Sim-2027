@@ -44,5 +44,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
     col = mix(col, g.sky_horizon.rgb, clamp(fog, 0.0, 0.92));
-    return vec4(col, 0.9);
+    // El río es turbio (agua color león): casi no deja ver el fondo. Así tampoco se notan
+    // los escalones del fondo entre niveles de detalle.
+    return vec4(col, 0.97);
 }

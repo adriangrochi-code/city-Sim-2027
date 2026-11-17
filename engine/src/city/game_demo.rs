@@ -8,10 +8,10 @@ use super::roads::{self, RoadKind};
 use super::{grid_lines, plaza_frame, BLOCK};
 use crate::session::Session;
 
-/// Plaza mayor de la demostración (el mismo sitio que la escena colonial).
-pub const PLAZA: Vec2 = Vec2::new(13500.0, 16300.0);
-/// Punto medio de la calle curva (para la captura de cerca).
-pub const CURVE_VIEW: Vec2 = Vec2::new(PLAZA.x - 10.0, PLAZA.y - 420.0);
+/// Plaza mayor de la demostración: la Ciudad Vieja del mapa real, junto a la Plaza Matriz.
+pub const PLAZA: Vec2 = crate::terrain::FOUNDING_REAL;
+/// Punto medio del camino curvo que sale hacia el este (para la captura de cerca).
+pub const CURVE_VIEW: Vec2 = Vec2::new(PLAZA.x + 5.0 * BLOCK, PLAZA.y - 0.6 * BLOCK);
 
 fn apply(s: &mut Session, r: Result<crate::buildings::Edits, String>) -> String {
     match r {
@@ -40,20 +40,37 @@ pub fn grid(s: &mut Session) -> String {
     let (f, side) = plaza_frame(0.0);
     let a = PLAZA - side * (BLOCK * 2.5) - f * (BLOCK * 2.5);
     let lines = grid_lines(a, a + side * BLOCK * 5.0, a + f * BLOCK * 5.0);
-    let r = g.city.build_grid(&t, &lines, RoadKind::Stone);
+    // En el terreno real alguna cuadra puede caer en la barranca: si el damero entero no se
+    // puede, se traza cuadra por cuadra y se saltean las que no.
+    let r = g.city.build_grid(&t, &lines, RoadKind::Stone).or_else(|err| {
+        println!("Damero completo: {err}; se traza cuadra por cuadra");
+        let mut all = crate::buildings::Edits::default();
+        for l in &lines {
+            let (p0, p1) = (l[0], *l.last().unwrap());
+            let n = (p0.distance(p1) / BLOCK).round().max(1.0) as i32;
+            for k in 0..n {
+                let seg = roads::line(p0.lerp(p1, k as f32 / n as f32), p0.lerp(p1, (k + 1) as f32 / n as f32));
+                if let Ok(e) = g.city.build_road(&t, &seg, RoadKind::Stone) {
+                    all.voxels.extend(e.voxels);
+                    all.surface.extend(e.surface);
+                }
+            }
+        }
+        Ok::<_, String>(all)
+    });
     let out = apply(s, r);
     let g = s.game.as_ref().unwrap();
     format!("{out} · {} tramos, {} solares", g.city.net.edges.len(), g.city.lots.lots.len())
 }
 
-/// Camino de tierra curvo que sale del damero hacia el norte de la península.
+/// Camino de tierra curvo que sale del damero hacia el este, tierra adentro.
 pub fn curve(s: &mut Session) -> String {
     let t = s.terrain.clone();
     let g = s.game.as_mut().unwrap();
     let (f, side) = plaza_frame(0.0);
-    let p0 = PLAZA + side * (BLOCK * 0.5) - f * (BLOCK * 2.5);
-    let p1 = PLAZA + side * (BLOCK * 2.0) - f * (BLOCK * 6.5);
-    let ctrl = PLAZA - side * (BLOCK * 1.5) - f * (BLOCK * 5.5);
+    let p0 = PLAZA + side * (BLOCK * 2.5) + f * (BLOCK * 0.5);
+    let ctrl = PLAZA + side * (BLOCK * 5.0) - f * (BLOCK * 1.8);
+    let p1 = PLAZA + side * (BLOCK * 7.5) - f * (BLOCK * 0.3);
     let pts = roads::bezier(g.snap(p0), ctrl, p1);
     let r = g.city.build_road(&t, &pts, RoadKind::Dirt);
     let out = apply(s, r);
@@ -74,7 +91,7 @@ pub fn zone(s: &mut Session) -> String {
         (PLAZA - Vec2::new(0.0, 140.0), 480.0, ZoneKind::Residencial, Density::Media),
         (PLAZA, 100.0, ZoneKind::Comercial, Density::Alta),
         (PLAZA + side * (BLOCK * 2.0), 60.0, ZoneKind::Comercial, Density::Media),
-        (PLAZA + side * (BLOCK * 1.2) - f * (BLOCK * 5.2), 140.0, ZoneKind::Industrial, Density::Media),
+        (PLAZA + side * (BLOCK * 5.2) - f * (BLOCK * 0.8), 140.0, ZoneKind::Industrial, Density::Media),
     ] {
         let (k_n, k_e) = g.city.paint(c, r, zone_code(k, d));
         n += k_n;

@@ -1,6 +1,10 @@
-//! Geografía del mapa: península, bahía, cerro, arroyos y cuchillas.
-//! Es un puerto directo de `scripts/world/terrain_gen.gd` (mismas constantes y fórmulas),
-//! para que el prototipo de Godot y el motor de vóxeles compartan el mismo mapa.
+//! Geografía del mapa. Dos mapas:
+//! - **Montevideo real** ([`TerrainGen::montevideo`], el del juego): el relieve de
+//!   `assets/mapas/montevideo/` (24 × 24 km cada 20 m, más 6 km de entorno cada 100 m), los
+//!   arroyos reales y biomas de la época de la fundación (pradera, monte ribereño, bañados,
+//!   playas, médanos y puntas de piedra). Ver `docs/sistemas/mapa-real.md`.
+//! - **Ficticio** ([`TerrainGen::new`]): puerto directo de `scripts/world/terrain_gen.gd`, usado
+//!   por el sandbox, el banco de pruebas y las pruebas.
 
 use crate::palette::*;
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
@@ -19,6 +23,8 @@ pub struct TerrainGen {
     n_coast: FastNoiseLite,
     n_hills: FastNoiseLite,
     n_detail: FastNoiseLite,
+    /// Médanos: crestas de unos 60 m, alargadas a lo largo de la costa.
+    n_dune: FastNoiseLite,
     seg_a: Vec<Vec2>,
     seg_b: Vec<Vec2>,
     seg_hash: HashMap<(i32, i32), Vec<u32>>,
@@ -27,7 +33,183 @@ pub struct TerrainGen {
     grid_min: (i32, i32),
     grid_size: (i32, i32),
     pub arroyos: Vec<Vec<Vec2>>,
+    /// Mapa real (alturas, distancia al mar). `None` = mapa ficticio.
+    real: Option<Box<RealMap>>,
 }
+
+// --- Mapa real ------------------------------------------------------------------------------
+
+/// Datos embebidos en el ejecutable (3 MB): así el mapa no puede faltar en el paquete.
+const ALTURA_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/altura.bin");
+const CONTEXTO_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/contexto.bin");
+const ARROYOS_JSON: &str = include_str!("../../assets/mapas/montevideo/arroyos.json");
+/// Mismos valores que `meta.json`.
+const MAIN_N: usize = 1201;
+const MAIN_STEP: f32 = 20.0;
+const CTX_N: usize = 361;
+const CTX_STEP: f32 = 100.0;
+const CTX_FROM: f32 = -6000.0;
+/// Sitio de la fundación (Ciudad Vieja, junto a la Plaza Matriz) y cumbre del Cerro.
+pub const FOUNDING_REAL: Vec2 = Vec2::new(11297.7, 14348.9);
+pub const CERRO_REAL: Vec2 = Vec2::new(5923.7, 12269.8);
+/// Cauce de los arroyos: se hunde el terreno y el centro es agua.
+const CAUCE_PROFUNDIDAD: f32 = 1.6;
+const CAUCE_ANCHO: f32 = 30.0;
+pub const ARROYO_AGUA: f32 = 5.0;
+
+/// Grilla regular de valores (alturas o distancias), con muestreo suave.
+struct Grid {
+    v: Vec<f32>,
+    n: usize,
+    step: f32,
+    from: f32,
+}
+
+impl Grid {
+    fn from_u16(bytes: &[u8], n: usize, step: f32, from: f32) -> Grid {
+        assert_eq!(bytes.len(), n * n * 2, "mapa real incompleto");
+        let v = bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]]) as f32 / 200.0 - 50.0).collect();
+        Grid { v, n, step, from }
+    }
+    #[inline]
+    fn at(&self, i: i32, j: i32) -> f32 {
+        let m = self.n as i32 - 1;
+        self.v[(i.clamp(0, m) + j.clamp(0, m) * self.n as i32) as usize]
+    }
+    /// Catmull-Rom bicúbico: continuo en la pendiente, sin las facetas ni los quiebres del
+    /// bilineal (que de lejos se ven como líneas rectas en las laderas).
+    fn cubic(&self, x: f32, z: f32) -> f32 {
+        let fx = ((x - self.from) / self.step).clamp(0.0, (self.n - 1) as f32);
+        let fz = ((z - self.from) / self.step).clamp(0.0, (self.n - 1) as f32);
+        let (i, j) = (fx.floor() as i32, fz.floor() as i32);
+        let (tx, tz) = (fx - i as f32, fz - j as f32);
+        let cr = |a: f32, b: f32, c: f32, d: f32, t: f32| {
+            b + 0.5 * t * (c - a + t * (2.0 * a - 5.0 * b + 4.0 * c - d + t * (3.0 * (b - c) + d - a)))
+        };
+        let mut rows = [0f32; 4];
+        for (k, r) in rows.iter_mut().enumerate() {
+            let jj = j - 1 + k as i32;
+            *r = cr(self.at(i - 1, jj), self.at(i, jj), self.at(i + 1, jj), self.at(i + 2, jj), tx);
+        }
+        cr(rows[0], rows[1], rows[2], rows[3], tz)
+    }
+    fn linear(&self, x: f32, z: f32) -> f32 {
+        let fx = ((x - self.from) / self.step).clamp(0.0, (self.n - 1) as f32 - 0.001);
+        let fz = ((z - self.from) / self.step).clamp(0.0, (self.n - 1) as f32 - 0.001);
+        let (i, j) = (fx as i32, fz as i32);
+        let (tx, tz) = (fx - i as f32, fz - j as f32);
+        let a = self.at(i, j) + (self.at(i + 1, j) - self.at(i, j)) * tx;
+        let b = self.at(i, j + 1) + (self.at(i + 1, j + 1) - self.at(i, j + 1)) * tx;
+        a + (b - a) * tz
+    }
+    /// Distancia (m) de cada celda de tierra al agua más cercana: transformada de distancia
+    /// de chaflán en dos pasadas (rápida y suficiente para elegir playas y médanos).
+    fn sea_distance(&self) -> Grid {
+        let n = self.n;
+        let big = 1e7f32;
+        let mut d: Vec<f32> = self.v.iter().map(|&h| if h <= 0.0 { 0.0 } else { big }).collect();
+        let (a, b) = (self.step, self.step * std::f32::consts::SQRT_2);
+        for j in 0..n {
+            for i in 0..n {
+                let k = i + j * n;
+                let mut v = d[k];
+                if i > 0 { v = v.min(d[k - 1] + a); }
+                if j > 0 {
+                    v = v.min(d[k - n] + a);
+                    if i > 0 { v = v.min(d[k - n - 1] + b); }
+                    if i + 1 < n { v = v.min(d[k - n + 1] + b); }
+                }
+                d[k] = v;
+            }
+        }
+        for j in (0..n).rev() {
+            for i in (0..n).rev() {
+                let k = i + j * n;
+                let mut v = d[k];
+                if i + 1 < n { v = v.min(d[k + 1] + a); }
+                if j + 1 < n {
+                    v = v.min(d[k + n] + a);
+                    if i + 1 < n { v = v.min(d[k + n + 1] + b); }
+                    if i > 0 { v = v.min(d[k + n - 1] + b); }
+                }
+                d[k] = v;
+            }
+        }
+        Grid { v: d, n, step: self.step, from: self.from }
+    }
+}
+
+struct RealMap {
+    main: Grid,
+    ctx: Grid,
+    sea_main: Grid,
+    sea_ctx: Grid,
+}
+
+/// Lee `{"arroyos": [[[x, z], ...], ...]}` sin dependencias: cada `[x, z]` es un punto y cada
+/// lista de puntos, un arroyo.
+fn parse_arroyos(txt: &str) -> Vec<Vec<Vec2>> {
+    // Profundidad de corchetes: 1 = lista de arroyos, 2 = un arroyo, 3 = un punto.
+    let mut out: Vec<Vec<Vec2>> = Vec::new();
+    let mut depth = 0;
+    let mut num = String::new();
+    let mut pair: Vec<f32> = Vec::new();
+    for ch in txt.chars() {
+        match ch {
+            '[' => {
+                depth += 1;
+                if depth == 2 {
+                    out.push(Vec::new());
+                }
+            }
+            ']' | ',' => {
+                if !num.is_empty() {
+                    pair.push(num.parse().unwrap_or(0.0));
+                    num.clear();
+                }
+                if ch == ']' {
+                    if depth == 3 {
+                        if pair.len() == 2 {
+                            out.last_mut().unwrap().push(Vec2::new(pair[0], pair[1]));
+                        }
+                        pair.clear();
+                    }
+                    depth -= 1;
+                }
+            }
+            c if depth == 3 && (c.is_ascii_digit() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+') => num.push(c),
+            _ => {}
+        }
+    }
+    out.retain(|a| a.len() >= 2);
+    out
+}
+
+fn hash2(x: i32, z: i32, salt: u32) -> u32 {
+    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (z as u32).wrapping_mul(0xd816_3841) ^ salt.wrapping_mul(0xcb1a_b31f);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5bd1_e995);
+    h ^ (h >> 15)
+}
+
+fn hashf(x: i32, z: i32, salt: u32) -> f32 {
+    (hash2(x, z, salt) & 0xffff) as f32 / 65535.0
+}
+
+/// Un árbol del paisaje (ver [`TerrainGen::trees_in`]).
+#[derive(Clone, Copy, Debug)]
+pub struct Tree {
+    pub x: f32,
+    pub z: f32,
+    /// Altura de la copa (m sobre el suelo) y radio de la copa (m).
+    pub height: f32,
+    pub radius: f32,
+    pub trunk: f32,
+    pub leaf: Mat,
+}
+
+/// Lado de la celda de la grilla de árboles (m).
+pub const TREE_CELL: f32 = 7.0;
 
 /// Ruido configurado como el `FastNoiseLite` por defecto de Godot
 /// (OpenSimplex2S, fractal FBM, lacunaridad 2, ganancia 0,5).
@@ -63,6 +245,11 @@ impl TerrainGen {
             n_coast: godot_noise(seed, 0.0007, 5),
             n_hills: godot_noise(seed + 1, 0.00035, 3),
             n_detail: godot_noise(seed + 2, 0.004, 5),
+            n_dune: {
+                let mut n = godot_noise(seed + 3, 0.016, 3);
+                n.set_fractal_type(Some(FractalType::Ridged));
+                n
+            },
             seg_a: Vec::new(),
             seg_b: Vec::new(),
             seg_hash: HashMap::new(),
@@ -70,6 +257,7 @@ impl TerrainGen {
             grid_min: (0, 0),
             grid_size: (0, 0),
             arroyos: Vec::new(),
+            real: None,
         };
         t.add_arroyo(&[
             (11600.0, 14400.0), (11450.0, 13300.0), (11800.0, 12100.0),
@@ -83,6 +271,105 @@ impl TerrainGen {
         t
     }
 
+    /// El mapa del juego: la geografía real de Montevideo.
+    pub fn montevideo() -> Self {
+        let mut t = TerrainGen::new(1726);
+        t.seg_a.clear();
+        t.seg_b.clear();
+        t.seg_hash.clear();
+        t.arroyos.clear();
+        let main = Grid::from_u16(ALTURA_BIN, MAIN_N, MAIN_STEP, 0.0);
+        let ctx = Grid::from_u16(CONTEXTO_BIN, CTX_N, CTX_STEP, CTX_FROM);
+        let (sea_main, sea_ctx) = (main.sea_distance(), ctx.sea_distance());
+        t.real = Some(Box::new(RealMap { main, ctx, sea_main, sea_ctx }));
+        for a in parse_arroyos(ARROYOS_JSON) {
+            t.add_arroyo_raw(a);
+        }
+        t.build_grid();
+        t
+    }
+
+    pub fn is_real(&self) -> bool {
+        self.real.is_some()
+    }
+
+    /// Centro sugerido para la plaza mayor.
+    pub fn founding_site(&self) -> Vec2 {
+        if self.is_real() { FOUNDING_REAL } else { Vec2::new(PENINSULA_X, 16300.0) }
+    }
+
+    /// Relieve real sin cauces: dentro del mapa, la grilla de 20 m; afuera, la de 100 m, con
+    /// una transición de 400 m para que el borde del mapa no se vea como un corte.
+    fn real_raw(&self, r: &RealMap, x: f32, z: f32) -> f32 {
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        if edge <= 0.0 {
+            return r.ctx.cubic(x, z);
+        }
+        let h = r.main.cubic(x, z);
+        if edge < 400.0 {
+            let w = smoothstep(0.0, 400.0, edge);
+            return r.ctx.cubic(x, z) * (1.0 - w) + h * w;
+        }
+        h
+    }
+
+    /// Distancia aproximada al río o a la bahía (m); 0 en el agua.
+    pub fn sea_distance(&self, x: f32, z: f32) -> f32 {
+        let Some(r) = &self.real else { return (self.coast_z(x) - z).max(0.0) };
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        if edge <= 0.0 {
+            return r.sea_ctx.linear(x, z);
+        }
+        let d = r.sea_main.linear(x, z);
+        if edge < 400.0 {
+            let w = smoothstep(0.0, 400.0, edge);
+            return r.sea_ctx.linear(x, z) * (1.0 - w) + d * w;
+        }
+        d
+    }
+
+    /// Ancho de la franja de arena de la costa (m): angosta en la bahía y la Ciudad Vieja,
+    /// ancha hacia Carrasco y la costa de Canelones, donde los médanos tapaban los caminos.
+    pub fn dune_belt(&self, x: f32, z: f32) -> f32 {
+        let east = smoothstep(13000.0, 25000.0, x);
+        // Dentro de la bahía (al norte de la península) casi no hay médanos.
+        let bay = 1.0 - smoothstep(13000.0, 15500.0, z) * (1.0 - smoothstep(9000.0, 13000.0, x));
+        (70.0 + 480.0 * east) * (1.0 - 0.7 * bay.clamp(0.0, 1.0) * (1.0 - east)) * (0.8 + 0.4 * (self.n_hills.get_noise_2d(x * 2.0, z * 2.0) * 0.5 + 0.5))
+    }
+
+    /// Relieve de los médanos (m) en un punto de la franja de arena.
+    fn dune_relief(&self, x: f32, z: f32, sd: f32, belt: f32) -> f32 {
+        if sd <= 0.0 || sd >= belt {
+            return 0.0;
+        }
+        let east = smoothstep(13000.0, 25000.0, x);
+        let amp = 1.5 + 7.5 * east;
+        // Crestas paralelas a la costa (este-oeste): se estira el ruido a lo largo de x.
+        let ridge = self.n_dune.get_noise_2d(x * 0.45, z) * 0.5 + 0.5;
+        let fade = smoothstep(12.0, 70.0, sd) * (1.0 - smoothstep(belt * 0.6, belt, sd));
+        amp * ridge * fade
+    }
+
+    fn real_height(&self, r: &RealMap, x: f32, z: f32) -> f32 {
+        let mut h = self.real_raw(r, x, z);
+        if h > 0.0 && h < 25.0 {
+            let sd = self.sea_distance(x, z);
+            let belt = self.dune_belt(x, z);
+            if sd < belt {
+                h += self.dune_relief(x, z, sd, belt);
+            }
+        }
+        if h > 0.3 {
+            // Ondulación fina (±0,35 m) para que la ladera no sea una superficie de vidrio.
+            h += self.n_detail.get_noise_2d(x, z) * 0.35 * smoothstep(0.5, 3.0, h);
+            let da = self.arroyo_distance(x, z);
+            if da < CAUCE_ANCHO {
+                h -= CAUCE_PROFUNDIDAD * (1.0 - smoothstep(ARROYO_AGUA, CAUCE_ANCHO, da));
+            }
+        }
+        h
+    }
+
     fn build_grid(&mut self) {
         let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
         for &(cx, cz) in self.seg_hash.keys() {
@@ -92,6 +379,8 @@ impl TerrainGen {
             z1 = z1.max(cz);
         }
         if x0 > x1 {
+            self.seg_grid.clear();
+            self.grid_size = (0, 0);
             return;
         }
         let (w, h) = (x1 - x0 + 1, z1 - z0 + 1);
@@ -106,6 +395,9 @@ impl TerrainGen {
 
     /// Línea de costa: para cada x, la z donde empieza el agua (al sur está el río).
     pub fn coast_z(&self, x: f32) -> f32 {
+        if self.real.is_some() {
+            return 0.0; // el mapa real no usa la costa por columna
+        }
         let mut z = COAST_Z + self.n_coast.get_noise_2d(x, 0.0) * 380.0;
         z -= 1500.0 * (-((x - BAY_X) / 1100.0).powi(2)).exp();
         z += 1700.0 * (-((x - PENINSULA_X) / 520.0).powi(6)).exp();
@@ -121,6 +413,9 @@ impl TerrainGen {
     /// de `x`: al recorrer una grilla se calcula una vez por columna en lugar de por punto).
     #[inline]
     pub fn height_with_coast(&self, x: f32, z: f32, coast: f32) -> f32 {
+        if let Some(r) = &self.real {
+            return self.real_height(r, x, z);
+        }
         let d = coast - z;
         let mut h;
         if d < 0.0 {
@@ -172,6 +467,9 @@ impl TerrainGen {
 
     /// Material de la superficie según altura, pendiente y cercanía al agua.
     pub fn surface_material(&self, x: f32, z: f32, h: f32, slope: f32) -> Mat {
+        if self.real.is_some() {
+            return self.biome(x, z, h, slope);
+        }
         if h < -0.3 {
             return MUD;
         }
@@ -190,9 +488,139 @@ impl TerrainGen {
         }
     }
 
+    /// Biomas de la costa y la campaña de la fundación (hacia 1726): pradera abierta casi sin
+    /// árboles, monte ribereño en las orillas de los arroyos, bañados en los bajos junto a
+    /// ellos, playas de arena con médanos y puntas de piedra donde la costa es empinada.
+    fn biome(&self, x: f32, z: f32, h: f32, slope: f32) -> Mat {
+        // Ruido de manchas (cientos de metros) y de grano fino (metros).
+        let blot = self.n_hills.get_noise_2d(x * 3.0, z * 3.0);
+        let fine = self.n_detail.get_noise_2d(x * 2.5, z * 2.5);
+        if h < -0.3 {
+            // Fondo: arena cerca de la orilla, limo más adentro.
+            return if h > -2.5 { SAND_WET } else { MUD };
+        }
+        let sd = self.sea_distance(x, z);
+        let da = self.arroyo_distance(x, z);
+        // Arroyos: agua en el centro del cauce y barro en las orillas.
+        if da < ARROYO_AGUA {
+            return STREAM;
+        }
+        if da < ARROYO_AGUA + 3.5 + fine * 1.5 {
+            return MUD;
+        }
+        // Costa: puntas de piedra donde es empinada; si no, playa (húmeda junto al agua),
+        // médanos de arena suelta con matas de pasto en las crestas, y un borde irregular
+        // hacia la pradera.
+        if sd < 60.0 && slope > 0.32 + fine * 0.08 && x < 21000.0 {
+            return COAST_ROCK;
+        }
+        if h < 0.7 && sd < 80.0 {
+            return SAND_WET;
+        }
+        let belt = self.dune_belt(x, z);
+        if sd < belt * 0.3 + 25.0 && h < 12.0 {
+            return SAND;
+        }
+        if sd < belt && h < 25.0 {
+            let edge = (sd - belt * 0.3) / (belt * 0.7); // 0 junto a la playa, 1 en el borde
+            return if fine > 0.55 - edge * 0.9 { GRASS_DRY } else { DUNE };
+        }
+        if slope > 0.9 || (h > 105.0 && slope > 0.3 + fine * 0.1) {
+            return ROCK;
+        }
+        // Bañados: bajos llanos junto a los arroyos y en sus desembocaduras.
+        if slope < 0.05 && h < 5.0 + blot * 2.0 && (da < 200.0 || (da < 700.0 && sd < 350.0)) && fine > -0.35 {
+            return MARSH;
+        }
+        // Monte ribereño: suelo de hojarasca bajo los árboles.
+        if da < 38.0 + blot * 18.0 {
+            return FOREST_FLOOR;
+        }
+        // Pradera: más verde y húmeda en los bajos, seca y amarillenta en las cuchillas.
+        // Grano fino (metros) para que los bordes de las manchas no sean líneas limpias.
+        let grain = self.n_detail.get_noise_2d(x * 14.0, z * 14.0) * 0.18;
+        let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain;
+        if dry > 0.45 {
+            GRASS_DRY
+        } else if (h < 18.0 && da < 400.0 && grain > -0.05) || dry < -0.45 {
+            GRASS_LUSH
+        } else {
+            GRASS
+        }
+    }
+
+    /// Árboles con el tronco en el rectángulo `[x0, x1) × [z0, z1)` (en metros), según el bioma:
+    /// monte cerrado en las orillas de los arroyos, algún coronilla y tala cerca de la costa, y
+    /// árboles sueltos en la pradera (ombúes, talas). Determinista: el mismo lugar da el mismo
+    /// árbol en todos los niveles de detalle. Solo el mapa real tiene árboles.
+    pub fn trees_in(&self, x0: f32, z0: f32, x1: f32, z1: f32, out: &mut Vec<Tree>) {
+        if self.real.is_none() {
+            return;
+        }
+        let (i0, i1) = ((x0 / TREE_CELL).floor() as i32, ((x1 / TREE_CELL).ceil() as i32));
+        let (j0, j1) = ((z0 / TREE_CELL).floor() as i32, ((z1 / TREE_CELL).ceil() as i32));
+        for j in j0..j1 {
+            for i in i0..i1 {
+                let x = (i as f32 + 0.15 + 0.7 * hashf(i, j, 1)) * TREE_CELL;
+                let z = (j as f32 + 0.15 + 0.7 * hashf(i, j, 2)) * TREE_CELL;
+                if x < x0 || x >= x1 || z < z0 || z >= z1 {
+                    continue;
+                }
+                let roll = hashf(i, j, 3);
+                // Descarte barato antes de calcular alturas: casi toda la pradera no tiene árboles.
+                let da = self.arroyo_distance(x, z);
+                let p_max = if da < 70.0 { 0.8 } else { 0.025 };
+                if roll >= p_max {
+                    continue;
+                }
+                let h = self.height(x, z);
+                if h < 1.2 {
+                    continue;
+                }
+                let (p, kind) = if da < ARROYO_AGUA + 3.0 {
+                    (0.0, 0)
+                } else if da < 34.0 {
+                    (0.8, 1) // monte ribereño cerrado
+                } else if da < 70.0 {
+                    (0.3, 1)
+                } else {
+                    let sd = self.sea_distance(x, z);
+                    if sd < 110.0 || sd < self.dune_belt(x, z) {
+                        (0.0, 0) // playa y médanos: arena suelta, sin árboles
+                    } else if sd < 400.0 {
+                        (0.01, 2) // matorral costero
+                    } else if h > 100.0 {
+                        (0.02, 2) // espinillos en el Cerro
+                    } else {
+                        (0.0035, 3) // árbol suelto en la pradera
+                    }
+                };
+                if roll >= p {
+                    continue;
+                }
+                let r2 = hashf(i, j, 4);
+                let t = match kind {
+                    1 => Tree { x, z, height: 5.5 + r2 * 4.0, radius: 2.4 + r2 * 1.6, trunk: 0.35, leaf: if hashf(i, j, 5) < 0.6 { LEAF_DARK } else { LEAF } },
+                    2 => Tree { x, z, height: 3.5 + r2 * 2.0, radius: 1.8 + r2 * 1.0, trunk: 0.3, leaf: LEAF_DARK },
+                    _ if hashf(i, j, 6) < 0.45 => Tree { x, z, height: 8.0 + r2 * 3.0, radius: 5.5 + r2 * 2.0, trunk: 1.0, leaf: LEAF_OMBU },
+                    _ => Tree { x, z, height: 6.0 + r2 * 2.0, radius: 3.0 + r2 * 1.0, trunk: 0.4, leaf: LEAF },
+                };
+                out.push(t);
+            }
+        }
+    }
+
+    /// Radio máximo de copa (para buscar árboles que entran en una columna desde las vecinas).
+    pub const MAX_TREE_RADIUS: f32 = 7.5;
+
     fn add_arroyo(&mut self, raw: &[(f32, f32)]) {
         let raw: Vec<Vec2> = raw.iter().map(|&(x, z)| Vec2::new(x, z)).collect();
         let pts = self.smooth_path(&raw, 40.0);
+        self.add_arroyo_raw(pts);
+    }
+
+    /// Registra un arroyo ya muestreado (los del mapa real vienen con meandros).
+    fn add_arroyo_raw(&mut self, pts: Vec<Vec2>) {
         for w in pts.windows(2) {
             let (a, b) = (w[0], w[1]);
             let si = self.seg_a.len() as u32;
@@ -273,6 +701,37 @@ mod tests {
             assert_eq!(t.arroyo_distance(x, z), slow(x, z));
             assert_eq!(t.height(x, z), t.height_with_coast(x, z, t.coast_z(x)));
         }
+    }
+
+    #[test]
+    fn mapa_real_de_montevideo() {
+        let t = TerrainGen::montevideo();
+        assert!(t.height(FOUNDING_REAL.x, FOUNDING_REAL.y) > 2.0, "la Ciudad Vieja es tierra firme");
+        assert!(t.height(CERRO_REAL.x, CERRO_REAL.y) > 100.0, "el Cerro");
+        assert!(t.height(12000.0, 22000.0) < 0.0, "al sur, el Río de la Plata");
+        assert!(t.arroyos.len() >= 10, "{} arroyos", t.arroyos.len());
+        // El cauce de un arroyo es agua.
+        let p = t.arroyos[0][t.arroyos[0].len() / 2];
+        assert_eq!(t.surface_material(p.x, p.y, t.height(p.x, p.y), 0.0), STREAM);
+        // Borde del mapa sin saltos: a ambos lados del límite la altura es parecida.
+        for k in 0..50 {
+            let z = 2000.0 + k as f32 * 400.0;
+            let (a, b) = (t.height(MAP_SIZE - 1.0, z), t.height(MAP_SIZE + 1.0, z));
+            assert!((a - b).abs() < 1.5, "salto en el borde: {a} / {b} en z={z}");
+        }
+        // Relieve suave: sin escalones entre muestras vecinas de 1 m en tierra firme.
+        let mut worst: f32 = 0.0;
+        for k in 0..2000 {
+            let (x, z) = (9000.0 + (k % 40) as f32 * 37.0, 9000.0 + (k / 40) as f32 * 41.0);
+            worst = worst.max((t.height(x + 1.0, z) - t.height(x, z)).abs());
+        }
+        assert!(worst < 1.5, "escalón de {worst} m en 1 m");
+        // Hay árboles, sobre todo cerca de los arroyos.
+        let mut trees = Vec::new();
+        t.trees_in(p.x - 300.0, p.y - 300.0, p.x + 300.0, p.y + 300.0, &mut trees);
+        let mut prairie = Vec::new();
+        t.trees_in(9000.0, 9000.0, 9600.0, 9600.0, &mut prairie);
+        assert!(trees.len() > prairie.len() * 3, "monte {} / pradera {}", trees.len(), prairie.len());
     }
 
     #[test]

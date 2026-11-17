@@ -4,3 +4,4 @@
 *.tmp
 engine/target/
 dist/
+.claude/worktrees/

@@ -38,6 +38,28 @@ struct TourUi {
     ms: Vec<f64>,
 }
 
+/// Paisajes del mapa real de Montevideo (`motor --mapa real --auto-test carpeta`): para revisar
+/// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
+pub fn landscape_steps() -> Vec<Act> {
+    use Act::*;
+    let views: [(&'static str, [f32; 5]); 7] = [
+        ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
+        ("paisaje-ciudad-vieja", [11300.0, 14350.0, 900.0, 200.0, 38.0]),
+        ("paisaje-medanos-carrasco", [22000.0, 13100.0, 520.0, 200.0, 30.0]),
+        ("paisaje-costa-este-lejos", [21500.0, 13000.0, 2600.0, 230.0, 28.0]),
+        ("paisaje-arroyo-monte", [12752.5, 5055.0, 260.0, 200.0, 38.0]),
+        ("paisaje-cerro", [5924.0, 12270.0, 1600.0, 200.0, 32.0]),
+        ("paisaje-ladera-cerca", [9000.0, 9000.0, 120.0, 200.0, 30.0]),
+    ];
+    let mut out = vec![Hour(10.5)];
+    for (name, cam) in views {
+        out.push(Cam(cam));
+        out.push(WaitIdle(name));
+        out.push(Shot(name));
+    }
+    out
+}
+
 /// Recorrido del modo juego: funda la plaza, traza un damero y una calle curva, zonifica,
 /// hace crecer la ciudad y saca capturas (general, de cerca sobre la curva y de noche).
 pub fn city_steps() -> Vec<Act> {

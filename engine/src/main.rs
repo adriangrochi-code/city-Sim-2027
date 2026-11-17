@@ -9,7 +9,7 @@
 //!   motor --auto-test carpeta          recorrido automático sin pantalla, con capturas
 //!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
 //!   motor --bench carpeta              banco de pruebas reproducible (tabla y capturas)
-//! Opciones: --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
+//! Opciones: --mapa real (Montevideo, sin la escena), --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
 //!   --hour 10.5, --size 1600x900, --levels 8, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
 //!   --sin-suavizar (sin el suavizado de los escalones del terreno)
 
@@ -61,6 +61,8 @@ struct Args {
     juego: bool,
     sandbox: bool,
     scene_set: bool,
+    /// Capturas y sandbox sobre el mapa real de Montevideo (`--mapa real`).
+    real: bool,
 }
 
 fn parse_args() -> Args {
@@ -83,6 +85,7 @@ fn parse_args() -> Args {
         juego: false,
         sandbox: false,
         scene_set: false,
+        real: false,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -113,6 +116,7 @@ fn parse_args() -> Args {
                     a.cam[k] = v.parse().unwrap_or(a.cam[k]);
                 }
             }
+            "--mapa" => a.real = next == "real",
             "--hour" => a.hour = next.parse().unwrap_or(a.hour),
             "--size" => {
                 if let Some((w, h)) = next.split_once('x') {
@@ -170,6 +174,10 @@ fn new_session(args: &Args) -> session::Session {
         session::Session::new_game(args.levels, args.threads, cam, args.hour)
     } else {
         let cam = if args.cam_set { args.cam } else { session::scene_camera(&args.scene) };
+        if args.real {
+            let t = std::sync::Arc::new(terrain::TerrainGen::montevideo());
+            return session::Session::with_terrain("vacia", t, args.levels, args.threads, cam, args.hour);
+        }
         session::Session::new(&args.scene, args.levels, args.threads, cam, args.hour)
     }
 }
@@ -231,7 +239,7 @@ fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
     println!("Adaptador: {} · listo en {:.2?} · {} hilos de trabajo", r.adapter_name, t0.elapsed(), args.threads);
     let mut s = new_session(args);
     s.view_h = args.size.1 as f32;
-    let steps = if s.game.is_some() { tour::city_steps() } else { tour::default_steps() };
+    let steps = if s.game.is_some() { tour::city_steps() } else if args.real { tour::landscape_steps() } else { tour::default_steps() };
     let mut tour = tour::Tour::with_steps(dir, args.size.0, args.size.1, steps);
     let mut first_logged = false;
     loop {

@@ -52,7 +52,15 @@ pub const SACK: Mat = 43;
 pub const LEAF_OMBU: Mat = 44;
 pub const CAL_AZUL: Mat = 45;
 pub const AZUL_SUCIA: Mat = 46;
-pub const COUNT: usize = 47;
+// Biomas del mapa real.
+pub const SAND_WET: Mat = 47;
+pub const MARSH: Mat = 48;
+pub const GRASS_LUSH: Mat = 49;
+pub const COAST_ROCK: Mat = 50;
+pub const DUNE: Mat = 51;
+pub const STREAM: Mat = 52;
+pub const FOREST_FLOOR: Mat = 53;
+pub const COUNT: usize = 54;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -76,7 +84,7 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [186, 178, 160], // piedra de la plaza
     [70, 98, 44],    // hojas
     [84, 64, 46],    // tronco
-    [150, 150, 88],  // pastizal seco
+    [142, 144, 84],  // pastizal seco
     [150, 104, 80],  // baldosa de azotea
     [228, 206, 158], // cal ocre
     [222, 182, 168], // cal rosa viejo
@@ -103,6 +111,13 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [86, 120, 52],   // hojas de ombú
     [196, 210, 216], // cal celeste
     [176, 188, 192], // cal celeste manchada
+    [156, 138, 104], // arena húmeda
+    [104, 112, 62],  // bañado (juncos y paja brava)
+    [108, 134, 64],  // pradera húmeda
+    [98, 92, 86],    // piedra de la costa
+    [216, 200, 158], // médano
+    [64, 82, 82],    // agua del arroyo
+    [86, 80, 52],    // hojarasca del monte
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)

@@ -191,7 +191,9 @@ fn gen_column(t: &TerrainGen, le: &LevelEdits, spec: LevelSpec, c: IVec2) -> (IV
                     } else if depth <= soil {
                         match s {
                             SAND | MUD => s,
-                            ROCK => ROCK,
+                            SAND_WET | DUNE => SAND,
+                            STREAM | MARSH => MUD,
+                            ROCK | COAST_ROCK => ROCK,
                             _ => DIRT,
                         }
                     } else {

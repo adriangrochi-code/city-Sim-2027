@@ -443,12 +443,128 @@ fn layer(depth: i32, soil: i32, surf: Mat) -> Mat {
     } else if depth <= soil {
         match surf {
             SAND | MUD => surf,
-            ROCK => ROCK,
+            SAND_WET | DUNE => SAND,
+            STREAM | MARSH => MUD,
+            ROCK | COAST_ROCK => ROCK,
             _ => DIRT,
         }
     } else {
         ROCK
     }
+}
+
+/// Un árbol ya llevado a vóxeles del nivel: tronco y copa (elipsoide).
+struct VoxTree {
+    /// Centro del tronco en vóxeles (x, z), suelo (y del primer vóxel de tronco).
+    cx: f32,
+    cz: f32,
+    ground: i32,
+    trunk_top: i32,
+    trunk_r: f32,
+    /// Centro y radios de la copa en vóxeles.
+    cy: f32,
+    rh: f32,
+    rv: f32,
+    top: i32,
+    leaf: Mat,
+    seed: u32,
+}
+
+/// Niveles con árboles: de 0,5 m a 4 m por vóxel (más lejos, una copa sería un solo vóxel).
+const TREE_MAX_LOD: u32 = 3;
+
+/// Árboles cuyo tronco o copa caen en la columna, salvo donde hay obras (calles, plaza o
+/// edificios): ahí el monte se taló.
+fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, col: IVec2) -> Vec<VoxTree> {
+    let mut out = Vec::new();
+    if spec.lod > TREE_MAX_LOD || !t.is_real() {
+        return out;
+    }
+    let vs = spec.voxel();
+    let r = TerrainGen::MAX_TREE_RADIUS;
+    let (x0, z0) = (col.x as f32 * N as f32 * vs, col.y as f32 * N as f32 * vs);
+    let (x1, z1) = (x0 + N as f32 * vs, z0 + N as f32 * vs);
+    let mut trees = Vec::new();
+    t.trees_in(x0 - r - vs, z0 - r - vs, x1 + r + vs, z1 + r + vs, &mut trees);
+    for tr in trees {
+        let (gx, gz) = ((tr.x / vs).floor() as i32, (tr.z / vs).floor() as i32);
+        // ¿Obras cerca del tronco? (superficie pintada o vóxeles editados en el chunk).
+        let cleared = (-1..=1).any(|d: i32| {
+            let g = IVec2::new(gx + d * (3.0 / vs).ceil() as i32, gz);
+            let g2 = IVec2::new(gx, gz + d * (3.0 / vs).ceil() as i32);
+            ls.surface.contains_key(&g) || ls.surface.contains_key(&g2)
+        });
+        if cleared {
+            continue;
+        }
+        let ground = top_from_height(t.height(tr.x, tr.z), vs) + 1;
+        let ck = IVec2::new(gx >> 5, gz >> 5);
+        let cy = ground >> 5;
+        if (-1..=1).any(|dy| ls.voxels.contains_key(&IVec3::new(ck.x, cy + dy, ck.y))) {
+            continue;
+        }
+        let rh = (tr.radius / vs).max(0.8);
+        let rv = (tr.radius * 0.72 / vs).max(0.7);
+        let c_y = ground as f32 + (tr.height - tr.radius * 0.72) / vs;
+        out.push(VoxTree {
+            cx: tr.x / vs,
+            cz: tr.z / vs,
+            ground,
+            trunk_top: c_y as i32,
+            trunk_r: (tr.trunk / vs).max(0.55),
+            cy: c_y,
+            rh,
+            rv,
+            top: (c_y + rv).ceil() as i32,
+            leaf: tr.leaf,
+            seed: (gx as u32).wrapping_mul(73_856_093) ^ (gz as u32).wrapping_mul(19_349_663),
+        });
+    }
+    out
+}
+
+/// Escribe un árbol en el bloque `pad` (Q³ desde `lo`); solo ocupa aire y columnas presentes.
+/// Devuelve los vóxeles puestos.
+fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
+    let mut n = 0;
+    let (u0, u1) = (((tr.cx - tr.rh).floor() as i32 - lo.x).max(0), ((tr.cx + tr.rh).ceil() as i32 - lo.x).min(Q - 1));
+    let (w0, w1) = (((tr.cz - tr.rh).floor() as i32 - lo.z).max(0), ((tr.cz + tr.rh).ceil() as i32 - lo.z).min(Q - 1));
+    let (y0, y1) = ((tr.ground - lo.y).max(0), (tr.top - lo.y).min(Q - 1));
+    if u0 > u1 || w0 > w1 || y0 > y1 {
+        return 0;
+    }
+    for w in w0..=w1 {
+        for u in u0..=u1 {
+            if top[(u + w * Q) as usize] == i32::MIN {
+                continue;
+            }
+            let (dx, dz) = ((u + lo.x) as f32 + 0.5 - tr.cx, (w + lo.z) as f32 + 0.5 - tr.cz);
+            let d2 = dx * dx + dz * dz;
+            for y in y0..=y1 {
+                let gy = y + lo.y;
+                let k = (u + w * Q + y * Q * Q) as usize;
+                if pad[k] != AIR {
+                    continue;
+                }
+                let m = if gy <= tr.trunk_top && d2 <= tr.trunk_r * tr.trunk_r {
+                    TRUNK
+                } else {
+                    let dy = gy as f32 + 0.5 - tr.cy;
+                    let e = d2 / (tr.rh * tr.rh) + dy * dy / (tr.rv * tr.rv);
+                    // Borde de la copa irregular: algunos vóxeles del contorno faltan.
+                    let hh = (tr.seed ^ ((u + lo.x) as u32).wrapping_mul(2_654_435_761) ^ (gy as u32).wrapping_mul(40_503) ^ ((w + lo.z) as u32).wrapping_mul(97_331)) % 100;
+                    if e <= 1.0 && (e < 0.6 || hh > 35) {
+                        tr.leaf
+                    } else {
+                        continue;
+                    }
+                };
+                pad[k] = m;
+                n += 1;
+            }
+        }
+    }
+    n
 }
 
 /// Genera y malla una columna de chunks completa de un nivel.
@@ -510,11 +626,23 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
             }
         }
     }
+    // Pendiente continua de cada columna de la copia con borde (para la normal de las laderas).
+    let mut grad = vec![0f32; (Q * Q * 2) as usize];
+    for j in 0..Q {
+        for i in 0..Q {
+            let hi = |a: i32, b: i32| hs[((i + 1 + a) + (j + 1 + b) * p) as usize];
+            let k = ((i + j * Q) * 2) as usize;
+            grad[k] = (hi(1, 0) - hi(-1, 0)) / (2.0 * vs);
+            grad[k + 1] = (hi(0, 1) - hi(0, -1)) / (2.0 * vs);
+        }
+    }
     SURF_NS.fetch_add(tsf.elapsed().as_nanos() as u64, AtOrd::Relaxed);
     let soil = ((2.0 / vs).ceil() as i32).max(1);
     let edit_top = ls.max_y.get(&col).copied().unwrap_or(i32::MIN);
+    let trees = column_trees(t, ls, spec, col);
+    let tree_top = trees.iter().map(|tr| tr.top).max().unwrap_or(i32::MIN);
     let y0 = (tmin - 1).div_euclid(N);
-    let y1 = tmax.max(edit_top).div_euclid(N);
+    let y1 = tmax.max(edit_top).max(tree_top).div_euclid(N);
     // Origen de la malla de la columna: esquina inferior del chunk más bajo.
     let mut out = Mesh::new(Vec3::new(base.x as f32, (y0 * N) as f32, base.y as f32) * vs, vs);
     let mut pad = vec![AIR; (Q * Q * Q) as usize];
@@ -556,6 +684,10 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
                 }
             }
         }
+        // Árboles del paisaje (antes que las ediciones: una obra los tapa).
+        for tr in &trees {
+            solid += raster_tree(tr, lo, &top, &mut pad);
+        }
         if any_edit {
             // Ediciones del propio chunk: se recorren todas.
             if let Some(map) = ls.voxels.get(&ck) {
@@ -591,7 +723,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         }
         CHUNKS.fetch_add(1, AtOrd::Relaxed);
         let tm = std::time::Instant::now();
-        let m = mesher::mesh_chunk(&pad, IVec3::new(0, (cy - y0) * N, 0));
+        let m = mesher::mesh_chunk_grad(&pad, IVec3::new(0, (cy - y0) * N, 0), Some(&grad));
         out.append(&m);
         *mesh_ns += tm.elapsed().as_nanos() as u64;
     }

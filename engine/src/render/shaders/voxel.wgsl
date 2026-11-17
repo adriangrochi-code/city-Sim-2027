@@ -147,10 +147,12 @@ const M_STONE: u32 = 36u;
 const M_STONE_DARK: u32 = 37u;
 const M_HIDE: u32 = 38u;
 const M_DOME: u32 = 41u;
+const M_STREAM: u32 = 52u;
+const M_MARSH: u32 = 48u;
 
 // Materiales del terreno (deben coincidir con palette.rs).
 fn is_terrain(m: u32) -> bool {
-    return m == 1u || m == 2u || m == 3u || m == 4u || m == 5u || m == 12u || m == 13u || m == 17u || m == 20u || m == 25u;
+    return m == 1u || m == 2u || m == 3u || m == 4u || m == 5u || m == 12u || m == 13u || m == 17u || m == 20u || m == 25u || (m >= 47u && m <= 53u);
 }
 
 // Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
@@ -185,7 +187,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         // De cerca se nota algo el escalón (estética de vóxeles); de lejos, nada.
         if (abs(n.y) < 0.5) {
             let far = smoothstep(0.08, 0.35, fw);
-            ln = normalize(mix(normalize(n * 0.35 + ln), ln, far));
+            ln = normalize(mix(normalize(n * 0.15 + ln), ln, far));
         }
     }
     albedo *= 1.0 - select(0.18, 0.05, terr) * line;
@@ -231,13 +233,21 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         // Cueros estaqueados: borde más oscuro.
         let a = fract(along(v.world, n) * 2.0);
         albedo *= mix(1.0, 0.75 + 0.25 * smoothstep(0.0, 0.2, min(a, 1.0 - a)), near);
+    } else if (mat == M_MARSH) {
+        // Bañado: matas de junco más oscuras y espejos de agua entre ellas.
+        let c = hash3(floor(v.world * vec3(1.5, 1.0, 1.5)));
+        albedo *= mix(1.0, 0.75 + 0.4 * c, near * 0.8 + 0.2);
     } else if (mat == M_DOME) {
         // Azulejos de la cúpula: damero fino.
         let c = floor(along(v.world, n) * 6.0) + floor(v.world.y * 6.0);
         albedo *= mix(1.0, 0.9 + 0.12 * (c - 2.0 * floor(c * 0.5)), near);
     }
 
-    let ao = mix(select(0.42, 0.8, terr), 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
+    // De lejos, el terreno no se oscurece en los escalones: si no, cada escalón dibuja una
+    // curva de nivel y la ladera se ve rayada.
+    let far_t = smoothstep(0.08, 0.35, fw);
+    let ao_min = select(0.42, mix(0.9, 1.0, far_t), terr);
+    let ao = mix(ao_min, 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
     let ndl = max(dot(ln, g.sun_dir.xyz), 0.0);
     // Las caras que no miran al sol no reciben su luz: no hace falta consultar la sombra
     // (9 lecturas del mapa por fragmento). El resultado es idéntico.
@@ -249,6 +259,12 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let bounce = vec3(0.35, 0.30, 0.22) * max(-ln.y, 0.0);
     var light = g.sun_color.rgb * ndl * sh + (sky * 0.55 + bounce * 0.2) * g.params.w * ao;
     var col = albedo * light;
+    // Agua de los arroyos: refleja el cielo, más cuanto más rasante se mira.
+    if (mat == M_STREAM) {
+        let vdir = normalize(g.cam_pos.xyz - v.world);
+        let fres = 0.25 + 0.6 * pow(1.0 - max(vdir.y, 0.0), 3.0);
+        col = mix(col, g.sky_horizon.rgb * 0.9, fres);
+    }
     // Ventanas iluminadas por velas de noche.
     if (glass > 0.0) {
         // Toda la ventana se enciende o no (celda de ~2 m × 3 m), no vóxel por vóxel.

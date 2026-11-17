@@ -143,7 +143,7 @@ impl Vertex {
 /// Materiales del terreno natural y del suelo (calles, plaza, huertas).
 pub fn is_terrain(m: Mat) -> bool {
     use palette::*;
-    matches!(m, GRASS | DIRT | SAND | ROCK | MUD | COBBLE | DIRT_ROAD | PLAZA | GRASS_DRY | GARDEN)
+    matches!(m, GRASS | DIRT | SAND | ROCK | MUD | COBBLE | DIRT_ROAD | PLAZA | GRASS_DRY | GARDEN | SAND_WET | MARSH | GRASS_LUSH | COAST_ROCK | DUNE | STREAM | FOREST_FLOOR)
 }
 
 /// Altura (índice y en la copia con borde) del vóxel de terreno más alto de cada columna.
@@ -160,6 +160,24 @@ fn terrain_tops(v: &[Mat]) -> Vec<i32> {
         }
     }
     tops
+}
+
+/// Terreno natural (no calles, plaza ni huertas, que están aplanadas por obras).
+fn is_natural(m: Mat) -> bool {
+    use palette::*;
+    !matches!(m, COBBLE | DIRT_ROAD | PLAZA | GARDEN)
+}
+
+/// Normal en una esquina a partir de la pendiente continua de las cuatro columnas que la tocan.
+fn grad_normal(grad: &[f32], cx: i32, cz: i32) -> [i8; 4] {
+    let (mut gx, mut gz) = (0.0, 0.0);
+    for (x, z) in [(cx - 1, cz - 1), (cx, cz - 1), (cx - 1, cz), (cx, cz)] {
+        let k = (x.clamp(0, P - 1) + z.clamp(0, P - 1) * P) as usize * 2;
+        gx += grad[k];
+        gz += grad[k + 1];
+    }
+    let n = Vec3::new(-gx / 4.0, 1.0, -gz / 4.0).normalize();
+    [(n.x * 127.0) as i8, (n.y * 127.0) as i8, (n.z * 127.0) as i8, 0]
 }
 
 /// Normal suave en una esquina de la grilla (coordenadas de la copia con borde).
@@ -304,6 +322,15 @@ fn at(v: &[Mat], x: i32, y: i32, z: i32) -> Mat {
 /// Solo se calculan material y oclusión donde realmente hay una cara; después, cada corte se
 /// une con el mismo *greedy meshing* de siempre (la salida es idéntica a la versión anterior).
 pub fn mesh_chunk(v: &[Mat], offset: IVec3) -> Mesh {
+    mesh_chunk_grad(v, offset, None)
+}
+
+/// Igual que [`mesh_chunk`], con la pendiente continua del terreno de cada columna de la
+/// copia con borde (`grad[(x + z * P) * 2 ..]` = dh/dx, dh/dz). Con ella, la normal suave de
+/// las laderas sale del relieve real y no de los escalones enteros: en una pendiente suave,
+/// los escalones daban una normal que saltaba de plana a empinada en cada borde y la ladera
+/// se veía rayada como un mapa de curvas de nivel.
+pub fn mesh_chunk_grad(v: &[Mat], offset: IVec3, grad: Option<&[f32]>) -> Mesh {
     let mut mesh = Mesh::default();
     let tops = terrain_tops(v);
     // Bits de sólido por fila: rows[y * P + z] tiene el bit x encendido si (x, y, z) no es aire.
@@ -391,7 +418,7 @@ pub fn mesh_chunk(v: &[Mat], offset: IVec3) -> Mesh {
                                 mask[(i + ii + (j + jj) * N) as usize] = 0;
                             }
                         }
-                        emit_quad(&mut mesh, &tops, offset, axis, u_ax, v_ax, sign, slice, i, j, w, h, key);
+                        emit_quad(&mut mesh, &tops, grad, offset, axis, u_ax, v_ax, sign, slice, i, j, w, h, key);
                         i += w;
                     }
                 }
@@ -421,7 +448,7 @@ fn face_ao(v: &[Mat], p: [i32; 3], u_ax: usize, v_ax: usize) -> u32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_quad(mesh: &mut Mesh, tops: &[i32], offset: IVec3, axis: usize, u_ax: usize, v_ax: usize, sign: i32, slice: i32, i: i32, j: i32, w: i32, h: i32, key: u32) {
+fn emit_quad(mesh: &mut Mesh, tops: &[i32], grad: Option<&[f32]>, offset: IVec3, axis: usize, u_ax: usize, v_ax: usize, sign: i32, slice: i32, i: i32, j: i32, w: i32, h: i32, key: u32) {
     let m = (key & 0xff) as Mat;
     let ao = (key >> 8) & 0xff;
     let plane = if sign > 0 { slice + 1 } else { slice };
@@ -438,7 +465,10 @@ fn emit_quad(mesh: &mut Mesh, tops: &[i32], offset: IVec3, axis: usize, u_ax: us
     for (k, (du, dv)) in [(0, 0), (w, 0), (w, h), (0, h)].iter().enumerate() {
         let g = grid(*du, *dv);
         let (sx, sz) = if terrain {
-            let sn = smooth_normal(tops, g[0] + 1, g[2] + 1);
+            let sn = match grad {
+                Some(gr) if is_natural(m) => grad_normal(gr, g[0] + 1, g[2] + 1),
+                _ => smooth_normal(tops, g[0] + 1, g[2] + 1),
+            };
             ((sn[0] as i32 + 128) as u32, (sn[2] as i32 + 128) as u32)
         } else {
             (128, 128)

@@ -47,8 +47,11 @@ pub struct Session {
 
 impl Session {
     pub fn new(scene: &str, levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
+        Session::with_terrain(scene, Arc::new(TerrainGen::new(1726)), levels, threads, cam, hour)
+    }
+
+    pub fn with_terrain(scene: &str, terrain: Arc<TerrainGen>, levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
         let started = Instant::now();
-        let terrain = Arc::new(TerrainGen::new(1726));
         let store = Arc::new(RwLock::new(EditStore::new(levels)));
         let streamer = Streamer::new(terrain.clone(), store, levels, threads);
         // La escena (miles de edificios) se arma en otro hilo: mientras tanto ya se ve el terreno.
@@ -73,7 +76,8 @@ impl Session {
 
     /// Sesión del modo juego: terreno virgen y la ciudad por fundar.
     pub fn new_game(levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
-        let mut s = Session::new("vacia", levels, threads, cam, hour);
+        // El juego se juega sobre la geografía real de Montevideo.
+        let mut s = Session::with_terrain("vacia", Arc::new(TerrainGen::montevideo()), levels, threads, cam, hour);
         s.game = Some(Game::default());
         s.day_paused = false;
         s
