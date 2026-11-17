@@ -12,6 +12,9 @@
 | Prototipo: época colonial | Mapa por parcelas, calles curvas, solares, crecimiento en 3 niveles, vecinos con conducción realista, agua, incendios, puerto y flujos, muralla y aduana, serenos, campo, iglesia por fases, ampliar y modernizar, nuevo orden, guardar/cargar |
 | Motor de vóxeles | Mundo por chunks con LOD, streaming en hilos, catálogo colonial en vóxeles, ventana interactiva, sandbox, optimizado (dibujo indirecto, caras compactas, descarte en GPU) |
 | Distribución | Versión de prueba para Linux (probada) y Windows (compilada) con `tools/empaquetar.sh` |
+| Mundo real en el motor | MDT de 30 m de la IDE, hidrografía oficial (arroyos, cañadas, bañados, playas, islas), curvatura, puentes, ríos con corriente, mareas y ciclo lunar, sequías e inundaciones, clima con datos del INUMET, viento |
+| Paisaje de 1726 | Monte nativo calibrado con datos y testimonios (4,2 % del mapa, galerías por clase de cauce), 9 especies de árboles con variantes, flora baja nativa por zona, suelos y afloramientos (CONEAT), costa por tramos (arena, mixta, piedra, restingas) — ver `docs/sistemas/vegetacion-historica.md` y `costa.md` |
+| Calidad visual | Vóxel de 0,25 m, flora en micro-vóxeles de 0,125 m, copas con racimos, nivel de detalle del monte, agua sin tapar tierra en ningún nivel, niebla con sol |
 
 ## Fase 1: cerrar la época colonial (prototipo)
 
@@ -39,11 +42,13 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 2. [x] Solares que siguen la calle, zonificación con pincel y crecimiento con el catálogo de vóxeles (rancho → azotea → altos), con edificios girados a cualquier ángulo
 3. [x] Interfaz del juego en el motor: categorías con cajón de tarjetas, barra de fichas, ficha de información, gaceta, ordenanzas y presupuesto con impuestos
 3b. [x] Economía en el motor: existencias, mercado, comercio por el puerto, impuestos, presupuesto, opinión y ordenanzas
-3c. [ ] Mapa real de Montevideo en el motor
-4. [ ] Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
-5. [ ] Servicios, agua, incendios, puerto, muralla, campo e iglesia
+3c. [x] Mapa real de Montevideo en el motor (geografía, agua, clima, vegetación y costa reales)
+4. [ ] *(en curso)* Vecinos y vehículos con el modelo de conducción IDM (portar desde el prototipo)
+5. [ ] *(en curso)* Servicios, agua, incendios, puerto, muralla, campo e iglesia
 6. [x] Guardar y cargar en el motor (menú principal, menú de pausa con Esc, F5 / F9, opciones y autoguardado)
 7. [ ] Hi-Z (descarte de lo tapado), sombras en cascadas, medir en GPU real
+8. [x] Vóxel de 0,25 m con capa de detalle de 0,125 m (flora) y monte con nivel de detalle
+9. [ ] Hojas de los árboles en micro-vóxeles (sauces con ramas colgantes de cerca), curva tonal
 
 ## Fase 3: diseño de todas las épocas
 
