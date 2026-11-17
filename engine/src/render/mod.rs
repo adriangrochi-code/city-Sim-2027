@@ -586,7 +586,9 @@ impl Renderer {
         });
         // Superficie del río: un plano enorme al nivel del mar (en cuadrícula para la precisión).
         let mut wv: Vec<[f32; 3]> = Vec::new();
-        let (c, s, n) = (12000.0f32, 20000.0f32, 20); // 400 km: el río llega hasta el horizonte
+        // 400 km en baldosas de 2 km: la curvatura de la Tierra se aplica en cada vértice, y con
+        // baldosas más grandes el centro de cada una quedaba metros por debajo del nivel real.
+        let (c, s, n) = (12000.0f32, 2000.0f32, 200);
         for j in 0..n {
             for i in 0..n {
                 let x0 = c - s * n as f32 / 2.0 + i as f32 * s;
