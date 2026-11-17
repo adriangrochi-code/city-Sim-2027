@@ -507,6 +507,51 @@ fn vnoise3(p: Vec3, seed: u32) -> f32 {
 /// Niveles con árboles: hasta 4 m por vóxel (más lejos, una copa sería un solo vóxel).
 const TREE_MAX_VOXEL: f32 = 4.0;
 
+fn hash_col(x: i32, z: i32, salt: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (z as u32).wrapping_mul(0xd816_3841) ^ salt.wrapping_mul(0x9e37_79b9);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5bd1_e995);
+    h ^= h >> 15;
+    (h & 0xffff) as f32 / 65536.0
+}
+
+/// Monte de lejos: en los niveles sin árboles sueltos, cuántos vóxeles de copa tiene cada
+/// columna de la copia con borde (0 = ninguno) y de qué follaje. Las copas cubren la fracción
+/// del suelo que da la densidad del monte; su altura media es la del monte (5,5–9 m: sauces,
+/// canelones y talas de la galería), repartida al azar entre 0 y 1 vóxel cuando el vóxel es
+/// más grande que el monte, así en promedio la masa tiene la altura justa.
+fn forest_canopy(t: &TerrainGen, spec: LevelSpec, base: IVec2, top: &[i32], surf: &[Mat], natural: &[bool]) -> (Vec<i32>, Vec<Mat>) {
+    let n = (Q * Q) as usize;
+    let mut c = vec![0i32; n];
+    let mut m = vec![AIR; n];
+    let vs = spec.voxel();
+    if vs <= TREE_MAX_VOXEL || !t.is_real() {
+        return (c, m);
+    }
+    for j in 0..Q {
+        for i in 0..Q {
+            let k = (i + j * Q) as usize;
+            if !natural[k] || top[k] == i32::MIN || !matches!(surf[k], FOREST_FLOOR | GRASS_LUSH | GRASS | GRASS_DRY) {
+                continue;
+            }
+            if (top[k] as f32 + 1.0) * vs < 1.2 {
+                continue;
+            }
+            let (gx, gz) = (base.x + i - 1, base.y + j - 1);
+            let (x, z) = ((gx as f32 + 0.5) * vs, (gz as f32 + 0.5) * vs);
+            let dens = t.forest_density(x, z);
+            if dens < 0.25 || dens < 0.3 + 0.45 * hash_col(gx, gz, 1) {
+                continue;
+            }
+            let h = (5.5 + 3.5 * dens) * (0.85 + 0.3 * hash_col(gx, gz, 2));
+            c[k] = (h / vs + hash_col(gx, gz, 3)).floor() as i32;
+            let u = hash_col(gx, gz, 4);
+            m[k] = if u < 0.45 { LEAF } else if u < 0.75 { LEAF_DARK } else if u < 0.92 { LEAF_TALA } else { LEAF_SAUCE };
+        }
+    }
+    (c, m)
+}
+
 /// Árboles cuyo tronco o copa caen en la columna, salvo donde hay obras (calles, plaza o
 /// edificios): ahí el monte se taló.
 fn column_trees(t: &TerrainGen, ls: &crate::store::LevelStore, spec: LevelSpec, col: IVec2) -> Vec<VoxTree> {
@@ -759,7 +804,11 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
     let edit_top = ls.max_y.get(&col).copied().unwrap_or(i32::MIN);
     let trees = column_trees(t, ls, spec, col);
     let tree_top = trees.iter().map(|tr| tr.top).max().unwrap_or(i32::MIN);
-    // Flora baja (matas, juncos, flores) de cada columna natural, por encima del agua.
+    // Nivel de detalle del monte: en los niveles sin árboles sueltos (vóxel de más de 4 m) el
+    // monte es una masa de copas sobre el suelo, con la altura del monte (5–9 m) y el borde
+    // ralo, así no desaparece al alejar la cámara.
+    let (canopy, canopy_mat) = forest_canopy(t, spec, base, &top, &surf, &natural);
+    let tree_top = tree_top.max((0..(Q * Q) as usize).filter(|&k| canopy[k] > 0).map(|k| top[k] + canopy[k]).max().unwrap_or(i32::MIN));
     // Flora baja (matas, juncos, flores) de cada columna natural, por encima del agua: en
     // micro-vóxeles, aparte de la malla (ver `trees::plant_micro`).
     let mut detail: Vec<crate::trees::Micro> = Vec::new();
@@ -815,7 +864,13 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
                 }
                 for y in 0..Q {
                     let gy = lo.y + y;
-                    let m = if gy > ty { AIR } else { layer(ty - gy, soil, surf[k]) };
+                    let m = if gy > ty + canopy[k] {
+                        AIR
+                    } else if gy > ty {
+                        canopy_mat[k]
+                    } else {
+                        layer(ty - gy, soil, surf[k])
+                    };
                     solid += (m != AIR) as usize;
                     pad[(i + j * Q + y * Q * Q) as usize] = m;
                 }
