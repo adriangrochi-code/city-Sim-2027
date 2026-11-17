@@ -173,6 +173,13 @@ impl Session {
 
     /// Sube a la GPU lo que terminaron los hilos de trabajo (con un presupuesto por cuadro).
     pub fn apply_ops(&mut self, r: &mut Renderer, vertex_budget: usize) -> usize {
+        // Agua de los arroyos del mapa real (se arma una sola vez por renderizador).
+        if self.terrain.is_real() && !r.has_streams() {
+            let v = self.terrain.stream_ribbons();
+            r.set_streams(&v);
+        } else if !self.terrain.is_real() && r.has_streams() {
+            r.set_streams(&[]);
+        }
         // Río y luna del juego (sin partida: río en su nivel medio y media luna).
         match &self.game {
             Some(g) if g.city.plaza.is_some() => {

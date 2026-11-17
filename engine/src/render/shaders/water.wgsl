@@ -16,6 +16,8 @@ struct Globals {
 struct VOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
+    // Corriente (m/s): cero en el río, la del cauce en los arroyos.
+    @location(1) flow: vec2<f32>,
 };
 
 // Curvatura de la Tierra (radio 6371 km): lo lejano baja d²/2R respecto de la cámara. A 10 km
@@ -26,10 +28,12 @@ fn curved(p: vec3<f32>) -> vec3<f32> {
 }
 
 @vertex
-fn vs_main(@location(0) pos: vec3<f32>) -> VOut {
+fn vs_main(@location(0) pos: vec3<f32>, @location(1) flow: vec2<f32>) -> VOut {
     var o: VOut;
-    // El plano del río sube y baja con la marea y los temporales (extra.y).
-    let p = vec3(pos.x, pos.y + g.extra.y, pos.z);
+    o.flow = flow;
+    // El plano del río sube y baja con la marea y los temporales (extra.y); los arroyos no.
+    let is_river = dot(flow, flow) < 1e-6;
+    let p = vec3(pos.x, pos.y + select(0.0, g.extra.y, is_river), pos.z);
     o.clip = g.view_proj * vec4(curved(p), 1.0);
     o.world = p;
     return o;
@@ -84,7 +88,9 @@ fn cell_shade(p: vec2<f32>, size: f32, t: f32) -> vec4<f32> {
 @fragment
 fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let t = g.params.z;
-    let p = v.world.xz;
+    // En los arroyos el dibujo de las celdas viaja con la corriente: el agua se ve correr.
+    let flowing = dot(v.flow, v.flow) > 1e-6;
+    let p = select(v.world.xz, v.world.xz - v.flow * t, flowing);
     // Metros por píxel: elige el tamaño de celda (≥ ~6 píxeles), mezclando dos tamaños para que
     // no se vean saltos.
     let mpp = max(length(fwidth(p)), 1e-4);
@@ -97,7 +103,9 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let n = normalize(vec3(cs.x, 1.0, cs.y));
     let view = normalize(g.cam_pos.xyz - v.world);
     let fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, view), 0.0), 5.0);
-    let base = pow(vec3(0.43, 0.34, 0.23), vec3(2.2)) * (0.92 + 0.16 * cs.z);
+    // El río es color león; el agua de los arroyos, más clara y verdosa (agua dulce y baja).
+    let tint = select(vec3(0.43, 0.34, 0.23), vec3(0.33, 0.38, 0.32), flowing);
+    let base = pow(tint, vec3(2.2)) * (0.92 + 0.16 * cs.z);
     let sky = mix(g.sky_horizon.rgb, g.sky_top.rgb, 0.3);
     let moon = vec3(0.45, 0.5, 0.65) * 0.12 * g.extra.z * g.params.y;
     let lit = base * (g.sun_color.rgb * max(g.sun_dir.y, 0.0) * 0.8 + sky * 0.5 * g.params.w + moon);
@@ -115,5 +123,5 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     col = mix(col, g.sky_horizon.rgb, clamp(fog, 0.0, 0.88));
     // El río es turbio (agua color león): casi no deja ver el fondo. Así tampoco se notan
     // los escalones del fondo entre niveles de detalle.
-    return vec4(col, 0.97);
+    return vec4(col, select(0.97, 0.88, flowing));
 }

@@ -37,6 +37,8 @@ pub struct TerrainGen {
     grid_min: (i32, i32),
     grid_size: (i32, i32),
     pub arroyos: Vec<Vec<Vec2>>,
+    /// Ancho del agua en cada punto de cada arroyo (m), paralelo a `arroyos`.
+    pub arroyo_w: Vec<Vec<f32>>,
     /// Nombre oficial de cada arroyo (paralelo a `arroyos`; `None` si no tiene).
     pub arroyo_nombres: Vec<Option<String>>,
     /// Mapa real (alturas, distancia al mar). `None` = mapa ficticio.
@@ -382,6 +384,7 @@ impl TerrainGen {
             grid_size: (0, 0),
             arroyos: Vec::new(),
             arroyo_nombres: Vec::new(),
+            arroyo_w: Vec::new(),
             real: None,
         };
         t.add_arroyo(&[
@@ -871,6 +874,7 @@ impl TerrainGen {
             }
         }
         self.arroyos.push(pts);
+        self.arroyo_w.push(widths);
     }
 
     /// Catmull-Rom con meandros de ruido (igual que en Godot).
@@ -897,6 +901,71 @@ impl TerrainGen {
             }
         }
         out.push(raw[last]);
+        out
+    }
+}
+
+// --- Agua de los arroyos ----------------------------------------------------------------------
+
+impl TerrainGen {
+    /// Superficie del agua de los arroyos y cañadas: cintas de triángulos que siguen el cauce
+    /// por debajo de las orillas, a la altura del lecho de cada tramo (bajan aguas abajo).
+    /// Cada vértice lleva [x, y, z, fx, fz]: (fx, fz) es la dirección y velocidad de la
+    /// corriente (m/s), para que el agua se vea correr. Solo en el mapa real.
+    pub fn stream_ribbons(&self) -> Vec<[f32; 5]> {
+        let mut out = Vec::new();
+        if self.real.is_none() {
+            return out;
+        }
+        for (pts, ws) in self.arroyos.iter().zip(&self.arroyo_w) {
+            if pts.len() < 2 || ws.len() != pts.len() {
+                continue;
+            }
+            // La corriente va de lo alto a lo bajo.
+            let down = self.height(pts[0].x, pts[0].y) >= self.height(pts[pts.len() - 1].x, pts[pts.len() - 1].y);
+            // Muestreo cada ~5 m a lo largo del arroyo.
+            let mut samples: Vec<(Vec2, f32)> = Vec::new();
+            for k in 0..pts.len() - 1 {
+                let (a, b) = (pts[k], pts[k + 1]);
+                let n = (a.distance(b) / 5.0).ceil().max(1.0) as usize;
+                for j in 0..n {
+                    let u = j as f32 / n as f32;
+                    samples.push((a.lerp(b, u), ws[k] + (ws[k + 1] - ws[k]) * u));
+                }
+            }
+            samples.push((pts[pts.len() - 1], ws[ws.len() - 1]));
+            let mut prev: Option<([f32; 5], [f32; 5])> = None;
+            for i in 0..samples.len() {
+                let (p, w) = samples[i];
+                let (a, b) = (samples[i.saturating_sub(1)].0, samples[(i + 1).min(samples.len() - 1)].0);
+                let tan = (b - a).normalize_or_zero();
+                if tan == Vec2::ZERO {
+                    continue;
+                }
+                let hw = w * 0.5;
+                let (depth, reach) = cauce(hw);
+                // En el río (bajo el nivel del mar) ya está el plano del río.
+                let raw = self.height(p.x, p.y) + depth;
+                if raw < 0.6 {
+                    prev = None;
+                    continue;
+                }
+                // Nivel del agua: un tercio de la profundidad del cauce por debajo de las orillas.
+                let y = raw - depth * 0.35;
+                // Hasta donde la orilla sube por encima del nivel del agua.
+                let half = hw + (reach - hw) * 0.55;
+                let nrm = Vec2::new(-tan.y, tan.x) * half;
+                // Más rápido en cauces angostos: unos 0,3 a 1 m/s.
+                let speed = (0.35 + 1.2 / (1.0 + hw)).min(1.0);
+                let f = if down { tan * speed } else { -tan * speed };
+                let l = [p.x + nrm.x, y, p.y + nrm.y, f.x, f.y];
+                let r = [p.x - nrm.x, y, p.y - nrm.y, f.x, f.y];
+                if let Some((pl, pr)) = prev {
+                    out.extend_from_slice(&[pl, pr, r, pl, r, l]);
+                }
+                prev = Some((l, r));
+            }
+        }
         out
     }
 }

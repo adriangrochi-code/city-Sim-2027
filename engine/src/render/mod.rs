@@ -195,6 +195,8 @@ pub struct Renderer {
     water_pipe: wgpu::RenderPipeline,
     overlay_pipe: wgpu::RenderPipeline,
     water: wgpu::Buffer,
+    /// Agua de los arroyos (cintas sobre el cauce), si el mapa las tiene.
+    streams: Option<wgpu::Buffer>,
     origins: wgpu::Buffer,
     shadow_vox_bg: wgpu::BindGroup,
     /// Megabúfer con las caras de todas las columnas y su asignador por bloques.
@@ -548,7 +550,8 @@ impl Renderer {
                 module: &water_mod,
                 entry_point: "vs_main",
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout { array_stride: 12, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![0 => Float32x3] }],
+                // Posición y corriente (m/s en x, z; cero en el río).
+                buffers: &[wgpu::VertexBufferLayout { array_stride: 20, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2] }],
             },
             fragment: Some(wgpu::FragmentState { module: &water_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[blend_target.clone()] }),
             primitive: Default::default(),
@@ -585,7 +588,7 @@ impl Renderer {
             cache: None,
         });
         // Superficie del río: un plano enorme al nivel del mar (en cuadrícula para la precisión).
-        let mut wv: Vec<[f32; 3]> = Vec::new();
+        let mut wv: Vec<[f32; 5]> = Vec::new();
         // 400 km en baldosas de 2 km: la curvatura de la Tierra se aplica en cada vértice, y con
         // baldosas más grandes el centro de cada una quedaba metros por debajo del nivel real.
         let (c, s, n) = (12000.0f32, 2000.0f32, 200);
@@ -594,7 +597,7 @@ impl Renderer {
                 let x0 = c - s * n as f32 / 2.0 + i as f32 * s;
                 let z0 = c - s * n as f32 / 2.0 + j as f32 * s;
                 let (x1, z1) = (x0 + s, z0 + s);
-                wv.extend_from_slice(&[[x0, 0.0, z0], [x0, 0.0, z1], [x1, 0.0, z1], [x0, 0.0, z0], [x1, 0.0, z1], [x1, 0.0, z0]]);
+                wv.extend_from_slice(&[[x0, 0.0, z0, 0.0, 0.0], [x0, 0.0, z1, 0.0, 0.0], [x1, 0.0, z1, 0.0, 0.0], [x0, 0.0, z0, 0.0, 0.0], [x1, 0.0, z1, 0.0, 0.0], [x1, 0.0, z0, 0.0, 0.0]]);
             }
         }
         let water = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("agua"), contents: bytemuck::cast_slice(&wv), usage: wgpu::BufferUsages::VERTEX });
@@ -689,6 +692,7 @@ impl Renderer {
             shadow_pipe,
             sky_pipe,
             water_pipe,
+            streams: None,
             overlay_pipe,
             water,
             origins,
@@ -829,6 +833,15 @@ impl Renderer {
             }
             self.free_batch(b);
         }
+    }
+
+    /// Sube el agua de los arroyos (una vez por mapa).
+    pub fn set_streams(&mut self, verts: &[[f32; 5]]) {
+        self.streams = (!verts.is_empty()).then(|| self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("arroyos"), contents: bytemuck::cast_slice(verts), usage: wgpu::BufferUsages::VERTEX }));
+    }
+
+    pub fn has_streams(&self) -> bool {
+        self.streams.is_some()
     }
 
     pub fn remove_column(&mut self, key: (u32, IVec2)) {
@@ -1207,7 +1220,11 @@ impl Renderer {
         pass.set_pipeline(&self.water_pipe);
         pass.set_bind_group(0, &self.shadow_bg, &[]);
         pass.set_vertex_buffer(0, self.water.slice(..));
-        pass.draw(0..(self.water.size() / 12) as u32, 0..1);
+        pass.draw(0..(self.water.size() / 20) as u32, 0..1);
+        if let Some(st) = &self.streams {
+            pass.set_vertex_buffer(0, st.slice(..));
+            pass.draw(0..(st.size() / 20) as u32, 0..1);
+        }
         if self.overlay_count > 0 {
             pass.set_pipeline(&self.overlay_pipe);
             pass.set_vertex_buffer(0, self.overlay.slice(..));
