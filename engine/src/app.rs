@@ -559,7 +559,10 @@ impl ApplicationHandler for App {
                     // Un clic derecho sin arrastrar excava (en el modo juego, cancela el trazado).
                     if self.right_moved < 5.0 {
                         if let Some(g) = self.session.game.as_mut() {
-                            g.cancel();
+                            // Clic derecho: cancela el trazado; si no había, suelta la herramienta.
+                            if !g.cancel() {
+                                g.drop_tool();
+                            }
                         } else {
                             self.session.dig(3);
                         }

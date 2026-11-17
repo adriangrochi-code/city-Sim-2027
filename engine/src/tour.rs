@@ -95,7 +95,9 @@ pub fn landscape_steps() -> Vec<Act> {
         ("costa-punta-yeguas", [1120.0, 14000.0, 200.0, 200.0, 22.0]),
         ("costa-pocitos", [16100.0, 15400.0, 180.0, 200.0, 20.0]),
     ];
-    let mut out = vec![Hour(10.5)];
+    // `MOTOR_HORA=17.3` saca las vistas a esa hora (para revisar la luz baja).
+    let hora = std::env::var("MOTOR_HORA").ok().and_then(|h| h.parse().ok()).unwrap_or(10.5);
+    let mut out = vec![Hour(hora)];
     // `MOTOR_VISTAS=vegetacion` saca solo las vistas cuyo nombre contiene ese texto.
     let filtro = std::env::var("MOTOR_VISTAS").unwrap_or_default();
     for (name, cam) in views.into_iter().filter(|(n, _)| n.contains(filtro.as_str())) {
