@@ -118,6 +118,31 @@ Perfil medido (cobertura rural de hoy / reconstruida para 1726) por distancia al
 
 (El perfil completo, por altura sobre el agua también, queda en `meta.json`, `bosque`.)
 
+## Calibración con datos medidos y testimonios (noviembre de 2026)
+
+La investigación completa, con cada dato marcado como medido, testimonio o estimación, está en
+[`monte-1726-fuentes.md`](monte-1726-fuentes.md). Lo que cambió en el motor:
+
+- **Cuánto monte**: en el mapa jugable (24 × 24 km) el monte cubre **4,2 % de la tierra**, dentro
+  del rango de 2–5 % que sostienen la cobertura medida hoy (Montevideo 1,7 %, Canelones ~3 %) y
+  los testimonios: en la jurisdicción de Montevideo el monte fue siempre una galería angosta a lo
+  largo de los cursos (Gautreau 2006; Síndico del Cabildo, 1809: "los únicos montes que tuvieron
+  los campos de Montevideo fueron los del río de Santa Lucía y sus ramos"). La prueba
+  `el_monte_es_una_galeria_angosta_como_en_1726` lo verifica.
+- **Ancho por clase de cauce** (por el nombre oficial; si no tiene, por el ancho): cañadas 0–5 m
+  por margen en ~20 % del largo; arroyos chicos 5–12 m; Miguelete, Pantanoso, Carrasco, Las Piedras
+  10–25 m; Colorado, Pando, Solís, Canelón 20–60 m; San José 40–125 m; Santa Lucía 50–150 m (hasta
+  ~250 m en meandros), sin monte en el tramo salobre de la desembocadura.
+- **Planicie**: la parte baja de los valles grandes cerca del río es bañado (juncal, pajonal), no
+  monte. Un modelo anterior que llenaba la planicie con monte daba 19 % de la tierra: 3–5 veces
+  cualquier cifra medida o histórica del sur.
+- **Canales**: los tramos rectos de la hidrografía oficial (canales de drenaje del siglo XX) no
+  llevan monte.
+- **Parque de espinillos** solo en las laderas bajas de los valles grandes; árboles sueltos en las
+  lomadas, casi ninguno. **Matorral costero** solo en los médanos de la costa oeste.
+- **De lejos**: en los niveles sin árboles sueltos (vóxel de más de 4 m), el monte es una masa de
+  copas de 5,5–9 m sobre el suelo, así no desaparece al alejar la cámara.
+
 ## En el motor
 
 - **Raster**: `bosque.bin` y `bosque_contexto.bin` van embebidos (`include_bytes!`, tamaños de

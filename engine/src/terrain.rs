@@ -36,6 +36,8 @@ pub struct TerrainGen {
     /// Tramos canalizados (rectos por cientos de metros: canales de drenaje del siglo XX que
     /// la hidrografía oficial incluye). En 1726 no existían: no llevan monte ni sauces.
     seg_art: Vec<bool>,
+    /// Clase de cada tramo para el monte ribereño (`CAUCE_*`).
+    seg_class: Vec<u8>,
     seg_hash: HashMap<(i32, i32), Vec<u32>>,
     /// La misma tabla de segmentos en una grilla densa (más rápida que el HashMap).
     seg_grid: Vec<Vec<u32>>,
@@ -63,6 +65,34 @@ struct Flood {
     near: Vec<u32>,
     /// Puntos de cauce: posición (m), nivel del agua (m) y ancho del cauce (m).
     pts: Vec<(Vec2, f32, f32)>,
+}
+
+/// Clases de cauce para el monte ribereño (ver [`TerrainGen::gallery`]).
+pub const CAUCE_CANADA: u8 = 0;
+pub const CAUCE_CHICO: u8 = 1;
+pub const CAUCE_MEDIO: u8 = 2;
+pub const CAUCE_MAYOR: u8 = 3;
+pub const CAUCE_SAN_JOSE: u8 = 4;
+pub const CAUCE_SANTA_LUCIA: u8 = 5;
+/// Tramo canalizado (siglo XX): sin monte.
+pub const CAUCE_CANAL: u8 = 255;
+
+/// Clase de un cauce por su nombre oficial (la hidrografía no trae el orden de Strahler y el
+/// ancho que estimamos por la cuenca no alcanza para distinguir un río de un arroyo).
+fn cauce_por_nombre(n: &str) -> Option<u8> {
+    let n = n.to_lowercase();
+    let tiene = |k: &[&str]| k.iter().any(|w| n.contains(w));
+    if tiene(&["santa lucía", "santa lucia"]) && !n.contains("chico") {
+        Some(CAUCE_SANTA_LUCIA)
+    } else if tiene(&["río san josé", "rio san jose", "río san jose"]) {
+        Some(CAUCE_SAN_JOSE)
+    } else if tiene(&["colorado", "pando", "solís", "solis", "canelón", "canelon", "santa lucía chico"]) {
+        Some(CAUCE_MAYOR)
+    } else if tiene(&["miguelete", "pantanoso", "carrasco", "las piedras", "toledo", "manga", "melilla", "cufré", "del cerro", "seco"]) {
+        Some(CAUCE_MEDIO)
+    } else {
+        None
+    }
 }
 
 // --- Mapa real ------------------------------------------------------------------------------
@@ -455,6 +485,7 @@ impl TerrainGen {
             seg_b: Vec::new(),
             seg_hw: Vec::new(),
             seg_art: Vec::new(),
+            seg_class: Vec::new(),
             seg_hash: HashMap::new(),
             flood: None,
             seg_grid: Vec::new(),
@@ -484,6 +515,7 @@ impl TerrainGen {
         t.seg_b.clear();
         t.seg_hw.clear();
         t.seg_art.clear();
+        t.seg_class.clear();
         t.seg_hash.clear();
         t.arroyos.clear();
         t.arroyo_nombres.clear();
@@ -521,7 +553,8 @@ impl TerrainGen {
             let (arroyos, names) = parse_arroyos(txt);
             for (a, name) in arroyos.into_iter().zip(names) {
                 let (pts, widths): (Vec<Vec2>, Vec<f32>) = a.into_iter().unzip();
-                t.add_arroyo_raw(pts, widths);
+                let class = name.as_deref().and_then(cauce_por_nombre);
+                t.add_arroyo_raw(pts, widths, class);
                 t.arroyo_nombres.push(name);
             }
         }
@@ -628,32 +661,6 @@ impl TerrainGen {
         self.flood = Some(Box::new(Flood { n, step, near, pts }));
     }
 
-    /// Monte de la planicie de inundación (0..1) en un punto a `h` m de altura. El monte
-    /// ribereño ocupa la parte baja del valle, la que el arroyo inunda en las crecidas: llega
-    /// hasta donde el terreno queda pocos metros por encima del agua, y más lejos cuanto más
-    /// grande el arroyo. En el Uruguay se midieron montes de 100–200 m a cada lado en arroyos
-    /// medianos, 300–360 m en el San Miguel y hasta casi 4 km en el Cebollatí (Carrere 1990,
-    /// Porcile 1987; ver docs/sistemas/vegetacion-historica.md). En el sur, sin embargo, los
-    /// mapas de vegetación del país muestran el monte como cintas angostas junto a los cauces y
-    /// las planicies bajas de las desembocaduras como humedales. Aquí (suposición): hasta ~55 m
-    /// del agua en una cañada de 2 m, ~270 m en un arroyo de 20 m y ~690 m en uno de 55 m,
-    /// mientras el suelo esté a menos de 1–3,5 m sobre el agua.
-    /// Lejos del agua el monte se abre en isletas (monte parque) en lugar de cortarse en línea.
-    pub fn floodplain_forest(&self, x: f32, z: f32, h: f32) -> f32 {
-        let Some((d, hand, w)) = self.flood_at(x, z, h) else { return 0.0 };
-        let reach = (30.0 + 12.0 * w).min(1200.0);
-        let hmax = (0.8 + 0.12 * w).min(3.5);
-        if d > reach || hand > hmax || self.lowland_marsh(x, z, h, d, hand) {
-            return 0.0;
-        }
-        let core = (1.0 - smoothstep(0.6 * reach, reach, d)) * (1.0 - smoothstep(0.5 * hmax, hmax, hand));
-        // Isletas: cerca del agua monte cerrado; hacia el borde, solo donde el ruido es alto.
-        let frac = d / reach;
-        let isle = self.n_hills.get_noise_2d(x * 12.0 + 911.0, z * 12.0 - 403.0) * 0.5 + 0.5;
-        let keep = smoothstep(frac * 0.85 - 0.12, frac * 0.85 + 0.08, isle);
-        core * keep
-    }
-
     /// Distancia al agua del arroyo más cercano (m, desde la orilla), altura sobre su agua (m)
     /// y ancho del cauce (m), según la planicie calculada al cargar el mapa.
     fn flood_at(&self, x: f32, z: f32, h: f32) -> Option<(f32, f32, f32)> {
@@ -675,6 +682,11 @@ impl TerrainGen {
     /// humedales del Santa Lucía y del Carrasco; el monte queda en los albardones más altos.
     fn lowland_marsh(&self, x: f32, z: f32, h: f32, d: f32, hand: f32) -> bool {
         h < 4.0 && hand < 1.0 && d > 15.0 && self.sea_distance(x, z) < 2500.0
+    }
+
+    /// ¿Cerca de los médanos? (matorral psamófilo)
+    fn biome_is_sandy(&self, x: f32, z: f32) -> bool {
+        self.sea_distance(x, z) < self.dune_belt(x, z) * 1.6
     }
 
     /// ¿Bañado de desembocadura en este punto? (para el bioma)
@@ -790,38 +802,58 @@ impl TerrainGen {
     /// en la celda); en el terreno se vuelve manchas de monte cerrado de unos 100 m con claros
     /// entre ellas: hay monte donde un ruido de manchas queda por debajo de la cobertura.
     pub fn forest_density(&self, x: f32, z: f32) -> f32 {
-        let (da, hw, art) = self.arroyo_query_art(x, z);
-        self.forest_density_at(x, z, da, hw, art, self.height(x, z))
+        let (da, hw, c) = self.arroyo_info(x, z);
+        self.forest_density_at(x, z, da, hw, c, self.height(x, z))
     }
 
     /// Igual que [`forest_density`], con la distancia al eje del arroyo más cercano y su medio
     /// ancho ya calculados: el monte del raster o la galería del arroyo, lo que sea mayor.
-    pub fn forest_density_at(&self, x: f32, z: f32, da: f32, hw: f32, art: bool, h: f32) -> f32 {
-        let g = if art { 0.0 } else { self.gallery(x, z, da - hw, hw) };
-        self.raster_forest(x, z).max(g).max(self.floodplain_forest(x, z, h))
-    }
-
-    /// Monte de galería de 1726: en el Uruguay el monte ribereño acompañaba casi todo arroyo
-    /// permanente, como una cinta continua de unas decenas de metros que se ensancha aguas
-    /// abajo (Carrere 1990; ver docs/sistemas/vegetacion-historica.md). El raster de 2021 es lo
-    /// que quedó de esa cinta (cortada por el pastoreo, la leña y la ciudad): aquí se repone.
-    /// `edge`: distancia al borde del agua (m), `hw`: medio ancho del cauce (m).
-    /// Ancho mínimo de la cinta desde la orilla (suposición, por debajo de los casos medidos
-    /// de 100–200 m en arroyos del interior): ~20 m en una cañada de 2 m, ~30 m en un arroyo
-    /// de 6 m, ~50 m en uno de 20 m, ~70 m en el Miguelete o el Pantanoso.
-    pub fn gallery(&self, x: f32, z: f32, edge: f32, hw: f32) -> f32 {
-        let w = hw * 2.0;
-        let band = 8.0 + 9.0 * w.max(0.5).sqrt();
-        if edge > band * 1.5 || edge < 0.0 || self.real.is_none() {
+    pub fn forest_density_at(&self, x: f32, z: f32, da: f32, hw: f32, class: u8, h: f32) -> f32 {
+        let g = self.gallery(x, z, da - hw, class);
+        // La planicie baja de los arroyos grandes es humedal, no monte (ver `lowland_marsh`).
+        if g < 0.5 && self.is_lowland_marsh(x, z, h) {
             return 0.0;
         }
-        // Borde irregular: entrantes y salientes de decenas de metros.
-        let lobe = self.n_hills.get_noise_2d(x * 18.0 + 211.0, z * 18.0 - 97.0);
-        let b = band * (0.95 + 0.45 * lobe);
-        // Las cañadas chicas (menos de 2 m) tienen monte a tramos; los arroyos, casi continuo.
+        self.raster_forest(x, z).max(g)
+    }
+
+    /// Monte de galería de 1726 según la clase del cauce (`CAUCE_*`), con los anchos y la
+    /// continuidad que resumen los datos medidos y los testimonios de la época (ver
+    /// docs/sistemas/monte-1726-fuentes.md, §7.2): en la jurisdicción de Montevideo el monte fue
+    /// siempre una galería angosta a lo largo de los cursos (Gautreau 2006; Síndico del Cabildo,
+    /// 1809), ancha solo en el Santa Lucía y el San José. `edge`: distancia al agua (m).
+    /// Ancho por margen (mínimo–máximo) y fracción del largo con monte:
+    /// cañada 0–5 m (20 %), arroyo chico 5–12 m (45 %), Miguelete/Pantanoso/Carrasco 10–25 m
+    /// (75 %), Colorado/Pando/Solís 20–60 m (88 %), San José 40–125 m (95 %), Santa Lucía
+    /// 50–150 m, hasta ~250 m en meandros (continuo; sin monte en el tramo salobre).
+    pub fn gallery(&self, x: f32, z: f32, edge: f32, class: u8) -> f32 {
+        if class == CAUCE_CANAL || edge < 0.0 || self.real.is_none() {
+            return 0.0;
+        }
+        // (ancho mínimo, máximo por margen; umbral del ruido de cortes para esa continuidad)
+        let (b0, b1, thr) = match class {
+            CAUCE_CANADA => (0.0, 5.0, 0.42),
+            CAUCE_CHICO => (5.0, 12.0, 0.04),
+            CAUCE_MEDIO => (10.0, 25.0, -0.2),
+            CAUCE_MAYOR => (20.0, 60.0, -0.35),
+            CAUCE_SAN_JOSE => (40.0, 125.0, -0.5),
+            _ => (50.0, 250.0, -2.0),
+        };
+        if edge > b1 * 1.1 + 2.0 {
+            return 0.0;
+        }
+        if class == CAUCE_SANTA_LUCIA && self.sea_distance(x, z) < 5000.0 {
+            return 0.0; // tramo salobre: juncal y pajonal (el monte, en barrancas e islas)
+        }
+        // Borde irregular: entrantes y salientes; más ancho en las curvas y confluencias.
+        let lobe = self.n_hills.get_noise_2d(x * 18.0 + 211.0, z * 18.0 - 97.0) * 0.5 + 0.5;
+        let lobe = if class == CAUCE_SANTA_LUCIA { lobe * lobe * 0.8 } else { lobe };
+        let b = b0 + (b1 - b0) * lobe;
+        // Tramos sin monte: el ruido de cortes (media 0, desvío ≈ 0,3) por encima del umbral.
         let gaps = self.n_hills.get_noise_2d(x * 9.0 - 333.0, z * 9.0 + 71.0);
-        let cont = smoothstep(-0.45 + (w - 2.0).clamp(0.0, 4.0) * -0.12, -0.15, gaps);
-        (1.0 - smoothstep(b * 0.75, b, edge)) * cont
+        let cont = 1.0 - smoothstep(-thr - 0.05, -thr + 0.05, -gaps);
+        let cont = if class == CAUCE_SANTA_LUCIA { 1.0 } else { cont };
+        (1.0 - smoothstep(b * 0.75, b.max(1.5), edge)) * cont
     }
 
     /// Monte del raster `bosque.bin` en manchas.
@@ -1032,12 +1064,19 @@ impl TerrainGen {
 
     /// Igual que [`arroyo_query`], y además si ese tramo es un canal (ver `seg_art`).
     pub fn arroyo_query_art(&self, x: f32, z: f32) -> (f32, f32, bool) {
+        let (d, hw, c) = self.arroyo_info(x, z);
+        (d, hw, c == CAUCE_CANAL)
+    }
+
+    /// Distancia al eje del tramo más cercano, su medio ancho y su clase (`CAUCE_*`; los
+    /// tramos canalizados son `CAUCE_CANAL`).
+    pub fn arroyo_info(&self, x: f32, z: f32) -> (f32, f32, u8) {
         let p = Vec2::new(x, z);
         let cx = (x / HASH_CELL).floor() as i32;
         let cz = (z / HASH_CELL).floor() as i32;
         // Se elige el tramo cuyo borde de agua está más cerca (no su eje): así un arroyo
         // ancho "gana" a una cañada que le desemboca al lado.
-        let (mut best, mut best_edge, mut best_hw, mut best_art) = (1e9f32, 1e9f32, ARROYO_AGUA, false);
+        let (mut best, mut best_edge, mut best_hw, mut best_c) = (1e9f32, 1e9f32, ARROYO_AGUA, CAUCE_CANADA);
         let (gx0, gz0) = self.grid_min;
         let (gw, gh) = self.grid_size;
         for dz in -1..=1 {
@@ -1058,12 +1097,12 @@ impl TerrainGen {
                         best_edge = d - hw;
                         best = d;
                         best_hw = hw;
-                        best_art = self.seg_art[si as usize];
+                        best_c = if self.seg_art[si as usize] { CAUCE_CANAL } else { self.seg_class[si as usize] };
                     }
                 }
             }
         }
-        (best, best_hw, best_art)
+        (best, best_hw, best_c)
     }
 
     /// Material de la superficie según altura, pendiente y cercanía al agua.
@@ -1097,7 +1136,7 @@ impl TerrainGen {
         let blot = self.n_hills.get_noise_2d(x * 3.0, z * 3.0);
         let fine = self.n_detail.get_noise_2d(x * 2.5, z * 2.5);
         let sd = self.sea_distance(x, z);
-        let (da, hw, art) = self.arroyo_query_art(x, z);
+        let (da, hw, class) = self.arroyo_info(x, z);
         if h < -0.3 {
             // El cauce de un arroyo ancho que baja del nivel del río sigue siendo arroyo
             // (agua); en el río y la bahía, el fondo: arena cerca de la orilla, limo más adentro.
@@ -1180,7 +1219,7 @@ impl TerrainGen {
         // Monte nativo (bosque.bin): suelo de hojarasca bajo el monte cerrado; en el borde de
         // las manchas, pasto verde a la sombra entre la hojarasca.
         let grain = self.n_detail.get_noise_2d(x * 14.0, z * 14.0) * 0.18;
-        let dens = self.forest_density_at(x, z, da, hw, art, h);
+        let dens = self.forest_density_at(x, z, da, hw, class, h);
         // Bordes mezclados vóxel a vóxel (banda de unos metros), no una línea.
         if dens > 0.78 + fine * 0.15 + dith * 0.25 {
             return FOREST_FLOOR;
@@ -1226,9 +1265,10 @@ impl TerrainGen {
                 if roll >= 0.88 {
                     continue;
                 }
-                let (da, hw, art) = self.arroyo_query_art(x, z);
+                let (da, hw, class) = self.arroyo_info(x, z);
+        let art = class == CAUCE_CANAL;
                 let h = self.height(x, z);
-                let dens = self.forest_density_at(x, z, da, hw, art, h);
+                let dens = self.forest_density_at(x, z, da, hw, class, h);
                 let edge = da - hw;
                 if edge < 0.7 {
                     continue; // en el agua
@@ -1277,11 +1317,20 @@ impl TerrainGen {
                     let (p, s) = if sd < 110.0 || sd < self.dune_belt(x, z) {
                         (0.0, Tala) // playa y médanos: arena suelta, sin árboles
                     } else if sd < 400.0 {
-                        (0.01, pick(u, &[(Coronilla, 3.0), (Molle, 3.0), (Tala, 2.0)])) // matorral costero
+                        // Matorral costero (psamófilo): solo en los médanos de la costa oeste, en
+                        // macizos; ni en las puntas de piedra ni en la costa este (§7.4).
+                        let p = if x < 9000.0 && self.biome_is_sandy(x, z) { 0.02 } else { 0.0 };
+                        (p, pick(u, &[(Coronilla, 3.0), (Molle, 3.0), (Tala, 2.0)]))
                     } else if h > 100.0 || slope > 0.35 {
                         (0.02, pick(u, &[(Espinillo, 3.0), (Coronilla, 2.0), (Molle, 3.0)])) // serranía del Cerro
                     } else {
-                        (0.0035, pick(u, &[(Ombu, 4.5), (Tala, 3.0), (Espinillo, 2.5)])) // árbol suelto en la pradera
+                        // Parque de espinillos en las laderas bajas que dominan la planicie de los
+                        // cauces grandes (50–300 m del monte); en las lomadas, casi nada (§7.4).
+                        if class >= CAUCE_MAYOR && class != CAUCE_CANAL && edge < 300.0 && slope < 0.15 {
+                            (0.05, pick(u, &[(Espinillo, 6.0), (Tala, 2.0), (Ombu, 0.5)]))
+                        } else {
+                            (0.0012, pick(u, &[(Ombu, 4.5), (Tala, 3.0), (Espinillo, 2.5)])) // árbol suelto en la pradera
+                        }
                     };
                     if roll >= p {
                         continue;
@@ -1320,11 +1369,12 @@ impl TerrainGen {
         let raw: Vec<Vec2> = raw.iter().map(|&(x, z)| Vec2::new(x, z)).collect();
         let pts = self.smooth_path(&raw, 40.0);
         let w = vec![ARROYO_AGUA * 2.0; pts.len()];
-        self.add_arroyo_raw(pts, w);
+        self.add_arroyo_raw(pts, w, None);
     }
 
     /// Registra un arroyo ya muestreado (los del mapa real vienen con meandros).
-    fn add_arroyo_raw(&mut self, pts: Vec<Vec2>, widths: Vec<f32>) {
+    /// `class`: clase del cauce por su nombre oficial (`None`: según el ancho de cada tramo).
+    fn add_arroyo_raw(&mut self, pts: Vec<Vec2>, widths: Vec<f32>, class: Option<u8>) {
         // Tramos rectos: desde cada punto, si los próximos 400 m (o más) casi no se desvían de
         // la cuerda (cuerda / largo > 0,985), todo ese tramo es un canal.
         let mut art = vec![false; pts.len().saturating_sub(1)];
@@ -1346,7 +1396,9 @@ impl TerrainGen {
             let si = self.seg_a.len() as u32;
             self.seg_a.push(a);
             self.seg_b.push(b);
-            self.seg_hw.push((widths[k] + widths[k + 1]) * 0.25);
+            let hw = (widths[k] + widths[k + 1]) * 0.25;
+            self.seg_hw.push(hw);
+            self.seg_class.push(class.unwrap_or(if hw * 2.0 < 2.5 { CAUCE_CANADA } else if hw * 2.0 < 6.0 { CAUCE_CHICO } else { CAUCE_MEDIO }));
             let (x0, x1) = ((a.x.min(b.x) / HASH_CELL).floor() as i32, (a.x.max(b.x) / HASH_CELL).floor() as i32);
             let (z0, z1) = ((a.y.min(b.y) / HASH_CELL).floor() as i32, (a.y.max(b.y) / HASH_CELL).floor() as i32);
             for cz in z0..=z1 {
@@ -1457,12 +1509,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn el_monte_ocupa_la_planicie_de_los_arroyos_grandes() {
+    fn el_monte_es_una_galeria_angosta_como_en_1726() {
         let t0 = std::time::Instant::now();
         let t = TerrainGen::montevideo();
         eprintln!("mapa real con planicie: {:?}", t0.elapsed());
-        // Fracción del mapa (tierra) con monte, y el ancho máximo del monte de planicie.
-        let (mut tierra, mut monte, mut lejos) = (0, 0, 0);
+        // Fracción de la tierra del mapa jugable con monte: 2–5 % según los datos medidos y los
+        // testimonios (docs/sistemas/monte-1726-fuentes.md, §7.1).
+        let (mut tierra, mut monte) = (0, 0);
         for j in 0..240 {
             for i in 0..240 {
                 let (x, z) = (i as f32 * 100.0 + 50.0, j as f32 * 100.0 + 50.0);
@@ -1471,23 +1524,20 @@ mod tests {
                     continue;
                 }
                 tierra += 1;
-                let (da, hw) = t.arroyo_query(x, z);
-                if t.forest_density_at(x, z, da, hw, false, h) > 0.5 {
+                let (da, hw, c) = t.arroyo_info(x, z);
+                if t.forest_density_at(x, z, da, hw, c, h) > 0.5 {
                     monte += 1;
-                    if t.floodplain_forest(x, z, h) > 0.5 && da > 300.0 {
-                        lejos += 1;
-                    }
                 }
             }
         }
         let frac = monte as f32 / tierra as f32;
-        eprintln!("monte: {:.1} % de la tierra; a más de 300 m del cauce: {lejos} muestras", frac * 100.0);
-        // Hay monte a cientos de metros de los arroyos grandes, pero la campaña sigue siendo
-        // sobre todo pradera (el monte de 1726 no cubría más de una parte menor del suelo).
-        assert!(lejos > 4, "el monte no se aleja de los cauces");
-        assert!(frac > 0.06 && frac < 0.2, "monte en {frac}");
-        // En las cuchillas, lejos y alto sobre el agua, no hay monte de planicie.
-        assert_eq!(t.floodplain_forest(CERRO_REAL.x, CERRO_REAL.y, t.height(CERRO_REAL.x, CERRO_REAL.y)), 0.0);
+        eprintln!("monte: {:.1} % de la tierra", frac * 100.0);
+        assert!(frac > 0.015 && frac < 0.06, "monte en {:.1} %", frac * 100.0);
+        // Las clases salen del nombre oficial.
+        assert_eq!(cauce_por_nombre("Arroyo Miguelete"), Some(CAUCE_MEDIO));
+        assert_eq!(cauce_por_nombre("Río Santa Lucía"), Some(CAUCE_SANTA_LUCIA));
+        assert_eq!(cauce_por_nombre("Arroyo Colorado"), Some(CAUCE_MAYOR));
+        assert_eq!(cauce_por_nombre("Cañada de la Chacarita"), None);
     }
 
     #[test]
