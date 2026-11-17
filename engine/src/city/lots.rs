@@ -190,12 +190,26 @@ pub fn growth_blockers(lots: &Lots, lot: &Lot, net: &RoadNetwork, pool: i32, dem
         why.push("El edificio es muy reciente.".into());
     }
     if next >= 2 && k != ZoneKind::Industrial && value <= LEVEL_VALUE[k as usize][next as usize] {
-        why.push(if lots.industry_near(lot.c, lot.id) > 0 { "Los talleres cercanos bajan el valor del suelo.".into() } else { "Está lejos de la plaza mayor: el suelo vale poco.".into() });
+        let molesta = lots.valor.get(&lot.id).map_or(lots.industry_near(lot.c, lot.id) > 0, |v| v.molestia > 0.15);
+        why.push(if molesta { "El olor, el ruido o el humo de la industria cercana bajan el valor del suelo.".into() } else { "Está lejos de la plaza mayor: el suelo vale poco.".into() });
     }
     if (next == 3 || d == Density::Alta) && !stone {
         why.push("Necesita una calle empedrada.".into());
     }
     why
+}
+
+/// Valor del suelo de un solar calculado por `recursos::valor` cada mes (acceso, servicios,
+/// molestias y recursos; ver `docs/sistemas/recursos-del-suelo.md`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ValorLote {
+    /// Valor del suelo (0 a 1).
+    pub valor: f32,
+    /// Molestias (olor, ruido, humo, agua sucia) combinadas (0 a 1).
+    pub molestia: f32,
+    /// Cuánto apura el crecimiento del solar (1 = normal): los mejores sitios se edifican y
+    /// suben de nivel primero.
+    pub atractivo: f32,
 }
 
 /// Valor del suelo mínimo para llegar a cada nivel: [tipo][nivel].
@@ -268,6 +282,9 @@ pub struct Lots {
     pub level_cap: HashMap<u32, u8>,
     /// Huellas de la muralla: no se generan solares debajo, pero las calles la cruzan (portones).
     pub walls: Vec<Obstacle>,
+    /// Valor del suelo de cada solar (ver [`ValorLote`]); sin entrada, el valor simple por la
+    /// distancia a la plaza y los talleres cercanos.
+    pub valor: HashMap<u32, ValorLote>,
     next: u32,
     hash: HashMap<IVec2, Vec<u32>>,
 }
@@ -333,6 +350,9 @@ impl Lots {
     /// Valor del suelo: cerca de la plaza vale más; la industria cercana lo baja (salvo
     /// para otros talleres).
     pub fn land_value(&self, lot: &Lot) -> f32 {
+        if let Some(v) = self.valor.get(&lot.id) {
+            return v.valor;
+        }
         let base = match self.plaza_center {
             Some(p) => (-(lot.c.distance(p)) / 650.0).exp().clamp(0.0, 1.0),
             None => 0.2,
@@ -545,7 +565,11 @@ impl Lots {
                         continue;
                     }
                     // Junto a los talleres nadie quiere vivir si puede elegir.
-                    let smoke = if self.industry_near(l.c, id) > 0 { 0.5 } else { 1.0 };
+                    let smoke = match self.valor.get(&id) {
+                        Some(v) => (1.0 - 0.8 * v.molestia).max(0.2),
+                        None if self.industry_near(l.c, id) > 0 => 0.5,
+                        None => 1.0,
+                    };
                     smoke * if l.level == 0 { 0.55 } else if next == 2 { 0.15 } else { 0.1 }
                 }
                 _ => {
@@ -556,6 +580,8 @@ impl Lots {
                     dm * if l.level == 0 { 0.5 } else { 0.12 }
                 }
             };
+            // Los mejores sitios (valor del suelo) se edifican primero.
+            let chance = chance * self.valor.get(&id).map_or(1.0, |v| v.atractivo);
             if rng.f() < chance {
                 let l = self.lots.get_mut(&id).unwrap();
                 l.level = next;

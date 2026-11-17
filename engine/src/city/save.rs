@@ -141,6 +141,11 @@ pub struct CityData {
     /// población la generan al cargar a partir de la fundación y de las casas.
     #[serde(default)]
     pub poblacion: Option<super::poblacion::Poblacion>,
+    /// Valor del suelo de cada solar: (solar, [valor, molestia, atractivo]). Es derivado, pero
+    /// se guarda para que el crecimiento hasta el próximo mes sea el mismo después de cargar
+    /// (las partidas viejas lo calculan al cargar).
+    #[serde(default)]
+    pub valor_suelo: Option<Vec<(u32, [f32; 3])>>,
 }
 
 impl CityData {
@@ -186,6 +191,11 @@ impl CityData {
             vecinos: Some(c.agentes.e.clone()),
             servicios: Some(super::services::save::ServicesData::from_services(&c.services, &c.lots.level_cap)),
             poblacion: c.poblacion.fundada.then(|| c.poblacion.clone()),
+            valor_suelo: (!c.lots.valor.is_empty()).then(|| {
+                let mut v: Vec<(u32, [f32; 3])> = c.lots.valor.iter().map(|(&id, v)| (id, [v.valor, v.molestia, v.atractivo])).collect();
+                v.sort_by_key(|x| x.0);
+                v
+            }),
         }
     }
 
@@ -205,6 +215,9 @@ impl CityData {
             None => Default::default(),
         };
         lots.level_cap = caps;
+        if let Some(v) = &self.valor_suelo {
+            lots.valor = v.iter().filter(|x| lots.lots.contains_key(&x.0)).map(|&(id, [valor, molestia, atractivo])| (id, super::lots::ValorLote { valor: valor.clamp(0.0, 1.0), molestia: molestia.clamp(0.0, 1.0), atractivo: atractivo.clamp(0.0, 2.0) })).collect();
+        }
         lots.walls = services.walls.obstacles();
         let ed = &self.economia;
         let mut economy = Economy::default();
@@ -236,6 +249,7 @@ impl CityData {
             month_acc: self.acumulado_mes,
             growth_acc: self.acumulado_crecimiento,
             poblacion: super::poblacion::Poblacion::nueva(1726),
+            suelo: Default::default(),
             mejoras: Vec::new(),
             llegados_barco: 0,
         };

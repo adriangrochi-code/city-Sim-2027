@@ -28,6 +28,9 @@ pub struct BuildingData {
     /// Pozos y aljibes: cuánto se ensució el agua (las partidas viejas, limpia).
     #[serde(default)]
     pub contaminacion: f32,
+    /// Rinde del sitio (las partidas viejas lo calculan al cargar).
+    #[serde(default)]
+    pub rinde: Option<f32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -78,7 +81,7 @@ impl ServicesData {
         topes.sort();
         let p = &s.port;
         ServicesData {
-            edificios: s.buildings.values().map(|b| BuildingData { id: b.id, tipo: info(b.kind).key.into(), centro: v2(b.c), frente: v2(b.f), abastece: b.served, contaminacion: b.contaminacion }).collect(),
+            edificios: s.buildings.values().map(|b| BuildingData { id: b.id, tipo: info(b.kind).key.into(), centro: v2(b.c), frente: v2(b.f), abastece: b.served, contaminacion: b.contaminacion, rinde: (b.rinde >= 0.0).then_some(b.rinde) }).collect(),
             proximo: s.next,
             agua: s.water.iter().map(|(&l, &(q, src))| (l, q, src)).collect(),
             topes,
@@ -111,7 +114,7 @@ impl ServicesData {
         let mut s = Services::default();
         for b in &self.edificios {
             let kind = kind_from_key(&b.tipo).ok_or_else(|| format!("servicio desconocido: {}", b.tipo))?;
-            s.buildings.insert(b.id, Building { id: b.id, kind, c: p2(b.centro), f: p2(b.frente), served: b.abastece, contaminacion: b.contaminacion.clamp(0.0, 1.0), voxels: Vec::new() });
+            s.buildings.insert(b.id, Building { id: b.id, kind, c: p2(b.centro), f: p2(b.frente), served: b.abastece, contaminacion: b.contaminacion.clamp(0.0, 1.0), rinde: b.rinde.map_or(-1.0, |r| r.clamp(0.0, 2.0)), voxels: Vec::new() });
         }
         s.next = self.proximo.max(s.buildings.keys().copied().max().unwrap_or(0));
         s.water = self.agua.iter().map(|&(l, q, src)| (l, (q, src))).collect();

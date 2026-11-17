@@ -3,6 +3,10 @@
 > Documento de sistema. Estado: **datos en el mapa** (`assets/mapas/montevideo/rocas.bin`);
 > afloramientos y transiciones graduales en el motor: en curso.
 
+Los recursos que salen de estos datos (productividad, aptitud para cultivo y pasturas, piedra,
+arcilla, arena) y la carta geológica de DINAMIGE están en
+[recursos-del-suelo.md](recursos-del-suelo.md).
+
 ## Fuente
 
 - **Grupos de suelos CONEAT** (RENARE, MGAP), servicio ArcGIS del SNIG
@@ -10,8 +14,9 @@
   no trae la descripción de cada grupo; el porcentaje de rocosidad sale de las descripciones
   publicadas de los grupos, resumido por zona (tabla `ROCOSIDAD_ZONA` del constructor). Es una
   aproximación: falta cruzarla con la descripción oficial de cada grupo.
-- **Carta Geológica (DINAMIGE)**: sería la fuente directa de las formaciones, pero su servidor
-  no respondió desde el entorno de desarrollo. Pendiente.
+- **Carta Geológica (DINAMIGE)**: desde noviembre de 2026 se usa el mapa base de unidades
+  geológicas 2017 del geoportal del MIEM (`geoportal.miem.gub.uy/arcgis1091`), que sí responde;
+  hoy alimenta los materiales (`minerales.bin`), no todavía los afloramientos de este documento.
 
 ## Qué dicen los datos en Montevideo
 

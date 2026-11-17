@@ -12,6 +12,7 @@ pub mod game;
 pub mod game_demo;
 pub mod lots;
 pub mod poblacion;
+pub mod recursos;
 pub mod roads;
 pub mod save;
 pub mod services;
@@ -68,6 +69,9 @@ pub struct City {
     /// Pobladores que trajeron los barcos (o salieron de la cuarentena) este mes y todavía no
     /// entraron a la población: se suman a las llegadas del mes.
     pub llegados_barco: i32,
+    /// Recursos del suelo, molestias de la industria y valor del suelo de cada solar
+    /// (derivado; ver `recursos`).
+    pub suelo: recursos::valor::SueloCiudad,
     /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
     mejoras: Vec<(u32, u8)>,
     rng: Rng,
@@ -78,7 +82,7 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), suelo: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -257,7 +261,10 @@ impl City {
         let max = self.lots.lots.keys().next_back().map_or(0, |&k| k as usize + 1);
         let mut v = vec![poblacion::ServiciosLote::default(); max];
         for l in self.lots.lots.values().filter(|l| l.level > 0) {
-            v[l.id as usize] = poblacion::ServiciosLote { escuela: br.escuela_de(l.id), salud: br.salud_de(l.id), insalubre: br.insalubre_de(l.id), delito: br.delito_de(l.id), vigilancia: br.vigilancia_de(l.id) };
+            // Las molestias de la industria: el agua sucia del arroyo y el olor también enferman.
+            let m = self.suelo.molestia_de(l.id);
+            let insalubre = (br.insalubre_de(l.id) + 0.3 * m.agua + 0.1 * (m.olor + m.humo)).min(1.0);
+            v[l.id as usize] = poblacion::ServiciosLote { escuela: br.escuela_de(l.id), salud: br.salud_de(l.id), insalubre, delito: br.delito_de(l.id), vigilancia: br.vigilancia_de(l.id), molestia: m.total() };
         }
         v
     }
@@ -586,10 +593,13 @@ impl City {
         let mut production = [0.0f32; 6];
         // Chacras privadas del ejido: el grano entra con las cosechas (trigo en diciembre y
         // enero, maíz en otoño), según el año que haya tocado.
-        let annual_grain = (300.0 + pop as f32 * 1.05) * 12.0;
+        // La tierra del entorno (CONEAT) pesa: buena tierra de chacra o buenas pasturas
+        // alrededor de la plaza rinden más (ver `recursos`).
+        let (tierra_cultivo, tierra_pasto) = self.suelo.factor_entorno();
+        let annual_grain = (300.0 + pop as f32 * 1.05) * 12.0 * tierra_cultivo;
         production[Res::Pan as usize] = self.climate.grain_this_month(self.month, annual_grain);
         // Ganado del campo: depende de las pasturas.
-        let herd = self.climate.livestock_factor();
+        let herd = self.climate.livestock_factor() * tierra_pasto;
         production[Res::Carne as usize] = (400.0 + pop as f32 * 0.9) * herd;
         production[Res::Ladrillos as usize] = 60.0 * self.climate.brick_factor();
         production[Res::Cueros as usize] = (80.0 + pop as f32 * 0.05) * herd;

@@ -9,6 +9,7 @@ use crate::buildings::Edits;
 use crate::render::OverlayVertex;
 use crate::terrain::TerrainGen;
 use glam::Vec2;
+use std::sync::Mutex;
 use std::time::Instant;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,7 +81,12 @@ pub struct Game {
     pub grupo: services::Grupo,
     /// Órdenes de la interfaz que producen vóxeles (se cumplen en `update`).
     pub orders: Vec<Order>,
+    /// Grilla de la capa de terreno ya calculada (clave, vértices): se rehace solo cuando
+    /// cambia la capa, la ventana o el mes.
+    capa_terreno: Mutex<Option<CapaTerreno>>,
 }
+
+type CapaTerreno = ((u8, i32, i32, u32, usize), Vec<OverlayVertex>);
 
 /// Ficha de lo inspeccionado para el panel de información.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -135,6 +141,7 @@ impl Default for Game {
             layer: None,
             grupo: services::Grupo::Agua,
             orders: Vec::new(),
+            capa_terreno: Mutex::new(None),
             plaza_angle: 0.0,
             free_draw: false,
             painting: false,
@@ -469,6 +476,23 @@ impl Game {
 
     /// Ficha del punto inspeccionado: solar (nivel, habitantes, valor del suelo y por qué no
     /// crece), calle (tipo y largo) o terreno.
+    /// Ficha con el terreno a mano: la de [`Self::inspect_info`] más el suelo del punto
+    /// (grupo CONEAT, productividad, aptitudes, geología, materiales y molestias).
+    pub fn inspect_info_en(&self, t: &TerrainGen) -> Option<Inspect> {
+        let mut i = self.inspect_info()?;
+        if matches!(i.kind, InspectKind::Lot | InspectKind::Terrain) {
+            let p = self.inspected?;
+            i.lines.extend(lineas_terreno(t, p, i.kind == InspectKind::Terrain));
+            if i.kind == InspectKind::Terrain {
+                let m = self.city.suelo.campo.en(p, None);
+                if m.total() >= 0.03 {
+                    i.lines.push(format!("Molestias: {} % (sobre todo {})", (m.total() * 100.0).round() as i32, m.principal()));
+                }
+            }
+        }
+        Some(i)
+    }
+
     pub fn inspect_info(&self) -> Option<Inspect> {
         let p = self.inspected?;
         if let Some(id) = self.city.services.at(p) {
@@ -501,6 +525,7 @@ impl Game {
                 Some(ZoneKind::Industrial) => i.lines.push(format!("Empleos: {} de {} (talleres)", pob.trabajadores_de_lote(id).count(), super::lots::JOBS_I[l.level as usize])),
             }
             i.lines.push(format!("Valor del suelo: {} %", (value * 100.0) as i32));
+            i.lines.extend(self.city.lineas_suelo_lote(id));
             i.lines.push(format!("Calle: {}", front.map_or("—", |k| k.name())));
             if l.level > 0 {
                 i.lines.push(format!("Antigüedad: {} {}", l.age, if l.age == 1 { "mes" } else { "meses" }));
@@ -600,6 +625,16 @@ impl Game {
                     let (c, f) = self.city.service_site(k, h);
                     let i = services::info(k);
                     help = format!("{help}\nCosto: {} pesos{}{}", fmt_thousands(i.cost), if i.ladrillos > 0.0 { format!(" · {} ladrillos", i.ladrillos as i32) } else { String::new() }, if i.piedra > 0.0 { format!(" · {} de piedra", i.piedra as i32) } else { String::new() });
+                    if matches!(k, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera) {
+                        let r = super::recursos::Recursos::de(t).en_area(c, f, i.size.0, i.size.1);
+                        let (que, x) = match k {
+                            Kind::Chacra => ("tierra para cultivo", r.cultivo),
+                            Kind::Estancia => ("pasturas", r.pastoreo),
+                            Kind::Horno => ("arcilla", r.arcilla),
+                            _ => ("piedra", r.piedra),
+                        };
+                        help = format!("{help}\nSitio: {que} {} (IP {}) · rinde {} %", super::recursos::calidad(x), r.ip.round() as i32, (super::recursos::rinde(k, &r) * 100.0).round() as i32);
+                    }
                     (None, self.city.service_problem(t, k, c, f))
                 }
                 Placeable::Muelle => (Some(services::port::PIER_COST), self.city.pier_problem(t, h)),
@@ -695,9 +730,16 @@ impl Game {
             (Tool::Service, Placeable::Building(Kind::Botica | Kind::Medico | Kind::Hospital)) => Some(Layer::Salud),
             (Tool::Service, Placeable::Building(Kind::Alcalde | Kind::Carcel)) => Some(Layer::Delito),
             (Tool::Service, Placeable::Building(Kind::Basurero)) => Some(Layer::Saneamiento),
+            (Tool::Service, Placeable::Building(Kind::Chacra)) => Some(Layer::Cultivo),
+            (Tool::Service, Placeable::Building(Kind::Estancia)) => Some(Layer::Pasturas),
+            (Tool::Service, Placeable::Building(Kind::Horno)) => Some(Layer::Arcilla),
+            (Tool::Service, Placeable::Building(Kind::Cantera)) => Some(Layer::Piedra),
             _ => None,
         });
         if let Some(layer) = layer {
+            if layer.es_de_terreno() {
+                self.terrain_layer(&mut out, t, layer);
+            }
             self.layer_overlay(&mut out, t, layer);
         }
         // Lo inspeccionado queda marcado mientras la ficha está abierta.
@@ -811,7 +853,8 @@ impl Game {
                 Layer::Saneamiento | Layer::Delito => s.barrio.basurales.contains(&l.id) || s.ruins.contains(&l.id),
                 _ => false,
             };
-            if l.level == 0 && !baldio_visible {
+            // El valor del suelo se ve también en los solares vacíos (adónde conviene crecer).
+            if l.level == 0 && !baldio_visible && layer != Layer::Valor {
                 continue;
             }
             let br = &s.barrio;
@@ -860,6 +903,25 @@ impl Game {
                     x if x < 0.24 => [0.95, 0.45, 0.12, 0.65],
                     _ => [0.7, 0.05, 0.05, 0.75],
                 },
+                // Valor del suelo: de azul pálido (poco) a amarillo y rojo (mucho).
+                Layer::Valor => {
+                    let mut c = valor_color(self.city.lots.land_value(l));
+                    if l.level == 0 {
+                        c[3] *= 0.6;
+                    }
+                    c
+                }
+                // Molestias en cada solar: de nada (gris claro) a violeta oscuro.
+                Layer::Molestias => {
+                    let m = self.city.suelo.molestia_de(l.id).total();
+                    if m < 0.03 {
+                        [0.85, 0.9, 0.85, 0.25]
+                    } else {
+                        [0.75 - 0.35 * m, 0.45 - 0.35 * m, 0.85 - 0.3 * m, 0.4 + 0.45 * m]
+                    }
+                }
+                // Recursos: los solares no se pintan (se ve el terreno).
+                Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena => continue,
             };
             quad(out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
@@ -874,10 +936,25 @@ impl Game {
                 Layer::Salud => matches!(b.kind, Kind::Botica | Kind::Medico | Kind::Hospital),
                 Layer::Saneamiento => b.kind == Kind::Basurero,
                 Layer::Delito => g == services::Grupo::Seguridad,
+                Layer::Molestias => super::recursos::molestias::perfil_de_servicio(b.kind).is_some(),
+                Layer::Cultivo => b.kind == Kind::Chacra,
+                Layer::Pasturas => b.kind == Kind::Estancia,
+                Layer::Piedra => b.kind == Kind::Cantera,
+                Layer::Arcilla => b.kind == Kind::Horno,
+                Layer::Arena | Layer::Valor => false,
             };
             if show {
-                let r = if layer == Layer::Fuego { b.info().fire_reach } else { b.info().radius };
-                circle(out, t, b.c, r, [0.35, 0.65, 1.0, 0.7]);
+                let r = match layer {
+                    Layer::Fuego => b.info().fire_reach,
+                    Layer::Molestias => super::recursos::molestias::perfil_de_servicio(b.kind).map_or(0.0, |p| p.radio),
+                    Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla => 0.0,
+                    _ => b.info().radius,
+                };
+                if r > 0.0 {
+                    circle(out, t, b.c, r, if layer == Layer::Molestias { [0.6, 0.25, 0.7, 0.75] } else { [0.35, 0.65, 1.0, 0.7] });
+                } else {
+                    outline(out, t, &b.corners(), 1.6, [1.0, 1.0, 1.0, 0.85]);
+                }
             }
             // Pozos y aljibes sucios (pozos negros y basura alrededor).
             if layer == Layer::Saneamiento && matches!(b.kind, Kind::Pozo | Kind::Aljibe) {
@@ -885,6 +962,67 @@ impl Game {
                 circle(out, t, b.c, super::services::barrio::RADIO_POZO_NEGRO, [0.4 + x * 0.6, 0.75 - x * 0.5, 0.95 - x * 0.7, 0.85]);
             }
         }
+    }
+
+    /// Capa de recursos o de molestias sobre el terreno: una grilla de 6 × 6 km (celdas de
+    /// 50 m) alrededor del cursor (o de la plaza), con el color de la aptitud de cada celda; en
+    /// la de molestias, además, el arroyo sucio aguas abajo.
+    fn terrain_layer(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen, layer: Layer) {
+        const MEDIO: f32 = 3000.0;
+        const PASO: f32 = 50.0;
+        let centro = self.hover.or(self.city.lots.plaza_center).unwrap_or(if t.is_real() { crate::terrain::FOUNDING_REAL } else { Vec2::splat(12000.0) });
+        // La ventana salta de a 500 m: no se rehace con cada movimiento del ratón.
+        let cx = (centro.x / 500.0).round() as i32;
+        let cz = (centro.y / 500.0).round() as i32;
+        let firma = if layer == Layer::Molestias { self.city.month.wrapping_mul(7919).wrapping_add(self.city.suelo.campo.fuentes().len() as u32) } else { 0 };
+        let clave = (layer as u8, cx, cz, firma, self.city.services.buildings.len());
+        let mut cache = self.capa_terreno.lock().unwrap();
+        if cache.as_ref().is_none_or(|c| c.0 != clave) {
+            let rec = super::recursos::Recursos::de(t);
+            let o = Vec2::new(cx as f32 * 500.0 - MEDIO, cz as f32 * 500.0 - MEDIO);
+            let n = (2.0 * MEDIO / PASO) as usize;
+            let alto: Vec<f32> = (0..=n)
+                .flat_map(|j| (0..=n).map(move |i| (i, j)))
+                .map(|(i, j)| {
+                    let p = o + Vec2::new(i as f32, j as f32) * PASO;
+                    t.height(p.x, p.y).max(0.0) + 2.5
+                })
+                .collect();
+            let mut v = Vec::new();
+            for j in 0..n {
+                for i in 0..n {
+                    let p = o + Vec2::new(i as f32 + 0.5, j as f32 + 0.5) * PASO;
+                    if t.height(p.x, p.y) <= 0.2 {
+                        continue;
+                    }
+                    let col = match layer.uso() {
+                        Some(u) => uso_color(u, rec.aptitud(u, p.x, p.y)),
+                        None => {
+                            let m = self.city.suelo.campo.en(p, None);
+                            let x = m.total();
+                            if x < 0.03 {
+                                continue;
+                            }
+                            [0.55 + 0.35 * m.olor.max(m.humo), 0.25, 0.75 - 0.4 * m.humo, 0.15 + 0.5 * x]
+                        }
+                    };
+                    if col[3] <= 0.0 {
+                        continue;
+                    }
+                    let y = |a: usize, b: usize| alto[a + b * (n + 1)];
+                    let q = |a: usize, b: usize| OverlayVertex { pos: [o.x + a as f32 * PASO, y(a, b), o.y + b as f32 * PASO], color: col };
+                    v.extend_from_slice(&[q(i, j), q(i + 1, j), q(i + 1, j + 1), q(i, j), q(i + 1, j + 1), q(i, j + 1)]);
+                }
+            }
+            if layer == Layer::Molestias {
+                for &(p, x) in &self.city.suelo.campo.agua_sucia {
+                    let pts: Vec<Vec2> = (0..=6).map(|k| p + Vec2::from_angle(k as f32 / 6.0 * std::f32::consts::TAU) * 9.0).collect();
+                    ribbon(&mut v, t, &pts, 9.0, [0.45, 0.3, 0.1, 0.35 + 0.6 * x]);
+                }
+            }
+            *cache = Some((clave, v));
+        }
+        out.extend_from_slice(&cache.as_ref().unwrap().1);
     }
 
     /// Guías de un trazado enganchado: líneas finas punteadas (la dirección y la alineación).
@@ -915,6 +1053,61 @@ fn circle(out: &mut Vec<OverlayVertex>, t: &TerrainGen, c: Vec2, r: f32, color: 
 
 fn y_at(t: &TerrainGen, p: Vec2, lift: f32) -> f32 {
     t.height(p.x, p.y).max(0.0) + lift
+}
+
+/// Líneas del suelo de un punto para la ficha: grupo CONEAT (o estimado), productividad,
+/// aptitud general y para cultivos de verano, geología y, si `todo`, los materiales.
+pub fn lineas_terreno(t: &TerrainGen, p: Vec2, todo: bool) -> Vec<String> {
+    let rec = super::recursos::Recursos::de(t);
+    let r = rec.en_punto(p);
+    let mut out = Vec::new();
+    match rec.suelo(p) {
+        Some(s) => {
+            out.push(format!("Suelo CONEAT {}{} · IP {} (media del país 100)", s.grupo, if s.estimado { " (estimado: sin dato en la ciudad actual)" } else { "" }, s.ip.round() as i32));
+            out.push(format!("Aptitud: {} · cultivos de verano: {}{}", s.aptitud.replace("Tierras ", "").to_lowercase(), s.cultivo_verano, if s.limitantes.is_empty() { String::new() } else { format!(" — {}", s.limitantes.to_lowercase()) }));
+            out.push(format!("Geología: {}", s.geologia));
+        }
+        None if t.height(p.x, p.y) > 0.2 => out.push(format!("Suelo (estimado del relieve): IP {}", r.ip.round() as i32)),
+        None => {}
+    }
+    if todo || t.is_real() {
+        out.push(format!("Para chacra: {} · para estancia: {}", super::recursos::calidad(r.cultivo), super::recursos::calidad(r.pastoreo)));
+    }
+    if todo {
+        out.push(format!("Piedra {} · arcilla {} · arena {} · canto rodado {}", super::recursos::calidad(r.piedra), super::recursos::calidad(r.arcilla), super::recursos::calidad(r.arena), super::recursos::calidad(r.grava)));
+    }
+    out
+}
+
+/// Color del valor del suelo (0 a 1): azul pálido, verde, amarillo, naranja, rojo.
+pub fn valor_color(x: f32) -> [f32; 4] {
+    let x = x.clamp(0.0, 1.0);
+    let stops = [(0.0, [0.55, 0.7, 0.95]), (0.3, [0.45, 0.85, 0.45]), (0.55, [1.0, 0.9, 0.3]), (0.75, [1.0, 0.55, 0.15]), (1.0, [0.85, 0.1, 0.1])];
+    for w in stops.windows(2) {
+        let ((a, ca), (b, cb)) = (w[0], w[1]);
+        if x <= b {
+            let k = (x - a) / (b - a);
+            return [ca[0] + (cb[0] - ca[0]) * k, ca[1] + (cb[1] - ca[1]) * k, ca[2] + (cb[2] - ca[2]) * k, 0.62];
+        }
+    }
+    [0.85, 0.1, 0.1, 0.62]
+}
+
+/// Color de la aptitud de una celda para un uso (alfa 0 = no se dibuja).
+pub fn uso_color(u: super::recursos::Uso, x: f32) -> [f32; 4] {
+    use super::recursos::Uso;
+    let x = x.clamp(0.0, 1.0);
+    match u {
+        // Tierra: de pardo (mala) a verde oscuro (excelente).
+        Uso::Cultivo => [0.75 - 0.6 * x, 0.5 + 0.12 * x, 0.25 - 0.1 * x, 0.42],
+        Uso::Pastoreo => [0.85 - 0.55 * x, 0.75 + 0.05 * x, 0.35 + 0.1 * x, 0.42],
+        // Materiales: solo donde hay; más intenso cuanto más.
+        Uso::Piedra if x >= 0.08 => [0.42, 0.42, 0.5, 0.15 + 0.6 * x],
+        Uso::Arcilla if x >= 0.08 => [0.8, 0.33, 0.12, 0.1 + 0.55 * x],
+        Uso::Arena if x >= 0.08 => [0.98, 0.85, 0.35, 0.12 + 0.6 * x],
+        Uso::Grava if x >= 0.08 => [0.35, 0.5, 0.85, 0.15 + 0.6 * x],
+        _ => [0.0, 0.0, 0.0, 0.0],
+    }
 }
 
 /// Cinta translúcida que sigue una polilínea sobre el terreno.

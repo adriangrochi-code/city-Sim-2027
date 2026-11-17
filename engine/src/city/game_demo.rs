@@ -366,6 +366,21 @@ fn place(s: &mut Session, k: Kind, around: Vec2, max_r: f32) -> String {
     format!("{} en ({:.0}, {:.0}): {}", services::info(k).name, c.x, c.y, apply(s, r))
 }
 
+/// El punto con piedra más cercano a la plaza (a más de 350 m: la cantera es ruidosa), en tierra
+/// firme y no muy empinada.
+fn piedra_cercana(t: &crate::terrain::TerrainGen) -> Option<Vec2> {
+    let rec = super::recursos::Recursos::de(t);
+    for r in 0..24 {
+        for a in 0..48 {
+            let p = PLAZA + Vec2::from_angle(a as f32 / 48.0 * std::f32::consts::TAU) * (380.0 + r as f32 * 50.0);
+            if t.height(p.x, p.y) > 2.0 && !t.is_water(p.x, p.y) && rec.en_area(p, Vec2::NEG_Y, 28.0, 22.0).piedra >= 0.35 {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 /// Un camino de tierra de `from` hacia `dir`, de a tramos de 60 m mientras se pueda (girando un
 /// poco si un tramo es muy empinado). Devuelve el punto final.
 fn road_towards(s: &mut Session, from: Vec2, dir: Vec2, len: f32) -> Vec2 {
@@ -475,7 +490,17 @@ pub fn servicios(s: &mut Session) -> String {
     let along = |k: f32| start.lerp(end, k);
     out.push(place(s, Kind::Chacra, along(0.45), 260.0));
     out.push(place(s, Kind::Estancia, along(0.9), 300.0));
-    out.push(place(s, Kind::Cantera, along(0.65), 300.0));
+    // La cantera va sobre la piedra (capa «Piedra»): si el camino al campo no pasa por el
+    // basamento, un camino de tierra hasta la piedra más cercana a la ciudad.
+    let mut cantera = place(s, Kind::Cantera, along(0.65), 300.0);
+    if cantera.contains("sin sitio") {
+        if let Some(p) = piedra_cercana(&s.terrain.clone()) {
+            let from = s.game.as_ref().unwrap().city.net.nodes.values().copied().min_by(|a, b| a.distance(p).total_cmp(&b.distance(p))).unwrap_or(PLAZA);
+            let reached = road_towards(s, from, p - from, from.distance(p));
+            cantera = place(s, Kind::Cantera, reached, 250.0);
+        }
+    }
+    out.push(cantera);
     // Muelle y aduana.
     let t = s.terrain.clone();
     match pier_site(s) {

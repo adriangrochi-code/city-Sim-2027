@@ -97,6 +97,8 @@ pub struct ServiciosLote {
     /// Riesgo de delito (0 a 1) y vigilancia (0 a 1).
     pub delito: f32,
     pub vigilancia: f32,
+    /// Olor, ruido, humo y agua sucia de la industria cercana (0 a 1; ver `city::recursos`).
+    pub molestia: f32,
 }
 
 /// Lo que la ciudad le cuenta a la población cada mes.

@@ -216,6 +216,40 @@ pub enum Layer {
     Saneamiento,
     /// Mapa de calor del delito.
     Delito,
+    // --- Recursos del suelo y zonas (ver `recursos`): sobre el terreno ---
+    /// Tierra para cultivo (chacras): índice CONEAT, aptitud, pendiente, bañados.
+    Cultivo,
+    /// Pasturas (estancias).
+    Pasturas,
+    /// Piedra para canteras (basamento cristalino).
+    Piedra,
+    /// Arcilla para hornos de ladrillos.
+    Arcilla,
+    /// Arena (playas, médanos, arenales).
+    Arena,
+    /// Olor, ruido, humo y agua sucia de la industria; el arroyo sucio aguas abajo.
+    Molestias,
+    /// Valor del suelo de cada solar.
+    Valor,
+}
+
+impl Layer {
+    /// Capas que se dibujan sobre el terreno (además de los solares).
+    pub fn es_de_terreno(self) -> bool {
+        matches!(self, Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena | Layer::Molestias)
+    }
+    /// El uso del suelo de una capa de recursos.
+    pub fn uso(self) -> Option<super::recursos::Uso> {
+        use super::recursos::Uso;
+        Some(match self {
+            Layer::Cultivo => Uso::Cultivo,
+            Layer::Pasturas => Uso::Pastoreo,
+            Layer::Piedra => Uso::Piedra,
+            Layer::Arcilla => Uso::Arcilla,
+            Layer::Arena => Uso::Arena,
+            _ => return None,
+        })
+    }
 }
 
 /// Un edificio de servicio construido.
@@ -232,6 +266,9 @@ pub struct Building {
     /// Pozos y aljibes: cuánto se ensució el agua con los pozos negros y la basura de
     /// alrededor (0 a 1; sube y baja de a poco, mes a mes).
     pub contaminacion: f32,
+    /// Rinde del sitio (chacra, estancia, horno, cantera: según la tierra o el material del
+    /// suelo, ver `recursos::rinde`; 1 = normal). Negativo = sin calcular todavía.
+    pub rinde: f32,
     /// Vóxeles (para demolerlo); se regeneran al cargar.
     pub voxels: Vec<IVec3>,
 }
@@ -510,6 +547,15 @@ impl City {
             Kind::Cantera if far(300.0) => return Some("La cantera es ruidosa: a más de 300 m de la plaza".into()),
             Kind::Horno if far(250.0) => return Some("El horno echa humo: a más de 250 m de la plaza".into()),
             Kind::Horno if t.arroyo_distance(c.x, c.y) > 300.0 && !near_coast(t, c, 300.0) => return Some("El horno necesita barro: un arroyo o la costa a menos de 300 m".into()),
+            Kind::Horno | Kind::Cantera => {
+                let r = super::recursos::Recursos::de(t).en_area(c, f, inf.size.0, inf.size.1);
+                if k == Kind::Horno && r.arcilla < super::recursos::MINIMO_MATERIAL {
+                    return Some("Acá no hay arcilla para ladrillos: busca limos o los bajos junto a un arroyo (capa «Arcilla»)".into());
+                }
+                if k == Kind::Cantera && r.piedra < super::recursos::MINIMO_MATERIAL {
+                    return Some("Acá no hay piedra: la cantera va sobre el basamento (capa «Piedra»)".into());
+                }
+            }
             Kind::Aguadores if t.arroyo_distance(c.x, c.y) > 400.0 && !near_coast(t, c, 250.0) => return Some("Los aguadores necesitan un arroyo a menos de 400 m o la costa a 250 m".into()),
             Kind::Aduana if !self.services.port.pier.as_ref().is_some_and(|p| p.land.distance(c) < 500.0) => return Some("La aduana va junto al muelle (a menos de 500 m): primero el muelle".into()),
             Kind::Aduana if self.services.count(Kind::Aduana) > 0 => return Some("La ciudad ya tiene aduana".into()),
@@ -549,12 +595,14 @@ impl City {
         let seed = 0x5E41_u64 ^ (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         let b = build_rotated(t, c, f, inf.frame.0, inf.frame.1, seed, &inf.builder);
         e.extend(b.edits);
-        self.services.buildings.insert(id, Building { id, kind: k, c, f, served: 0, contaminacion: 0.0, voxels: b.voxels });
+        let rinde = super::recursos::rinde(k, &super::recursos::Recursos::de(t).en_area(c, f, inf.size.0, inf.size.1));
+        self.services.buildings.insert(id, Building { id, kind: k, c, f, served: 0, contaminacion: 0.0, rinde, voxels: b.voxels });
         self.refresh_water();
         if k == Kind::Serenos {
             self.refresh_lamps(t, &mut e);
         }
         self.refresh_barrio();
+        self.refresh_suelo(t);
         Ok(e)
     }
 
@@ -571,6 +619,7 @@ impl City {
             self.refresh_lamps(t, &mut e);
         }
         self.refresh_barrio();
+        self.refresh_suelo(t);
         self.money -= 20;
         Ok(e)
     }
@@ -656,6 +705,8 @@ impl City {
         news.extend(self.saneamiento_month(t, e));
         self.refresh_water();
         self.refresh_barrio();
+        // Recursos, molestias y valor del suelo de cada solar (ver `recursos`).
+        self.refresh_suelo(t);
         news.extend(self.salubridad_month());
         news.extend(self.delito_month());
         news.extend(self.works_month(t, e));
@@ -670,7 +721,8 @@ impl City {
     /// Lo que los servicios le cuentan a la economía este mes.
     pub fn services_input(&self, inp: &mut MonthInput) {
         let s = &self.services;
-        let n = |k: Kind| s.count(k) as f32;
+        // Cada edificio rinde según su sitio (la tierra o el material del suelo; ver `recursos`).
+        let n = |k: Kind| s.of_kind(k).map(|b| if b.rinde < 0.0 { 1.0 } else { b.rinde }).sum::<f32>();
         inp.production[Res::Pan as usize] += self.climate.grain_this_month(self.month, CHACRA_GRAIN_YEAR * n(Kind::Chacra));
         let herd = self.climate.livestock_factor();
         inp.production[Res::Carne as usize] += ESTANCIA_CARNE * herd * n(Kind::Estancia);
@@ -724,8 +776,14 @@ impl City {
         }
         self.port_rebuild(t, e);
         self.walls_rebuild(t, e);
-        // Escuelas, salud y delito de cada solar (derivados: no se guardan).
+        // Escuelas, salud y delito de cada solar (derivados: no se guardan); recursos,
+        // molestias y valor del suelo (el valor se guarda: queda el de la partida).
         self.refresh_barrio();
+        let valor = std::mem::take(&mut self.lots.valor);
+        self.refresh_suelo(t);
+        if !valor.is_empty() {
+            self.lots.valor = valor;
+        }
     }
 
     /// Lleva un solar a ruinas (después de un incendio).
@@ -767,12 +825,28 @@ impl City {
                 out.push(format!("Alcance: {} m", inf.radius as i32));
             }
             Kind::Lazareto => out.push(format!("En cuarentena: {} personas", self.services.epidemic.quarantined_now())),
-            Kind::Chacra => out.push(format!("Trigo y maíz: {} raciones al año (año normal)", CHACRA_GRAIN_YEAR as i32)),
-            Kind::Estancia => out.push(format!("Por mes: {} de carne, {} cueros, {} de sebo", (ESTANCIA_CARNE * self.climate.livestock_factor()) as i32, (ESTANCIA_CUEROS * self.climate.livestock_factor()) as i32, (ESTANCIA_SEBO * self.climate.livestock_factor()) as i32)),
-            Kind::Horno => out.push(format!("Ladrillos por mes: {}", (HORNO_LADRILLOS * self.climate.brick_factor()) as i32)),
-            Kind::Cantera => out.push(format!("Piedra por mes: {}", CANTERA_PIEDRA as i32)),
+            Kind::Chacra => out.push(format!("Trigo y maíz: {} raciones al año (año normal)", (CHACRA_GRAIN_YEAR * b.rinde.max(0.0)) as i32)),
+            Kind::Estancia => {
+                let k = self.climate.livestock_factor() * b.rinde.max(0.0);
+                out.push(format!("Por mes: {} de carne, {} cueros, {} de sebo", (ESTANCIA_CARNE * k) as i32, (ESTANCIA_CUEROS * k) as i32, (ESTANCIA_SEBO * k) as i32))
+            }
+            Kind::Horno => out.push(format!("Ladrillos por mes: {}", (HORNO_LADRILLOS * self.climate.brick_factor() * b.rinde.max(0.0)) as i32)),
+            Kind::Cantera => out.push(format!("Piedra por mes: {}", (CANTERA_PIEDRA * b.rinde.max(0.0)) as i32)),
             Kind::Aduana => out.push("Contrabando: baja de 35 % a 5 %".into()),
             _ => self.barrio_lines(id, &mut out),
+        }
+        if matches!(b.kind, Kind::Chacra | Kind::Estancia | Kind::Horno | Kind::Cantera) && b.rinde >= 0.0 {
+            let que = match b.kind {
+                Kind::Chacra => "tierra para cultivo",
+                Kind::Estancia => "pasturas",
+                Kind::Horno => "arcilla",
+                _ => "piedra",
+            };
+            out.push(format!("Sitio: rinde {} % de lo normal ({})", (b.rinde * 100.0).round() as i32, que));
+        }
+        if let Some(p) = super::recursos::molestias::perfil_de_servicio(b.kind) {
+            let m = [(p.olor, "olor"), (p.ruido, "ruido"), (p.humo, "humo")].iter().filter(|x| x.0 >= 0.2).map(|x| x.1).collect::<Vec<_>>().join(", ");
+            out.push(format!("Molesta: {} hasta {} m{}", if m.is_empty() { "poco".into() } else { m }, p.radio as i32, if p.vertido >= 0.2 { "; ensucia el arroyo aguas abajo" } else { "" }));
         }
         out.push(format!("Mantenimiento: {} pesos al mes", inf.upkeep));
         out

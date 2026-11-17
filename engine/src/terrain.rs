@@ -176,6 +176,27 @@ const BOSQUE_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/bosq
 /// Rocosidad de los suelos CONEAT (0..255 = 0..100 % de roca a la vista).
 const ROCAS_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/rocas.bin");
 const ROCAS_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/rocas_contexto.bin");
+// --- Recursos del suelo (ver `docs/sistemas/recursos-del-suelo.md` y `city::recursos`) ---
+/// Grupo CONEAT de cada muestra: índice en `suelos.json` (bits 0-6) + 128 si es estimación.
+const SUELOS_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/suelos.bin");
+const SUELOS_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/suelos_contexto.bin");
+/// Índice de productividad CONEAT (media nacional 100), un byte por muestra.
+const PRODUCTIVIDAD_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/productividad.bin");
+const PRODUCTIVIDAD_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/productividad_contexto.bin");
+/// Unidad geológica (DINAMIGE): índice en `suelos.json`.
+const GEOLOGIA_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/geologia.bin");
+const GEOLOGIA_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/geologia_contexto.bin");
+/// Materiales (piedra, arcilla, arena, canto rodado), 4 bytes por muestra; el mapa en una
+/// grilla de 40 m, el entorno en la de contexto.
+const MINERALES_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/minerales.bin");
+const MINERALES_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/minerales_contexto.bin");
+/// Tabla de grupos CONEAT y unidades geológicas (la lee `city::recursos`).
+pub const SUELOS_JSON: &str = include_str!("../../assets/mapas/montevideo/suelos.json");
+/// Canales de `minerales.bin`.
+pub const MINERAL_PIEDRA: usize = 0;
+pub const MINERAL_ARCILLA: usize = 1;
+pub const MINERAL_ARENA: usize = 2;
+pub const MINERAL_GRAVA: usize = 3;
 
 /// Códigos de `biomas.bin`.
 pub const BIO_NADA: u8 = 0;
@@ -225,6 +246,16 @@ impl Grid {
     fn from_u8(bytes: &[u8], n: usize, step: f32, from: f32) -> Grid {
         assert_eq!(bytes.len(), n * n, "raster incompleto");
         Grid { v: bytes.iter().map(|&b| b as f32 / 255.0).collect(), n, step, from }
+    }
+    /// Valores de un byte tal cual (0..255), sin llevarlos a 0..1.
+    fn from_u8_raw(bytes: &[u8], n: usize, step: f32, from: f32) -> Grid {
+        assert_eq!(bytes.len(), n * n, "raster incompleto");
+        Grid { v: bytes.iter().map(|&b| b as f32).collect(), n, step, from }
+    }
+    /// Cuatro canales intercalados de un byte (0..255 → 0..1).
+    fn channels_u8(bytes: &[u8], n: usize, step: f32, from: f32) -> [Grid; 4] {
+        assert_eq!(bytes.len(), n * n * 4, "raster de minerales incompleto");
+        std::array::from_fn(|k| Grid { v: bytes.chunks_exact(4).map(|c| c[k] as f32 / 255.0).collect(), n, step, from })
     }
     #[inline]
     fn at(&self, i: i32, j: i32) -> f32 {
@@ -353,6 +384,16 @@ struct RealMap {
     /// Rocosidad de los suelos (0..1).
     rock_main: Grid,
     rock_ctx: Grid,
+    /// Recursos del suelo: productividad CONEAT (IP), grupo CONEAT y geología (bytes crudos,
+    /// muestra más cercana) y los cuatro materiales (0..1).
+    prod_main: Grid,
+    prod_ctx: Grid,
+    suelo_main: &'static [u8],
+    suelo_ctx: &'static [u8],
+    geo_main: &'static [u8],
+    geo_ctx: &'static [u8],
+    mineral_main: [Grid; 4],
+    mineral_ctx: [Grid; 4],
     /// Distancia de cada celda de agua a la tierra (m).
     land_main: Grid,
     land_ctx: Grid,
@@ -661,6 +702,14 @@ impl TerrainGen {
             forest_ctx,
             rock_main: Grid::from_u8(ROCAS_BIN, main_n, main_step, 0.0),
             rock_ctx: Grid::from_u8(ROCAS_CTX_BIN, ctx_n, ctx_step, ctx_from),
+            prod_main: Grid::from_u8_raw(PRODUCTIVIDAD_BIN, main_n, main_step, 0.0),
+            prod_ctx: Grid::from_u8_raw(PRODUCTIVIDAD_CTX_BIN, ctx_n, ctx_step, ctx_from),
+            suelo_main: SUELOS_BIN,
+            suelo_ctx: SUELOS_CTX_BIN,
+            geo_main: GEOLOGIA_BIN,
+            geo_ctx: GEOLOGIA_CTX_BIN,
+            mineral_main: Grid::channels_u8(MINERALES_BIN, (main_n - 1) / 2 + 1, main_step * 2.0, 0.0),
+            mineral_ctx: Grid::channels_u8(MINERALES_CTX_BIN, ctx_n, ctx_step, ctx_from),
             land_main,
             land_ctx,
             coast_r_main,
@@ -857,6 +906,46 @@ impl TerrainGen {
         } else {
             r.rock_main.linear(x, z)
         }
+    }
+
+    /// Índice de productividad CONEAT del suelo (media nacional 100; ver
+    /// `docs/sistemas/recursos-del-suelo.md`). `None` en el mapa ficticio.
+    pub fn productividad(&self, x: f32, z: f32) -> Option<f32> {
+        let r = self.real.as_ref()?;
+        Some(self.blend(&r.prod_main, &r.prod_ctx, x, z))
+    }
+
+    /// Grupo CONEAT del punto (muestra más cercana): índice en `suelos.json` (1..) y si es una
+    /// estimación (zona sin dato, rellenada con el vecino de la misma geología). `None` en el
+    /// agua o en el mapa ficticio.
+    pub fn grupo_coneat(&self, x: f32, z: f32) -> Option<(u8, bool)> {
+        let r = self.real.as_ref()?;
+        let b = self.raw_byte(r.suelo_main, r.suelo_ctx, &r.main, &r.ctx, x, z);
+        (b & 127 != 0).then_some((b & 127, b & 128 != 0))
+    }
+
+    /// Unidad geológica del punto (índice en `suelos.json`, 0 = sin dato).
+    pub fn unidad_geologica(&self, x: f32, z: f32) -> u8 {
+        match &self.real {
+            Some(r) => self.raw_byte(r.geo_main, r.geo_ctx, &r.main, &r.ctx, x, z),
+            None => 0,
+        }
+    }
+
+    /// Material del suelo (canal `MINERAL_*`, 0..1). `None` en el mapa ficticio.
+    pub fn mineral(&self, canal: usize, x: f32, z: f32) -> Option<f32> {
+        let r = self.real.as_ref()?;
+        Some(self.blend(&r.mineral_main[canal], &r.mineral_ctx[canal], x, z))
+    }
+
+    /// Byte crudo de un raster (muestra más cercana): el del mapa adentro, el del entorno afuera.
+    fn raw_byte(&self, main: &[u8], ctx: &[u8], gm: &Grid, gc: &Grid, x: f32, z: f32) -> u8 {
+        let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
+        let (bytes, g) = if edge >= 0.0 { (main, gm) } else { (ctx, gc) };
+        let m = g.n as i32 - 1;
+        let i = (((x - g.from) / g.step).round() as i32).clamp(0, m);
+        let j = (((z - g.from) / g.step).round() as i32).clamp(0, m);
+        bytes[(i + j * g.n as i32) as usize]
     }
 
     /// Afloramiento de roca en este punto (0 nada, 1 roca maciza): manchas de 10 a 20 m
