@@ -319,6 +319,32 @@ impl RoadNetwork {
         Some(e)
     }
 
+    /// Próximos ids de nodo y de tramo (para guardar la partida).
+    pub fn counters(&self) -> (u32, u32) {
+        (self.next_node, self.next_edge)
+    }
+
+    /// Rehace la red guardada: nodos, tramos (a, b, puntos, tipo) y contadores de ids. Los
+    /// índices (tramos por nodo y grilla espacial) se reconstruyen en orden de id, igual que
+    /// al construirla.
+    pub fn restore(nodes: BTreeMap<u32, Vec2>, edges: Vec<(u32, u32, u32, Vec<Vec2>, RoadKind)>, next_node: u32, next_edge: u32) -> Result<RoadNetwork, String> {
+        let mut net = RoadNetwork { node_edges: nodes.keys().map(|&k| (k, Vec::new())).collect(), nodes, next_node, next_edge, ..Default::default() };
+        let mut edges = edges;
+        edges.sort_by_key(|e| e.0);
+        for (id, a, b, pts, kind) in edges {
+            if pts.len() < 2 || !net.nodes.contains_key(&a) || !net.nodes.contains_key(&b) {
+                return Err(format!("tramo {id} inválido"));
+            }
+            net.edges.insert(id, Edge::new(a, b, pts, kind));
+            net.node_edges.get_mut(&a).unwrap().push(id);
+            net.node_edges.get_mut(&b).unwrap().push(id);
+            net.next_edge = net.next_edge.max(id);
+        }
+        net.next_node = net.next_node.max(net.nodes.keys().last().copied().unwrap_or(0));
+        net.rebuild_hash();
+        Ok(net)
+    }
+
     fn resolve_endpoint(&mut self, p: Vec2) -> u32 {
         let s = self.snap(p);
         if let Some(n) = s.node {

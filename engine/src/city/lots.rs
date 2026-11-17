@@ -421,6 +421,24 @@ impl Lots {
         id
     }
 
+    /// Próximo id de solar (para guardar la partida).
+    pub fn next_id(&self) -> u32 {
+        self.next
+    }
+
+    /// Rehace los solares guardados (sin los vóxeles de sus edificios: se regeneran aparte).
+    pub fn restore(lots: Vec<Lot>, obstacles: Vec<Obstacle>, plaza_center: Option<Vec2>, next: u32) -> Lots {
+        let mut out = Lots { obstacles, plaza_center, next, ..Default::default() };
+        for l in lots {
+            out.next = out.next.max(l.id);
+            out.lots.insert(l.id, l);
+        }
+        for (&id, l) in &out.lots {
+            out.hash.entry(cell(l.c)).or_default().push(id);
+        }
+        out
+    }
+
     pub fn remove(&mut self, id: u32) -> Lot {
         let lot = self.lots.remove(&id).unwrap();
         if let Some(v) = self.hash.get_mut(&cell(lot.c)) {

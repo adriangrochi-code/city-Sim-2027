@@ -10,7 +10,11 @@
 //! Modo juego (`motor --juego`, por omisión): 1 plaza · 2 recta · 3 curva · 4 damero ·
 //!   5 zona · 6 quitar zona · 7 demoler · 8 inspeccionar · Tab tipo de calle · R girar la
 //!   plaza · [ ] pincel · , . hora · Espacio pausa · 0 velocidad · clic derecho/Esc cancelar
+//!   · Esc (sin nada que cancelar) menú de pausa · F5 guardar · F9 cargar la última partida
+//!
+//! Sin argumentos el juego abre en el menú principal (ver `menu.rs`).
 
+use crate::menu::{self, Menu, MenuAction, Outcome};
 use crate::render::Renderer;
 use crate::session::{memory_mb, Session};
 use crate::sandbox::CATALOG;
@@ -70,12 +74,17 @@ struct App {
     ui_repaint: bool,
     /// Milisegundos de CPU de la interfaz por cuadro (egui + teselado + subida).
     ui_ms: Vec<f64>,
+    /// Menú principal y de pausa, partidas guardadas y opciones.
+    menu: Menu,
+    /// Acciones del menú de este cuadro, y la pesada que espera un cuadro (aviso «Cargando…»).
+    menu_acts: Vec<MenuAction>,
+    pending: Option<MenuAction>,
 }
 
 /// Con la escena quieta solo se redibuja para animar el agua, a este intervalo.
 const IDLE_REDRAW: std::time::Duration = std::time::Duration::from_millis(100);
 
-pub fn run(session: Session, opts: Options) -> Result<(), String> {
+pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| format!("no se pudo abrir el sistema de ventanas: {e}"))?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let steps = || if session.game.is_some() { crate::tour::city_steps() } else { crate::tour::default_steps() };
@@ -104,6 +113,9 @@ pub fn run(session: Session, opts: Options) -> Result<(), String> {
         ui: GameUi::default(),
         ui_repaint: true,
         ui_ms: Vec::new(),
+        menu,
+        menu_acts: Vec::new(),
+        pending: None,
     };
     event_loop.run_app(&mut app).map_err(|e| format!("error en el bucle de eventos: {e}"))?;
     if let Some(e) = app.error {
@@ -135,9 +147,14 @@ impl App {
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
         let s = &mut self.session;
-        // Cámara con el teclado.
+        // El menú detiene la simulación (pausa) o gira la cámara de fondo (menú principal).
+        self.menu.sync_pause(s);
+        self.menu.animate_background(s, dt);
+        self.menu.autosave(s);
+        let menu_open = self.menu.is_open();
+        // Cámara con el teclado (no con el menú abierto).
         let speed = s.cam.distance * 0.9 * dt;
-        let k = |c| self.keys.contains(&c) as i32 as f32;
+        let k = |c| (self.keys.contains(&c) && !menu_open) as i32 as f32;
         let fwd = k(KeyCode::KeyW) + k(KeyCode::ArrowUp) - k(KeyCode::KeyS) - k(KeyCode::ArrowDown);
         let right = k(KeyCode::KeyD) + k(KeyCode::ArrowRight) - k(KeyCode::KeyA) - k(KeyCode::ArrowLeft);
         s.cam.pan(right * speed, fwd * speed);
@@ -147,13 +164,13 @@ impl App {
         s.view_h = gpu.config.height as f32;
         s.apply_ops(&mut gpu.renderer, 400_000);
         gpu.renderer.time += dt;
-        // Selección bajo el cursor (no durante el recorrido automático).
-        if self.tour.is_none() {
+        // Selección bajo el cursor (no durante el recorrido automático ni con el menú abierto).
+        if self.tour.is_none() && !menu_open {
             let (w, h) = (gpu.config.width as f32, gpu.config.height as f32);
             let (o, d) = s.cam.ray(self.mouse.x as f32, self.mouse.y as f32, w, h);
             s.pick(o, d);
         }
-        gpu.renderer.set_overlay(&s.overlay());
+        gpu.renderer.set_overlay(&if self.menu.in_main_menu() { Vec::new() } else { s.overlay() });
         if let Some(t) = self.tour.as_mut() {
             if t.step(s, &mut gpu.renderer) && self.opts.frames.is_none() {
                 el.exit();
@@ -174,26 +191,39 @@ impl App {
         // pinta encima de la escena en la misma entrega.
         let t_ui = Instant::now();
         let mut ui_out = None;
-        if let Some(g) = s.game.as_mut() {
+        if s.game.is_some() || menu_open || self.menu.settings.mostrar_fps {
             self.ui.time += dt as f64;
-            self.ui.sync_news(g);
+            if let Some(g) = s.game.as_ref() {
+                self.ui.sync_news(g);
+            }
             let raw = gpu.egui.take_egui_input(&gpu.window);
             let ctx = gpu.egui.egui_ctx().clone();
-            ctx.set_zoom_factor(ui::zoom_for(gpu.config.height, gpu.window.scale_factor() as f32));
+            ctx.set_zoom_factor(ui::zoom_for(gpu.config.height, gpu.window.scale_factor() as f32) * self.menu.settings.escala_interfaz);
             let terrain = s.terrain.clone();
             let hour = s.hour;
             let mut acts = Vec::new();
+            let mut macts = Vec::new();
             let ui_state = &mut self.ui;
+            let menu = &mut self.menu;
+            let fps = self.fps;
             let full = ctx.run(raw, |ctx| {
-                acts = ui_state.draw(ctx, g, &terrain, hour, "");
+                // La interfaz del juego queda detrás del menú de pausa; no del principal.
+                if let Some(g) = s.game.as_ref().filter(|_| !menu.in_main_menu()) {
+                    acts = ui_state.draw(ctx, g, &terrain, hour, "");
+                }
+                macts = menu.draw(ctx, s.game.as_ref(), fps);
             });
-            let delta = ui::apply(&acts, g, &mut self.ui.list);
-            s.hour = (s.hour + delta).rem_euclid(24.0);
+            if let Some(g) = s.game.as_mut() {
+                let delta = ui::apply(&acts, g, &mut self.ui.list);
+                s.hour = (s.hour + delta).rem_euclid(24.0);
+            }
+            self.menu_acts.extend(macts);
             let repaint = full.viewport_output.get(&egui::ViewportId::ROOT).is_some_and(|v| v.repaint_delay < std::time::Duration::from_millis(500));
-            self.ui_repaint = repaint || !self.ui.toasts().is_empty() || !acts.is_empty();
+            self.ui_repaint = repaint || !self.ui.toasts().is_empty() || !acts.is_empty() || !self.menu_acts.is_empty() || self.pending.is_some();
             gpu.egui.handle_platform_output(&gpu.window, full.platform_output.clone());
             ui_out = Some((ctx, full));
         }
+        let has_ui = ui_out.is_some();
         let Gpu { renderer, surface, config, painter, .. } = gpu;
         let mut cpu_ui = t_ui.elapsed().as_secs_f64() * 1000.0;
         let mut hook = |d: &wgpu::Device, q: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, size: (u32, u32)| {
@@ -203,7 +233,6 @@ impl App {
                 cpu_ui += t0.elapsed().as_secs_f64() * 1000.0;
             }
         };
-        let has_ui = s.game.is_some();
         if let Err(e) = renderer.render_surface(surface, config, &s.cam, s.hour, has_ui.then_some(&mut hook as crate::render::UiHook)) {
             eprintln!("{e}");
         }
@@ -218,15 +247,79 @@ impl App {
             self.fps_samples.push(self.fps);
             self.fps_frames = 0;
             self.fps_time = Instant::now();
-            gpu.window.set_title(&s.title(self.fps, &gpu.renderer));
+            let title = if s.game.is_none() && self.menu.is_open() { format!("City Sim 2027 · {:.0} FPS", self.fps) } else { s.title(self.fps, &gpu.renderer) };
+            gpu.window.set_title(&title);
         }
         if self.opts.frames.is_some_and(|n| self.frames >= n) {
             el.exit();
         }
+        self.run_menu_actions(el);
+    }
+
+    /// Hace lo que pidió el menú. Empezar o cargar una partida se deja para el cuadro
+    /// siguiente, así se llega a ver el aviso «Cargando…».
+    fn run_menu_actions(&mut self, el: &ActiveEventLoop) {
+        let ready = self.pending.take();
+        for a in std::mem::take(&mut self.menu_acts) {
+            if a.heavy() && ready.is_none() {
+                self.menu.loading = Some(match &a {
+                    MenuAction::NewGame(n) => format!("Fundando {n}…"),
+                    MenuAction::Leave(_) => "Volviendo al menú principal…".into(),
+                    _ => "Cargando partida…".into(),
+                });
+                self.pending = Some(a);
+                self.ui_repaint = true;
+            } else {
+                self.menu_action(a, el);
+            }
+        }
+        if let Some(a) = ready {
+            self.menu_action(a, el);
+        }
+    }
+
+    fn menu_action(&mut self, a: MenuAction, el: &ActiveEventLoop) {
+        let renderer = self.gpu.as_mut().map(|g| &mut g.renderer);
+        match self.menu.perform(a, &mut self.session, renderer, &mut self.ui) {
+            Outcome::Quit => el.exit(),
+            Outcome::Settings => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    let mode = if self.menu.settings.sincronizacion_vertical { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
+                    if gpu.config.present_mode != mode {
+                        gpu.config.present_mode = mode;
+                        gpu.renderer.configure(&gpu.surface, &gpu.config);
+                    }
+                }
+            }
+            Outcome::None => {}
+        }
+        self.last_key = None;
+        self.ui_repaint = true;
+    }
+
+    /// Esc, F5 y F9 con partida o con el menú abierto. Con el menú abierto se traga las
+    /// demás teclas (no mueven la cámara ni eligen herramientas).
+    fn menu_key(&mut self, code: KeyCode) -> bool {
+        let has_game = self.session.game.is_some();
+        if !has_game && !self.menu.is_open() {
+            return false;
+        }
+        match code {
+            KeyCode::Escape => {
+                if let Some(a) = menu::escape(self.session.game.as_mut(), &mut self.ui, &mut self.menu) {
+                    self.menu_acts.push(a);
+                }
+            }
+            KeyCode::F5 if has_game && !self.menu.in_main_menu() => self.menu_acts.push(MenuAction::Save),
+            KeyCode::F9 if self.pending.is_none() => self.menu_acts.push(MenuAction::QuickLoad),
+            _ => return self.menu.is_open(),
+        }
+        self.ui_repaint = true;
+        true
     }
 
     /// Teclas del modo juego (como en el prototipo).
-    fn game_key(&mut self, code: KeyCode, el: &ActiveEventLoop) -> bool {
+    fn game_key(&mut self, code: KeyCode) -> bool {
         let s = &mut self.session;
         let Some(g) = s.game.as_mut() else { return false };
         let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8];
@@ -235,12 +328,6 @@ impl App {
             return true;
         }
         match code {
-            KeyCode::Escape => {
-                // Primero cancela el trazado, después cierra paneles; si no queda nada, sale.
-                if !g.cancel() && !self.ui.close_one(g) {
-                    el.exit();
-                }
-            }
             KeyCode::Tab => {
                 g.kind = if g.kind == crate::city::roads::RoadKind::Dirt { crate::city::roads::RoadKind::Stone } else { crate::city::roads::RoadKind::Dirt };
             }
@@ -257,7 +344,7 @@ impl App {
     }
 
     fn key(&mut self, code: KeyCode, el: &ActiveEventLoop) {
-        if self.game_key(code, el) {
+        if self.menu_key(code) || self.game_key(code) {
             return;
         }
         let s = &mut self.session;
@@ -294,7 +381,7 @@ impl ApplicationHandler for App {
         if self.gpu.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("Motor de vóxeles").with_inner_size(LogicalSize::new(self.opts.size.0, self.opts.size.1));
+        let attrs = Window::default_attributes().with_title(if self.menu.is_open() { "City Sim 2027" } else { "Motor de vóxeles" }).with_inner_size(LogicalSize::new(self.opts.size.0, self.opts.size.1));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
@@ -303,8 +390,14 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        match Renderer::for_window(window.clone(), self.opts.msaa) {
-            Ok((renderer, surface, config)) => {
+        // Sin --msaa, el suavizado de las opciones (0 = automático).
+        let msaa = if self.opts.msaa == 0 { self.menu.settings.msaa } else { self.opts.msaa };
+        match Renderer::for_window(window.clone(), msaa) {
+            Ok((mut renderer, surface, mut config)) => {
+                if !self.menu.settings.sincronizacion_vertical {
+                    config.present_mode = wgpu::PresentMode::AutoNoVsync;
+                    renderer.configure(&surface, &config);
+                }
                 println!("Ventana {}×{} · adaptador: {} · formato {:?}", config.width, config.height, renderer.adapter_name, config.format);
                 let ctx = egui::Context::default();
                 ui::theme::install(&ctx);
@@ -327,7 +420,8 @@ impl ApplicationHandler for App {
             self.ui_repaint = true;
         }
         // La interfaz ve el evento primero; si el cursor está sobre un panel, el mundo no.
-        let (ui_pointer, ui_keys) = match (self.gpu.as_mut(), self.session.game.is_some()) {
+        let menu_open = self.menu.is_open();
+        let (ui_pointer, ui_keys) = match (self.gpu.as_mut(), self.session.game.is_some() || menu_open || self.menu.settings.mostrar_fps) {
             (Some(gpu), true) => {
                 let _ = gpu.egui.on_window_event(&gpu.window, &event);
                 let ctx = gpu.egui.egui_ctx();
@@ -337,7 +431,7 @@ impl ApplicationHandler for App {
                 let at = egui::pos2(self.mouse.x as f32 / ppp, self.mouse.y as f32 / ppp);
                 // La capa de fondo cubre toda la pantalla: solo cuenta dentro de la barra superior.
                 let over = ctx.layer_id_at(at).is_some_and(|l| l.order != egui::Order::Background || at.y <= ui::TOP_BAR_H);
-                (over || ctx.is_using_pointer(), ctx.wants_keyboard_input())
+                (over || ctx.is_using_pointer() || menu_open, ctx.wants_keyboard_input())
             }
             _ => (false, false),
         };

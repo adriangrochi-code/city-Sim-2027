@@ -10,6 +10,7 @@ pub mod game;
 pub mod game_demo;
 pub mod lots;
 pub mod roads;
+pub mod save;
 pub mod voxelize;
 
 use crate::buildings::{Edits, Rng};
@@ -91,7 +92,66 @@ fn clear_voxels(e: &mut Edits, lot: &Lot) {
     }
 }
 
+/// Centro de la iglesia matriz: del lado de atrás de la plaza, cruzando la calle.
+fn church_center(c: Vec2, f: Vec2) -> Vec2 {
+    c - f * (BLOCK * 0.5 + RoadKind::Stone.width() * 0.5 + 0.6 + 21.0)
+}
+
+/// Vóxeles de la plaza mayor y de la iglesia matriz.
+fn plaza_church_edits(t: &TerrainGen, c: Vec2, f: Vec2) -> Edits {
+    let mut e = Edits::default();
+    plaza_edits(t, c, f, &mut e);
+    let church = build_rotated(t, church_center(c, f), f, 30, 84, 4242, &iglesia5);
+    e.voxels.extend(church.edits.voxels);
+    e.surface.extend(church.edits.surface);
+    e
+}
+
 impl City {
+    /// Vuelve a generar todos los vóxeles de la ciudad a partir de su estado (al cargar una
+    /// partida): plaza e iglesia, todas las calles y el edificio de cada solar construido.
+    /// La voxelización es determinista (semillas de los solares), así que el resultado es el
+    /// mismo mundo que se guardó. Llena los vóxeles de cada solar para poder reemplazarlo.
+    pub fn rebuild_edits(&mut self, t: &TerrainGen) -> Edits {
+        let mut e = match self.plaza {
+            Some((c, angle)) => plaza_church_edits(t, c, plaza_frame(angle).0),
+            None => Edits::default(),
+        };
+        // Calles y edificios en paralelo (cada tramo y cada edificio depende solo de la red y
+        // de su solar); se juntan en orden de id, así el resultado no depende de los hilos.
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).max(1);
+        let ids: Vec<u32> = self.net.edges.keys().copied().collect();
+        let net = &self.net;
+        let per = ids.len().div_ceil(threads).max(1);
+        let roads: Vec<Edits> = std::thread::scope(|sc| {
+            let hs: Vec<_> = ids.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&id| {
+                let mut r = Edits::default();
+                road_edits(t, net, id, &mut r);
+                r
+            }).collect::<Vec<_>>())).collect();
+            hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        });
+        for r in roads {
+            e.voxels.extend(r.voxels);
+            e.surface.extend(r.surface);
+        }
+        let jobs: Vec<(u32, Vec2, Vec2, u64, ZoneKind, u8)> = self.lots.lots.values().filter_map(|l| Some((l.id, l.c, l.f, l.seed, l.kind()?, l.level))).filter(|j| j.5 > 0).collect();
+        let per = jobs.len().div_ceil(threads).max(1);
+        let built: Vec<(u32, voxelize::Built)> = std::thread::scope(|sc| {
+            let hs: Vec<_> = jobs.chunks(per).map(|part| sc.spawn(move || part.iter().map(|&(id, c, f, seed, kind, level)| (id, build_rotated(t, c, f, LOT_W, LOT_D, seed, builder_for(kind, level, seed)))).collect::<Vec<_>>())).collect();
+            hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        });
+        for l in self.lots.lots.values_mut() {
+            l.voxels.clear();
+        }
+        for (id, b) in built {
+            e.voxels.extend(b.edits.voxels);
+            e.surface.extend(b.edits.surface);
+            self.lots.lots.get_mut(&id).unwrap().voxels = b.voxels;
+        }
+        e
+    }
+
     pub fn population(&self) -> i32 {
         self.lots.population()
     }
@@ -191,13 +251,8 @@ impl City {
         self.plaza = Some((c, angle));
         self.lots.plaza_center = Some(c);
         self.lots.obstacles.push(Obstacle { c, f, w: PLAZA_SIZE, d: PLAZA_SIZE });
-        let church_c = c - f * (BLOCK * 0.5 + RoadKind::Stone.width() * 0.5 + 0.6 + 21.0);
-        self.lots.obstacles.push(Obstacle { c: church_c, f, w: 18.0, d: 44.0 });
-        let mut e = Edits::default();
-        plaza_edits(t, c, f, &mut e);
-        let church = build_rotated(t, church_c, f, 30, 84, 4242, &iglesia5);
-        e.voxels.extend(church.edits.voxels);
-        e.surface.extend(church.edits.surface);
+        self.lots.obstacles.push(Obstacle { c: church_center(c, f), f, w: 18.0, d: 44.0 });
+        let mut e = plaza_church_edits(t, c, f);
         let half = BLOCK * 0.5;
         let q = [c + (s + f) * half, c + (-s + f) * half, c + (-s - f) * half, c + (s - f) * half];
         let mut new = Vec::new();

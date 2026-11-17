@@ -34,6 +34,8 @@ pub const TOOLS: [(Tool, &str); 8] = [
 ];
 
 pub struct Game {
+    /// Nombre de la ciudad (el que eligió el jugador al empezar la partida).
+    pub city_name: String,
     pub city: City,
     pub tool: Tool,
     pub kind: RoadKind,
@@ -89,6 +91,7 @@ pub fn stage_name(pop: i32) -> &'static str {
 impl Default for Game {
     fn default() -> Self {
         Game {
+            city_name: crate::ui::CITY_NAME.to_string(),
             city: City::default(),
             tool: Tool::Plaza,
             kind: RoadKind::Dirt,

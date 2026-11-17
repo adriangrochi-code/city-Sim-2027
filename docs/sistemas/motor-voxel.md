@@ -564,7 +564,8 @@ sandbox de antes queda en `motor --sandbox` (o con `--scene ...`).
 | Tab | Camino de tierra (6 m, radio mín. 14 m, 2 $/m) ↔ calle empedrada (8 m, radio mín. 22 m, 7 $/m) |
 | Espacio / 0 | Pausa / velocidad ×1, ×2, ×4 |
 | , / . | Hora del día |
-| Esc, clic derecho | Cancela el trazado en curso; Esc sin nada que cancelar sale |
+| Esc, clic derecho | Cancela el trazado en curso; Esc sin nada que cancelar abre el menú de pausa (sección 15) |
+| F5 / F9 | Guardar la partida / cargar la última guardada |
 
 La cámara se maneja igual que en el sandbox. Las vistas previas se dibujan con la capa
 translúcida: verde si se puede construir, rojo si no (con el motivo en el título); solares
@@ -722,7 +723,7 @@ sepia, bordes marrones, esquinas redondeadas).
 
 Los atajos de teclado van en los globos de ayuda, no en los botones. Esc cancela el
 trazado; si no hay trazado cierra, en orden, el listado, el presupuesto, la ficha y el
-cajón; si no queda nada abierto, sale.
+cajón; si no queda nada abierto, abre el menú de pausa (sección 15).
 
 | Captura | Qué muestra |
 |---|---|
@@ -796,7 +797,97 @@ sobre una tarjeta (encima del mundo) no fundan la plaza; un clic en el mundo lib
 - El balance arriba es el del presupuesto de la economía; hasta que cierra el primer mes
   muestra "—/mes".
 - La ficha de una calle o del terreno tiene pocos datos (tipo y largo; posición).
-- Sin pantalla de inicio, guardar / cargar ni menú de opciones (escala de la interfaz a
-  mano, idioma).
+- Falta elegir el idioma (los menús, el guardado y las opciones están en la sección 15).
 - Los globos de ayuda no se ven en las capturas (no hay cursor en el modo sin pantalla).
 
+## 15. Menú principal, pausa y partidas guardadas
+
+Fase 2, paso 6: el juego abre en un menú principal y se puede guardar y cargar la ciudad.
+Todo usa el mismo papel y tinta de la interfaz (sección 14).
+
+![Menú principal](../capturas/motor-menu-principal.jpg)
+
+- **Menú principal** (`motor` sin argumentos): la escena colonial gira despacio detrás
+  (2,5° por segundo alrededor de la plaza, a las 16:30) bajo el título. Opciones:
+  *Nueva partida* (pide el nombre de la ciudad y empieza en la fundación, marzo de 1726),
+  *Continuar* (la partida más reciente; desactivada si no hay), *Cargar partida*,
+  *Opciones* y *Salir*. `motor --juego` sigue entrando directo a una partida nueva.
+- **Cargar partida**: lista de la carpeta de partidas, la más reciente primero, con el
+  nombre, la fecha del juego, vecinos, pesos y cuándo se guardó («hace 5 horas»); marca el
+  autoguardado y la partida en curso. *Borrar* pide confirmación en el mismo renglón. Un
+  archivo dañado o de una versión más nueva aparece al final con el motivo y sin *Cargar*.
+- **Menú de pausa** (Esc cuando no queda trazado ni panel que cerrar): *Volver al juego*,
+  *Guardar*, *Guardar como…*, *Cargar*, *Opciones*, *Salir al menú principal*, *Salir del
+  juego*. Mientras está abierto la simulación y el día se detienen (se restituyen al
+  cerrarlo) y el mundo no recibe clics ni teclas. Si hay cambios sin guardar, salir pide
+  *Guardar y salir / Salir sin guardar / Cancelar*. Esc vuelve a la pantalla anterior.
+- **F5** guarda y **F9** carga la última partida (la actual o la más reciente), con aviso
+  en la gaceta.
+- **Opciones** (se guardan en `opciones.json`): tamaño de la interfaz (75 a 150 % sobre la
+  escala automática), sincronización vertical, contador de FPS, distancia de dibujo (6, 7 u
+  8 niveles de detalle; se aplica al empezar o cargar una partida), suavizado de bordes
+  (automático, desactivado o 4×; al volver a abrir el juego) y autoguardado cada 6, 12 o 24
+  meses de juego (o nunca).
+
+| Captura | Qué muestra |
+|---|---|
+| `motor-menu-principal.jpg` | Menú principal con la ciudad del recorrido de fondo |
+| `motor-menu-cargar.jpg` | Lista de partidas: la normal, otra ciudad y un autoguardado |
+| `motor-menu-pausa.jpg` | Menú de pausa sobre la partida, con la interfaz del juego detrás |
+| `motor-menu-opciones.jpg` | Opciones |
+| `motor-menu-ventana.jpg` | La ventana real (Xvfb + lavapipe) con la escena colonial detrás |
+
+### Formato de las partidas
+
+- Carpeta: Windows `%APPDATA%\CitySim2027\partidas\`, Linux
+  `~/.local/share/city-sim-2027/partidas/` (o `$XDG_DATA_HOME`); la variable
+  `CITYSIM_DATOS` la cambia (pruebas). Un archivo por partida, con el nombre de la ciudad
+  sin acentos (`san-felipe-de-montevideo.json`; `-2` si ya existe); el autoguardado va a
+  `<ciudad>-autoguardado.json`.
+- JSON (`serde` + `serde_json`) con `formato: 1`; una partida de un formato más nuevo no se
+  carga. Se escribe a un temporal y se renombra (nunca queda a medias). La ciudad de la
+  demostración (355 solares, 79 tramos) ocupa 82 KB y se guarda en menos de 1 ms.
+- Se guarda el estado, no los vóxeles (`city/save.rs`): calles (nodos, tramos con sus
+  puntos y tipo, contadores de id), solares (centro, frente, zona, nivel, antigüedad,
+  semilla), obstáculos de la plaza e iglesia, tesoro, pobladores, mes, plaza, economía
+  (existencias, impuestos, ordenanzas, opinión, pósito, sequía, último presupuesto) y el
+  estado de los dos generadores de azar, además de la cámara, la hora, el tipo de calle, el
+  pincel, la zona y la velocidad.
+- **Al cargar** se regeneran los vóxeles: plaza e iglesia, todas las calles y el edificio de
+  cada solar (`City::rebuild_edits`, determinista por semillas, en paralelo y juntado en
+  orden de id). Se arma una sesión nueva con el almacén de ediciones ya lleno y el
+  streaming genera las columnas como al empezar; el renderizador vacía sus mallas. Empezar o
+  cargar se hace un cuadro después del clic para mostrar «Cargando…».
+- Como también se guarda el azar, la ciudad cargada sigue creciendo igual que si no se
+  hubiera guardado (lo comprueba la prueba).
+
+### Prueba
+
+- `city::save::tests::guardar_y_cargar_da_la_misma_ciudad`: JSON ida y vuelta, mismas
+  calles, índices, solares, niveles, dinero y economía; los mismos edificios regenerados; 12
+  meses más dan la misma ciudad; las calles cargadas se pueden demoler.
+- `save::tests`: nombres de archivo, fechas relativas, listar / leer / borrar, formato
+  futuro, opciones con valores fuera de rango.
+- `menu::tests`: pantallas y Esc del menú principal, el orden de Esc en el juego (trazado →
+  listado → cajón → pausa → juego), la pausa detiene y restituye la simulación, y el ciclo
+  nueva partida → guardar → guardar como → F9 → menú principal → borrar → opciones.
+- El recorrido `--demo-ciudad` guarda la ciudad crecida, la carga en una sesión nueva,
+  compara (`IGUAL`) y saca `motor-ciudad-cargada.png` con la misma cámara que
+  `motor-ciudad-general.png` (iguales a la vista); después captura los menús.
+- En la ventana (Xvfb + xdotool): nueva partida con nombre, fundar, Esc → pausa, F5,
+  salir con cambios (pide confirmación), *Continuar*, F9, opciones (vsync y FPS) y salir.
+
+| Medición (4 núcleos, lavapipe) | Resultado |
+|---|---|
+| Guardar la ciudad de la demostración | 0,6 ms, 82 KB |
+| Cargarla (leer, regenerar 4,3 M vóxeles, llenar el almacén) | ≈3,2 s (1,7 s regenerando) |
+| Cargar una fundación | 80 ms |
+
+### Problemas conocidos
+
+- Cargar una ciudad grande traba la ventana unos segundos (se ve «Cargando partida…»); se
+  podría regenerar en otro hilo mostrando el terreno mientras tanto.
+- Los edificios vecinos que se pisan en un borde pueden quedar apenas distintos al
+  cargar (se regeneran en orden de solar, no en el orden en que crecieron).
+- El suavizado de bordes elegido se aplica recién al volver a abrir el juego.
+- El contador de FPS de las opciones es una etiqueta de la interfaz (abajo a la derecha).

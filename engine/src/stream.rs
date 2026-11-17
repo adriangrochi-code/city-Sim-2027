@@ -396,6 +396,12 @@ impl Drop for Streamer {
         self.shared.quit.store(true, AtOrd::SeqCst);
         self.shared.cv.notify_all();
         for w in self.workers.drain(..) {
+            // Un hilo puede estar trabado entregando una columna con el canal lleno: se vacía
+            // el canal mientras termina (si no, cerrar una partida colgaría el juego).
+            while !w.is_finished() {
+                while self.rx.try_recv().is_ok() {}
+                std::thread::yield_now();
+            }
             let _ = w.join();
         }
     }

@@ -55,6 +55,13 @@ impl Rng {
     pub fn range(&mut self, a: i32, b: i32) -> i32 {
         a + (self.next() % ((b - a) as u64 + 1)) as i32
     }
+    /// Estado interno (para guardar la partida y seguir la misma secuencia al cargarla).
+    pub fn state(&self) -> u64 {
+        self.0
+    }
+    pub fn from_state(s: u64) -> Self {
+        Rng(s | 1)
+    }
 }
 
 /// Altura del terreno en índice de vóxel base (el vóxel de superficie).
