@@ -335,6 +335,7 @@ pub struct Renderer {
     /// Vecinos y vehículos: una instancia por caja (`city::agentes::dibujo::Caja`), rehecho
     /// en cada cuadro.
     agent_pipe: wgpu::RenderPipeline,
+    agent_shadow_pipe: wgpu::RenderPipeline, // [personajes]
     agent_buf: Option<wgpu::Buffer>,
     agent_count: u32,
     agent_key: u64,
@@ -892,6 +893,38 @@ impl Renderer {
             cache: None,
         });
         let agent_mod = shader("agentes", &with_shadows(include_str!("shaders/agentes.wgsl")));
+        // [personajes]
+        let agent_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<crate::detalle::Caja>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Float32x3, 3 => Float32, 4 => Float32x3, 5 => Unorm8x4],
+        };
+        // Sombras de contacto bajo los modelos: las mismas instancias (las de alto 0), mezcla
+        // que oscurece lo que ya está dibujado, sin escribir profundidad.
+        let agent_shadow_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("agentes-sombra"),
+            layout: Some(&main_layout),
+            vertex: wgpu::VertexState { module: &agent_mod, entry_point: "vs_sombra", compilation_options: Default::default(), buffers: &[agent_layout.clone()] },
+            fragment: Some(wgpu::FragmentState {
+                module: &agent_mod,
+                entry_point: "fs_sombra",
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::GreaterEqual)),
+            multisample: ms,
+            multiview: None,
+            cache: None,
+        });
+        // [/personajes]
         let agent_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("agentes"),
             layout: Some(&main_layout),
@@ -899,12 +932,9 @@ impl Renderer {
                 module: &agent_mod,
                 entry_point: "vs_main",
                 compilation_options: Default::default(),
-                // Una instancia por caja (32 bytes): base, giro, tamaño y color.
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<crate::city::agentes::dibujo::Caja>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Float32x3, 3 => Unorm8x4],
-                }],
+                // [personajes] Una instancia por caja (48 bytes, `detalle::Caja`): pivote, giro,
+                // desde el pivote, inclinación, tamaño y color.
+                buffers: &[agent_layout.clone()],
             },
             fragment: Some(wgpu::FragmentState { module: &agent_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(format.into())] }),
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
@@ -1114,6 +1144,7 @@ impl Renderer {
             detail_buf: std::cell::RefCell::new(None),
             detail_dirty: std::cell::Cell::new(false),
             agent_pipe,
+            agent_shadow_pipe, // [personajes]
             agent_buf: None,
             agent_count: 0,
             agent_key: 0,
@@ -1324,7 +1355,7 @@ impl Renderer {
     }
 
     /// Cajas de los vecinos y vehículos de este cuadro (vacío: no se dibuja ninguno).
-    pub fn set_agents(&mut self, cajas: &[crate::city::agentes::dibujo::Caja]) {
+    pub fn set_agents(&mut self, cajas: &[crate::detalle::Caja]) {
         let bytes: &[u8] = bytemuck::cast_slice(cajas);
         let mut h = crate::fxhash::FxHasher::default();
         std::hash::Hasher::write(&mut h, bytes);
@@ -1968,7 +1999,10 @@ impl Renderer {
             pass.set_pipeline(&self.agent_pipe);
             pass.set_bind_group(0, &self.main_bg, &[]);
             pass.set_vertex_buffer(0, buf.slice(..));
-            pass.draw(0..30, 0..self.agent_count);
+            // [personajes] seis caras (las ruedas giran y muestran la de abajo) y las sombras
+            pass.draw(0..36, 0..self.agent_count);
+            pass.set_pipeline(&self.agent_shadow_pipe);
+            pass.draw(0..6, 0..self.agent_count);
         }
         // [agua en vóxeles] El plano del río solo queda como respaldo más allá del último anillo
         // (el shader lo recorta adentro, ver `water.wgsl`); el agua son las caras de las columnas,

@@ -1,6 +1,6 @@
 [package]
 name = "motor"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 description = "Motor de vóxeles del juego (época colonial rioplatense)"
 

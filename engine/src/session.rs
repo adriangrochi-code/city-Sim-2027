@@ -195,7 +195,8 @@ impl Session {
         match &self.game {
             Some(g) => {
                 let mut cajas = Vec::new();
-                g.city.agentes.cajas(&g.city.net, Vec2::new(self.cam.target.x, self.cam.target.z), &mut cajas);
+                // [personajes] vecinos, animales y detalles de micro-vóxeles
+                crate::city::agentes::fauna::cajas_ciudad(&g.city, &self.terrain, Vec2::new(self.cam.target.x, self.cam.target.z), self.hour, &mut cajas);
                 r.set_agents(&cajas);
             }
             None => r.set_agents(&[]),

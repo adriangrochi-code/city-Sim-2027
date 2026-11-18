@@ -7,10 +7,14 @@
 
 use super::super::roads::Edge;
 use super::super::voxelize::{deck_top, road_height, water_spans};
-use super::{pose, Agente, Agentes, Tipo};
+use super::{pose, Agente, Agentes, Rol, Tipo};
+use crate::city::poblacion::modelo::{Estamento, Oficio, Raiz, Sexo};
+use crate::detalle::anim;
+use crate::detalle::ropa::{mezcla, Quien};
+use crate::detalle::girar;
 use crate::lod::BASE_VOXEL;
 use crate::terrain::TerrainGen;
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 /// Solo se dibujan los agentes a menos de esta distancia del centro de la vista (m).
 pub const RADIO: f32 = 600.0;
@@ -19,16 +23,12 @@ pub const MAX_DIBUJADOS: usize = 2500;
 /// Separación de las muestras de altura de cada tramo (m).
 const MUESTRA: f32 = 2.0;
 
-/// Una caja de un agente para el renderer: base (centro del piso de la caja, en metros),
-/// giro alrededor de y (rad; 0 = mirando a +z), tamaño (m) y color sRGB.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Caja {
-    pub pos: [f32; 3],
-    pub giro: f32,
-    pub tam: [f32; 3],
-    pub color: [u8; 4],
-}
+/// Una caja para el renderer (ver `detalle::Caja`).
+pub use crate::detalle::Caja;
+
+/// Más cerca que esto (m) los agentes se dibujan con los modelos de micro-vóxeles
+/// (`detalle`); más lejos, con las cajas de siempre.
+pub const CERCA: f32 = 110.0;
 
 /// Ropa de la gente (paños teñidos con tintes de la época).
 pub const ROPA: [[u8; 3]; 8] = [[217, 209, 189], [140, 82, 64], [89, 102, 133], [158, 140, 97], [77, 77, 77], [178, 115, 89], [115, 133, 102], [196, 178, 140]];
@@ -143,9 +143,6 @@ fn altura(perfil: &[f32], ps: f32) -> f32 {
     perfil[i] + (perfil[j] - perfil[i]) * (x - i as f32).clamp(0.0, 1.0)
 }
 
-fn rgb(c: [u8; 3]) -> [u8; 4] {
-    [c[0], c[1], c[2], 255]
-}
 
 fn oscurecer(c: [u8; 3]) -> [u8; 3] {
     [(c[0] as f32 * 0.7) as u8, (c[1] as f32 * 0.7) as u8, (c[2] as f32 * 0.7) as u8]
@@ -162,7 +159,7 @@ fn poner(out: &mut Vec<Caja>, piezas: &[Pieza], base: glam::Vec3, giro: f32, dz:
             Tinte::Pelaje => pelaje,
             Tinte::PelajeOscuro => oscurecer(pelaje),
         };
-        out.push(Caja { pos: (base + off).into(), giro, tam: *tam, color: rgb(color) });
+        out.push(Caja::lisa(base + off, giro, *tam, color));
     }
 }
 
@@ -184,7 +181,7 @@ pub fn modelo(out: &mut Vec<Caja>, tipo: Tipo, base: glam::Vec3, giro: f32, ropa
             poner(out, &PERSONA, base, giro, 0.0, ropa, pelaje);
             let n = out.len();
             let (sn, cs) = giro.sin_cos();
-            for c in &mut out[n - PERSONA.len()..] {
+            for c in &mut out[n - PERSONA.len()..n] {
                 c.pos[0] += -1.25 * cs + (dz + 2.2) * sn;
                 c.pos[2] += 1.25 * sn + (dz + 2.2) * cs;
             }
@@ -196,9 +193,133 @@ pub fn modelo(out: &mut Vec<Caja>, tipo: Tipo, base: glam::Vec3, giro: f32, ropa
     }
 }
 
+/// Lo que hace falta para vestir a los vecinos: la población (personas de verdad), los
+/// solares (la casa de los vecinos sintéticos), el año y los segundos para lo que se mueve
+/// sin avanzar (mirar alrededor).
+#[derive(Clone, Copy, Default)]
+pub struct Vestuario<'a> {
+    pub poblacion: Option<&'a crate::city::poblacion::Poblacion>,
+    pub lots: Option<&'a crate::city::lots::Lots>,
+    pub anio: i32,
+    pub t: f32,
+}
+
+/// Oficio de la demografía para los oficios de los vecinos sintéticos (`OFICIOS`).
+fn oficio_sintetico(i: u8) -> Oficio {
+    match i {
+        1 => Oficio::Pulpero,
+        2 | 8 => Oficio::Peon,
+        6 => Oficio::Servicio,
+        _ => Oficio::Artesano,
+    }
+}
+
+/// Quién es un agente, para vestirlo: su persona de la demografía si la tiene; si no, lo que
+/// se sabe del vecino sintético (nombre, oficio, origen, casa); si no, un carretero.
+pub fn quien(ag: &Agentes, a: &Agente, v: &Vestuario) -> Quien {
+    if let (Some(id), Some(pob)) = (a.persona, v.poblacion) {
+        if let Some(p) = pob.persona(id) {
+            let principal = p.riqueza > 600.0 || (p.estamento == Estamento::Vecino && p.riqueza > 250.0);
+            return Quien { mujer: p.sexo == Sexo::Mujer, edad: p.edad(pob.mes).clamp(0, 120) as u8, oficio: p.oficio, principal, raiz: p.raiz, semilla: id as u64 ^ 0x5EED_0000 };
+        }
+    }
+    if let Some(vec) = a.vecino.and_then(|k| ag.e.vecinos.get(&k).map(|v| (k, v))) {
+        let (k, vc) = vec;
+        let s = mezcla(k);
+        let edad = match vc.rol {
+            Rol::NoTrabaja if s % 10 < 7 => 9,
+            Rol::NoTrabaja => 66,
+            _ => 22 + (s % 30) as u8,
+        };
+        let raiz = match vc.origen {
+            1 | 2 => Raiz::Europea,
+            0 if s % 3 == 0 => Raiz::Mixta,
+            0 => Raiz::Europea,
+            _ if s % 2 == 0 => Raiz::Indigena,
+            _ => Raiz::Mixta,
+        };
+        let principal = v.lots.and_then(|l| l.lots.get(&vc.casa)).is_some_and(|l| l.level >= 3);
+        return Quien { mujer: vc.nombre.0 >= 12, edad, oficio: oficio_sintetico(vc.oficio), principal, raiz, semilla: k };
+    }
+    let s = mezcla(a.id as u64 ^ ((a.conductor.0 as u64) << 40));
+    Quien { mujer: false, edad: 25 + (s % 30) as u8, oficio: Oficio::Peon, principal: false, raiz: [Raiz::Europea, Raiz::Mixta, Raiz::Indigena][(s % 3) as usize], semilla: s }
+}
+
+/// Un agente con los modelos de micro-vóxeles: `base` es el suelo bajo su frente, `giro` su
+/// rumbo, `dist` lo que lleva recorrido (fase de la marcha y de las ruedas), `vel` su velocidad
+/// y `t` los segundos (para mirar alrededor).
+#[allow(clippy::too_many_arguments)]
+pub fn detallado(out: &mut Vec<Caja>, tipo: Tipo, base: Vec3, giro: f32, q: &Quien, anio: i32, dist: f32, vel: f32, t: f32, id: u32, pelaje: u8) {
+    use crate::detalle::{biblioteca, emitir, modelos, ropa, sombra, Id, Parte, VOX};
+    let b = biblioteca();
+    let en = |v: Vec3| base + girar(v, giro);
+    let (at, pal) = ropa::vestir(q, anio);
+    let amp = (vel / tipo.params().v0.max(0.5) * 1.2).clamp(0.0, 1.0);
+    let mirar = (t * 0.23 + id as f32 * 1.7).sin().powi(5) * 0.5;
+    let persona = |out: &mut Vec<Caja>, p: Vec3, d: f32| {
+        let ciclo = if at.nino() { 1.0 } else { anim::CICLO_PERSONA };
+        let pose = if amp > 0.05 { anim::caminar(anim::fase(d, ciclo), amp, mirar * 0.4) } else { anim::persona_quieta(t, id) };
+        emitir(out, b.persona(at, false), &pal, p, giro, &pose, id);
+        sombra(out, p, giro, [0.27, 0.2], 130);
+    };
+    let semilla_caballo = id.wrapping_mul(7).wrapping_add(pelaje as u32);
+    match tipo {
+        Tipo::APie => persona(out, base, dist),
+        Tipo::Jinete => {
+            let o = en(Vec3::new(0.0, 0.0, -1.6));
+            let f = anim::fase(dist, anim::CICLO_CABALLO);
+            let m = b.objeto(Id::CaballoEnsillado);
+            emitir(out, m, &modelos::paleta(Id::CaballoEnsillado, semilla_caballo), o, giro, &anim::cuadrupedo(f, amp), semilla_caballo);
+            sombra(out, o, giro, [0.3, 1.15], 130);
+            // El jinete sube y baja con el paso; las manos adelante, con las riendas.
+            let salto = (f * std::f32::consts::TAU * 2.0).sin().abs() * 0.035 * amp;
+            let mut pose = anim::caminar(0.0, 0.0, mirar);
+            pose.set(Parte::BrazoI, 0.0, -0.55);
+            pose.set(Parte::BrazoD, 0.0, -0.55);
+            emitir(out, b.persona(at, true), &pal, o + Vec3::Y * (24.0 * VOX + salto), giro, &pose, id);
+        }
+        Tipo::Carreta => {
+            let mut pose = crate::detalle::Pose::default();
+            anim::ruedas(&mut pose, dist, 17.0 * VOX);
+            let pal_c = modelos::paleta(Id::Carreta, id);
+            let o = en(Vec3::new(0.0, 0.0, -6.13));
+            emitir(out, b.objeto(Id::Carreta), &pal_c, o, giro, &pose, id);
+            sombra(out, o, giro, [1.0, 1.9], 120);
+            for (k, x) in [-0.42f32, 0.42].into_iter().enumerate() {
+                let s = id.wrapping_mul(3).wrapping_add(k as u32);
+                let p = en(Vec3::new(x, 0.0, -1.6));
+                emitir(out, b.objeto(Id::Buey), &modelos::paleta(Id::Buey, s), p, giro, &anim::cuadrupedo(anim::fase(dist + k as f32 * 0.5, anim::CICLO_VACUNO), amp), s);
+                sombra(out, p, giro, [0.32, 1.1], 120);
+            }
+            // El boyero camina al lado de la yunta.
+            persona(out, en(Vec3::new(-1.15, 0.0, -1.0)), dist);
+        }
+        Tipo::Carro => {
+            let o = en(Vec3::new(0.0, 0.0, -1.6));
+            emitir(out, b.objeto(Id::Caballo), &modelos::paleta(Id::Caballo, semilla_caballo), o, giro, &anim::cuadrupedo(anim::fase(dist, anim::CICLO_CABALLO), amp), semilla_caballo);
+            sombra(out, o, giro, [0.3, 1.15], 130);
+            let mut pose = crate::detalle::Pose::default();
+            anim::ruedas(&mut pose, dist, 12.0 * VOX);
+            let c = en(Vec3::new(0.0, 0.0, -4.2));
+            emitir(out, b.objeto(Id::Carro), &modelos::paleta(Id::Carro, id), c, giro, &pose, id);
+            sombra(out, c, giro, [0.75, 1.0], 120);
+            let mut pd = anim::caminar(0.0, 0.0, mirar);
+            pd.set(Parte::BrazoI, 0.0, -0.6);
+            pd.set(Parte::BrazoD, 0.0, -0.6);
+            emitir(out, b.persona(at, true), &pal, c + girar(Vec3::new(0.0, 20.0 * VOX, 11.0 * VOX), giro), giro, &pd, id);
+        }
+    }
+}
+
 /// Multitud de prueba para medir el dibujo: `n` agentes (de todos los tipos, como en una
-/// ciudad: casi todos a pie) en una grilla alrededor de `centro`, sobre el terreno.
+/// ciudad: casi todos a pie) en una grilla alrededor de `centro`, sobre el terreno; los que
+/// quedan a menos de [`CERCA`] con los modelos de micro-vóxeles, como en el juego.
 pub fn multitud(t: &TerrainGen, centro: Vec2, n: usize) -> Vec<Caja> {
+    multitud_con(t, centro, n, CERCA)
+}
+
+/// Como [`multitud`], con micro-vóxeles hasta `cerca` m (0: todo con las cajas de siempre).
+pub fn multitud_con(t: &TerrainGen, centro: Vec2, n: usize, cerca: f32) -> Vec<Caja> {
     let mut out = Vec::new();
     let lado = (n as f32).sqrt().ceil() as usize;
     for i in 0..n {
@@ -209,7 +330,15 @@ pub fn multitud(t: &TerrainGen, centro: Vec2, n: usize) -> Vec<Caja> {
             2 => Tipo::Carro,
             _ => Tipo::APie,
         };
-        modelo(&mut out, tipo, glam::Vec3::new(p.x, t.height(p.x, p.y), p.y), i as f32 * 0.7, i as u8, i as u8);
+        let base = Vec3::new(p.x, t.height(p.x, p.y), p.y);
+        let giro = i as f32 * 0.7;
+        if p.distance(centro) < cerca {
+            let s = mezcla(i as u64);
+            let q = Quien { mujer: s % 2 == 0, edad: if s % 7 == 0 { 9 } else { 30 }, oficio: [Oficio::Peon, Oficio::Artesano, Oficio::Pulpero, Oficio::Servicio, Oficio::Soldado][(s / 7 % 5) as usize], principal: s % 11 == 0, raiz: Raiz::Mixta, semilla: s };
+            detallado(&mut out, tipo, base, giro, &q, 1750, i as f32 * 0.37, tipo.params().v0, 0.0, i as u32, i as u8);
+        } else {
+            modelo(&mut out, tipo, base, giro, i as u8, i as u8);
+        }
     }
     out
 }
@@ -217,9 +346,16 @@ pub fn multitud(t: &TerrainGen, centro: Vec2, n: usize) -> Vec<Caja> {
 impl Agentes {
     /// Cajas de los agentes cerca de `centro` (a menos de [`RADIO`], los
     /// [`MAX_DIBUJADOS`] más cercanos), con la posición interpolada entre los dos últimos
-    /// pasos de la simulación.
+    /// pasos de la simulación; vestidos como de costumbre en la colonia.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn cajas(&self, net: &super::super::roads::RoadNetwork, centro: Vec2, out: &mut Vec<Caja>) {
         out.clear();
+        self.cajas_con(net, centro, &Vestuario::default(), out);
+    }
+
+    /// Como [`cajas`](Self::cajas), con el vestuario de la ciudad (agrega a `out`): a menos de
+    /// [`CERCA`] m con los modelos de micro-vóxeles, más lejos con las cajas de siempre.
+    pub fn cajas_con(&self, net: &super::super::roads::RoadNetwork, centro: Vec2, v: &Vestuario, out: &mut Vec<Caja>) {
         let alfa = self.alfa();
         let mut vis: Vec<(f32, &Agente, Vec2, Vec2)> = Vec::new();
         for a in &self.e.agentes {
@@ -237,7 +373,7 @@ impl Agentes {
             vis.select_nth_unstable_by(MAX_DIBUJADOS, |x, y| x.0.total_cmp(&y.0));
             vis.truncate(MAX_DIBUJADOS);
         }
-        for (_, a, p, d) in vis {
+        for (dist, a, p, d) in vis {
             let pata = a.pata();
             let Some(e) = net.edges.get(&pata.tramo) else { continue };
             // Altura: la más alta entre el frente y el medio del vehículo (el tablero de los
@@ -245,8 +381,16 @@ impl Agentes {
             let s_medio = (a.s - a.params().largo * 0.5).max(0.0);
             let ps = |s: f32| if pata.sentido == 0 { s } else { e.len() - s };
             let y = self.perfiles.get(&pata.tramo).map_or(0.0, |pf| altura(pf, ps(a.s)).max(altura(pf, ps(s_medio))));
-            let base = glam::Vec3::new(p.x, y, p.y);
-            modelo(out, a.tipo, base, d.x.atan2(d.y), a.ropa, a.pelaje);
+            let base = Vec3::new(p.x, y, p.y);
+            let giro = d.x.atan2(d.y);
+            if dist < CERCA {
+                let q = quien(self, a, v);
+                // Lo recorrido: la posición en la pata (más un corrimiento por pata).
+                let recorrido = a.s + a.li as f32 * 53.0;
+                detallado(out, a.tipo, base, giro, &q, v.anio, recorrido, a.v, v.t, a.id, a.pelaje);
+            } else {
+                modelo(out, a.tipo, base, giro, a.ropa, a.pelaje);
+            }
         }
     }
 

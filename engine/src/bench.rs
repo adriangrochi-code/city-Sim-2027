@@ -72,6 +72,7 @@ fn camera(terrain: &TerrainGen, v: &[f32; 5]) -> OrbitCamera {
 
 /// Lo que se junta para las tablas del Hi-Z y de las sombras.
 struct Extra {
+    agentes: Vec<String>, // [personajes]
     hiz: Vec<String>,
     csm: Vec<String>,
 }
@@ -102,7 +103,7 @@ pub fn run(o: &Options) -> Result<(), String> {
     let _ = writeln!(md, "| Vista | Generar+mallar (pared) | CPU generación | CPU mallado | Columnas | Triángulos | Caras | Geometría en GPU | Megabúfer | Subido | Dibujos (principal / sombras) | Columnas / caras dibujadas | Caras de sombra | CPU por cuadro | Total por cuadro (sombra rehecha) | Total por cuadro (sombra en caché) | GPU pase principal | RSS |");
     let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     println!("{md}");
-    let mut extra = Extra { hiz: Vec::new(), csm: Vec::new() };
+    let mut extra = Extra { hiz: Vec::new(), csm: Vec::new(), agentes: Vec::new() };
     for v in &VIEWS {
         bench_view(o, &mut r, &terrain, &store, v, &mut md, &mut extra)?;
     }
@@ -130,6 +131,17 @@ pub fn run(o: &Options) -> Result<(), String> {
     for l in &extra.csm {
         let _ = writeln!(md, "{l}");
     }
+    // [personajes]
+    if !extra.agentes.is_empty() {
+        let _ = writeln!(md, "\n### Personajes y animales (multitud de prueba)\n");
+        let _ = writeln!(md, "2500 agentes (el tope de dibujo) en una grilla de 6 m alrededor de la vista: 70 % a pie, jinetes, carretas y carros. Mínimo de los cuadros, con y sin los modelos de micro-vóxeles (a menos de 110 m).\n");
+        let _ = writeln!(md, "| Vista | Sin agentes | Con la multitud |");
+        let _ = writeln!(md, "|---|---|---|");
+        for l in &extra.agentes {
+            let _ = writeln!(md, "{l}");
+        }
+    }
+    // [/personajes]
     println!("{}", &md[md.find("\n### ").unwrap_or(0)..]);
     println!("Memoria máxima del proceso (VmHWM): {peak:.0} MB");
     std::fs::write(format!("{}/bench.md", o.dir), md).map_err(|e| e.to_string())?;
@@ -314,5 +326,33 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
         r.hiz = hiz;
     }
     println!("   Sombras: {}", extra.csm.last().unwrap());
+    // [personajes] Multitud de 2500 agentes alrededor de la vista: sin agentes, solo cajas
+    // de siempre y con los modelos de micro-vóxeles cerca (como en el juego).
+    if matches!(v.slug, "cerca" | "calle") {
+        use crate::city::agentes::dibujo::{multitud_con, CERCA, MAX_DIBUJADOS};
+        let medir = |r: &mut Renderer| {
+            r.bench_frame(&cam, v.hour, w, h);
+            (0..o.frames.max(3)).map(|_| r.bench_frame(&cam, v.hour, w, h).total_ms).fold(f64::INFINITY, f64::min)
+        };
+        r.set_agents(&[]);
+        let sin = medir(r);
+        let mut fila = Vec::new();
+        for (nombre, cerca) in [("cajas", 0.0), ("micro-vóxeles", CERCA)] {
+            let t0 = Instant::now();
+            let cajas = multitud_con(terrain, center, MAX_DIBUJADOS, cerca);
+            let armar = t0.elapsed();
+            r.set_agents(&cajas);
+            let con = medir(r);
+            if cerca > 0.0 {
+                let _ = r.capture_image(&cam, v.hour, w, h, None).save(format!("{}/bench-{}-multitud.png", o.dir, v.slug));
+            }
+            fila.push(format!("{nombre}: {} instancias ({} KB), armadas en {armar:.2?}, cuadro {con:.1} ms", cajas.len(), cajas.len() * std::mem::size_of::<crate::detalle::Caja>() / 1024));
+        }
+        r.set_agents(&[]);
+        let l = format!("| {} | {sin:.1} ms | {} |", v.name, fila.join(" · "));
+        println!("   Personajes: {l}");
+        extra.agentes.push(l);
+    }
+    // [/personajes]
     Ok(())
 }

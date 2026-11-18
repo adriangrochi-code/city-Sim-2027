@@ -116,8 +116,9 @@ Porte del prototipo a `engine/src/city/agentes/` (Rust), con la misma semántica
 | `agentes/mod.rs` | Vecinos, agenda del día, viajes, pasos de la simulación, cruces, llegadas, estadísticas y consultas para la interfaz |
 | `agentes/idm.rs` | Tipos de agente (`Tipo`: a pie, jinete, carreta, carro) con sus parámetros, y el IDM puro (`aceleracion`, `paso`) |
 | `agentes/ruta.rs` | A* sobre la red de calles, tiempos medidos por carril (`Tiempos`) y caché de rutas |
-| `agentes/dibujo.rs` | Alturas de cada tramo (calzada o tablero del puente), modelos de cajas y la lista de instancias |
-| `render/shaders/agentes.wgsl` | Una instancia por caja, girada; luz, sombra recibida, niebla y curvatura como la flora baja |
+| `agentes/dibujo.rs` | Alturas de cada tramo (calzada o tablero del puente), vestuario de cada vecino, modelos de micro-vóxeles de cerca y de cajas de lejos, y la lista de instancias |
+| `agentes/fauna.rs` | Animales (rodeos, tropillas, caballos atados, perros, gallinas) y detalles fijos de la ciudad derivados de los servicios y los solares; `cajas_ciudad`, todo lo que se dibuja con los vecinos |
+| `render/shaders/agentes.wgsl` | Una instancia por caja, con partes que se inclinan alrededor de su pivote; micro-vóxeles, luz, sombra recibida, niebla, curvatura y sombra de contacto |
 
 **Vecinos.** Cada casa habitada tiene tantos vecinos como habitantes según su nivel y densidad
 (`Lot::residents`). Sus atributos (nombre, origen, oficio, rol, a pie o a caballo, temperamento,
@@ -164,12 +165,15 @@ agentes en camino, tiempos medidos, agenda y estadísticas. Las partidas viejas 
 vecinos desde los solares. Lo único que no se guarda es la caché (rutas, alturas, lugares), que
 se rehace sola.
 
-**Dibujo.** Modelos de cajas (persona de 0,5 × 1,75 m; jinete sobre su caballo; carreta con techo
-de cuero, ruedas grandes, yunta de bueyes y el boyero al costado; carro con carga y caballo),
-32 bytes por caja, subidos cada cuadro (solo si cambiaron), con la posición interpolada entre los
-dos últimos pasos. Solo los que están a menos de 600 m del centro de la vista, hasta 2500 (los
-más cercanos). La altura sale del perfil del tramo, con la misma cuenta que la voxelización de
-la calzada (y el tablero en los puentes), tomada en el medio del vehículo.
+**Dibujo.** A menos de 110 m del centro de la vista, modelos de **micro-vóxeles de 1/16 m**
+(`detalle`, ver `personajes-y-animales.md` y `modelos-de-detalle.md`): cada vecino vestido según
+su persona, su oficio y la época, caminando con piernas y brazos; el jinete sobre su caballo
+ensillado al paso; la carreta con las ruedas que giran, la yunta y el boyero; el carro con su
+caballo y el carrero. Más lejos, los modelos de cajas de antes (persona de 0,5 × 1,75 m; jinete;
+carreta; carro). 48 bytes por caja, subidos cada cuadro (solo si cambiaron), con la posición
+interpolada entre los dos últimos pasos. Solo los que están a menos de 600 m del centro de la
+vista, hasta 2500 (los más cercanos). La altura sale del perfil del tramo, con la misma cuenta
+que la voxelización de la calzada (y el tablero en los puentes), tomada en el medio del vehículo.
 
 **Interfaz.** Clic en la población de la barra superior: panel «Vecinos y tránsito» (en la calle
 por tipo, viajes de hoy y de ayer, viaje medio, demorados, los que no pudieron salir por calles

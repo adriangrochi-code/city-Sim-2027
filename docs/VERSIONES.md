@@ -10,6 +10,20 @@ Cómo numerar (mientras el juego esté en desarrollo, 0.x):
 - **0.X.Y**: arreglos y ajustes sobre la anterior (subir Y).
 - Cada versión que se manda a probar se anota acá y lleva una etiqueta de git `vX.Y.Z`.
 
+## v0.10.1 (2026-11-18)
+**Personajes y animales en micro-vóxeles de 1/16 m** (unas 27 alturas por persona):
+- 19 atuendos por época, sexo, edad, oficio y riqueza (paisano con poncho y chiripá, vecino
+  con casaca y tricornio, señora con mantilla, levita, dama con peinetón…), de pie y montados;
+  la misma persona viste igual el mismo año.
+- Animación: caminar sin que patinen los pies, caballos y vacas al paso, pastar, gallinas que
+  picotean, ruedas de carreta que giran lo recorrido.
+- Animales derivados de la ciudad: rodeo de cada estancia según su rinde, tropillas, ovejas
+  desde 1840, yuntas, gallinas, perros, caballos en el palenque de las pulperías y botes en
+  el muelle que flotan con la marea.
+- Biblioteca de modelos de detalle (faroles, toneles, aljibes, palenques, carretas, botes…)
+  lista para que los edificios la usen.
+- Micro-vóxeles hasta 110 m, cajas simples hasta 600 m; sombra de contacto suave.
+
 ## v0.10.0 (2026-11-18)
 Época 2, **Ciudad Nueva**, jugable en el motor:
 - Época explícita en la ciudad (se guarda; las partidas viejas son coloniales): requisitos,

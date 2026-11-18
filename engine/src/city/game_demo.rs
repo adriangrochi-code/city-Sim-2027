@@ -1113,3 +1113,103 @@ pub fn view_arquitectura(k: usize, hacia: f32, lejos: f32, giro: f32, pitch: f32
     let p = *c + *f * hacia;
     Some([p.x, p.y, lejos, f.x.atan2(f.y).to_degrees() + giro, pitch])
 }
+
+// [personajes] --- Vistas de cerca de los personajes, los animales y los detalles ------------
+
+/// Cámara sobre el agente de `tipo` más cercano a la plaza (de frente y de costado, a `dist`
+/// m, girada `giro` grados desde su rumbo).
+pub fn view_agente(s: &Session, tipo: super::agentes::Tipo, dist: f32, giro: f32, pitch: f32) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let plaza = c.plaza.map_or(PLAZA, |p| p.0);
+    let (p, d) = c
+        .agentes
+        .e
+        .agentes
+        .iter()
+        .filter(|a| a.tipo == tipo)
+        .map(|a| super::agentes::pose(&c.net, a))
+        .min_by(|x, y| x.0.distance(plaza).total_cmp(&y.0.distance(plaza)))?;
+    // El centro del vehículo queda medio largo detrás del frente.
+    let m = p - d * tipo.params().largo * 0.5;
+    Some([m.x, m.y, dist, d.x.atan2(d.y).to_degrees() + giro, pitch])
+}
+
+/// Cámara sobre la pastura de la primera estancia (con su rodeo).
+pub fn view_pastura(s: &Session, dist: f32) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let b = c.services.of_kind(Kind::Estancia).next()?;
+    let (m, _) = super::agentes::fauna::pastura_de(b.c, b.f);
+    Some([m.x, m.y, dist, b.f.x.atan2(b.f.y).to_degrees() + 200.0, 22.0])
+}
+
+/// Cámara sobre la muestra de detalles armada por [`muestra_detalles`], en la fracción `u`
+/// de la fila, desde el costado.
+pub fn view_muestra(s: &Session, u: f32, dist: f32, giro: f32) -> Option<[f32; 5]> {
+    let (p0, dir, largo) = s.game.as_ref()?.city.agentes.escena_muestra()?;
+    let p = p0 + dir * largo * u;
+    let lado = super::lots::side_of(dir);
+    Some([p.x, p.y, dist, lado.x.atan2(lado.y).to_degrees() + giro, 14.0])
+}
+
+/// Cámara sobre el grupo de gente a pie más numeroso (a menos de 8 m unos de otros).
+pub fn view_grupo(s: &Session, dist: f32) -> Option<[f32; 5]> {
+    use super::agentes::Tipo;
+    let c = &s.game.as_ref()?.city;
+    let ps: Vec<(Vec2, Vec2)> = c.agentes.e.agentes.iter().filter(|a| a.tipo == Tipo::APie).map(|a| super::agentes::pose(&c.net, a)).collect();
+    let (p, d) = ps.iter().max_by_key(|(p, _)| (ps.iter().filter(|(q, _)| q.distance(*p) < 8.0).count(), (p.x * 10.0) as i64))?;
+    Some([p.x, p.y, dist, d.x.atan2(d.y).to_degrees() + 140.0, 12.0])
+}
+
+/// Cámara sobre una pulpería con caballos en el palenque.
+pub fn view_pulperia(s: &Session) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let plaza = c.plaza.map_or(PLAZA, |p| p.0);
+    let l = c
+        .lots
+        .lots
+        .values()
+        .filter(|l| l.kind() == Some(super::lots::ZoneKind::Comercial) && l.level == 1 && !l.voxels.is_empty())
+        .min_by(|a, b| a.c.distance(plaza).total_cmp(&b.c.distance(plaza)))?;
+    let p = l.c + l.f * (super::lots::D * 0.5 + 2.0);
+    Some([p.x, p.y, 13.0, l.f.x.atan2(l.f.y).to_degrees() + 35.0, 16.0])
+}
+
+/// Pone la fila de modelos de detalle de muestra junto a la plaza.
+pub fn muestra_detalles(s: &mut Session) -> String {
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    let Some((plaza, _)) = c.plaza else { return "sin plaza".into() };
+    let n = c.agentes.poner_muestra(&t, &c.net, plaza);
+    format!("{n} modelos de detalle de muestra")
+}
+
+/// Larga una carreta de bueyes, un carro y un jinete por una calle larga cerca de la plaza y
+/// los deja andar hasta que la carreta hizo unos metros (para las capturas de cerca).
+pub fn traer_vehiculos(s: &mut Session) -> String {
+    use super::agentes::{Proposito, Tipo};
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    let plaza = c.plaza.map_or(PLAZA, |p| p.0);
+    let comp = super::agentes::componente(&c.net, match c.net.nodes.iter().min_by(|x, y| x.1.distance(plaza).total_cmp(&y.1.distance(plaza))) {
+        Some((&n, _)) => n,
+        None => return "sin calles".into(),
+    });
+    let mut nodos: Vec<Vec2> = comp.iter().map(|n| c.net.nodes[n]).collect();
+    nodos.sort_by(|a, b| a.distance(plaza).total_cmp(&b.distance(plaza)).then(a.x.total_cmp(&b.x)));
+    let Some(&desde) = nodos.get(1) else { return "sin calles".into() };
+    let Some(&hasta) = nodos.iter().find(|p| p.distance(desde) > 220.0) else { return "sin calles".into() };
+    let dt = 1.0 / 30.0;
+    let mut n = 0;
+    for (k, tipo) in [Tipo::Carreta, Tipo::Carro, Tipo::Jinete].into_iter().enumerate() {
+        if c.agentes.lanzar(&c.net, tipo, desde, hasta, None, Proposito::Paseo, 90 + k as u32, 1, (k as u8 + 3, k as u8 + 5)) {
+            n += 1;
+        }
+        for _ in 0..40 {
+            c.agentes.tick(&t, &c.net, &c.lots, c.plaza, dt);
+        }
+    }
+    format!("{n} vehículos de paseo desde ({:.0}, {:.0})", desde.x, desde.y)
+}
+// [/personajes]
