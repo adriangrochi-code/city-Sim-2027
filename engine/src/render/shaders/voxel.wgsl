@@ -204,6 +204,52 @@ const M_SHUTTER: u32 = 16u;
 const M_CARP_ROJIZA: u32 = 78u;
 const M_CARP_OCRE: u32 = 80u;
 const M_TILE_LIQUEN: u32 = 81u;
+// Época 2 (Ciudad Nueva).
+const M_HIERRO_FUNDIDO: u32 = 87u;
+const M_MARMOL: u32 = 88u;
+const M_MARMOL_GRIS: u32 = 89u;
+const M_LUZ_GAS: u32 = 90u;
+
+// Luces de los faroles (gas y sebo), en una grilla de celdas alrededor de la cámara (ver
+// `render::luces`): [0] = (luces, x0, z0, celda), [1] = (lado, …), 2 vec4 de índices por
+// celda y 2 vec4 por luz.
+@group(0) @binding(7) var<storage, read> luces: array<vec4<f32>>;
+
+// Luz de los faroles que llega a este punto (solo las de su celda: costo fijo y chico).
+fn luz_faroles(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    let h = luces[0];
+    if (h.x < 0.5) {
+        return vec3(0.0);
+    }
+    let lado = u32(luces[1].x);
+    let rel = (world.xz - h.yz) / h.w;
+    if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= f32(lado) || rel.y >= f32(lado)) {
+        return vec3(0.0);
+    }
+    let celda = u32(rel.y) * lado + u32(rel.x);
+    let base = 2u + lado * lado * 2u;
+    var acc = vec3(0.0);
+    for (var k = 0u; k < 2u; k = k + 1u) {
+        let ids = luces[2u + celda * 2u + k];
+        for (var j = 0u; j < 4u; j = j + 1u) {
+            let id = ids[j];
+            if (id < 0.0) {
+                continue;
+            }
+            let li = u32(id);
+            let l = luces[base + li * 2u];
+            let c = luces[base + li * 2u + 1u];
+            let d = l.xyz - world;
+            let dist = max(length(d), 0.05);
+            let att = clamp(1.0 - dist / l.w, 0.0, 1.0);
+            // Charco de luz: cae con el cuadrado de la distancia al borde del alcance; las caras
+            // que miran al farol, más.
+            let lam = 0.35 + 0.65 * max(dot(n, d / dist), 0.0);
+            acc += c.rgb * c.w * att * att * lam;
+        }
+    }
+    return acc;
+}
 
 // Materiales del terreno (deben coincidir con palette.rs).
 fn is_terrain(m: u32) -> bool {
@@ -215,7 +261,7 @@ fn is_terrain(m: u32) -> bool {
 // vóxeles del mundo. Sus bordes y su tinte van por vóxel de diseño, no por vóxel del mundo.
 const DESIGN_VOXEL: f32 = 0.5;
 fn is_built(m: u32) -> bool {
-    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u) || (m >= 64u && m <= 81u);
+    return (m >= 6u && m <= 11u) || (m >= 14u && m <= 16u) || (m >= 21u && m <= 23u) || (m >= 26u && m <= 46u && m != 44u) || (m >= 64u && m <= 90u);
 }
 
 // Coordenada horizontal "a lo largo" de la cara (para dibujos verticales).
@@ -301,6 +347,21 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         let iron = srgb_to_linear(vec3(0.05, 0.05, 0.05));
         albedo = mix(pane, iron, bar * near + (1.0 - near) * 0.5);
         glass = 1.0 - bar * near;
+    } else if (mat == M_HIERRO_FUNDIDO) {
+        // Hierro fundido: balaustres torneados cada 12,5 cm con un ensanche en el medio y
+        // travesaños con roleos; detrás, vidrio o sombra.
+        let h = fract(along(v.world, n) * 8.0);
+        let ty = fract(v.world.y * 2.0);
+        let panza = 0.18 + 0.14 * (1.0 - abs(ty - 0.5) * 2.0);
+        let bar = max(step(h, panza), max(step(0.9, ty), step(ty, 0.06)));
+        let pane = srgb_to_linear(vec3(0.20, 0.24, 0.27));
+        let iron = srgb_to_linear(vec3(0.07, 0.09, 0.08));
+        albedo = mix(pane, iron, bar * near + (1.0 - near) * 0.6);
+    } else if (mat == M_MARMOL || mat == M_MARMOL_GRIS) {
+        // Mármol: vetas suaves.
+        let q = v.world.xz * 3.0 + vec2(v.world.y * 2.0);
+        let veta = smoothstep(0.45, 0.5, vnoise(q)) * (1.0 - smoothstep(0.5, 0.56, vnoise(q)));
+        albedo *= mix(1.0, 0.93 - 0.12 * veta, near);
     } else if (mat == M_WINDOW) {
         glass = 1.0;
         albedo = mix(albedo, srgb_to_linear(vec3(0.20, 0.24, 0.28)), 0.6);
@@ -411,6 +472,14 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         let vdir = normalize(g.cam_pos.xyz - v.world);
         let fres = 0.25 + 0.6 * pow(1.0 - max(vdir.y, 0.0), 3.0);
         col = mix(col, g.sky_horizon.rgb * 0.9, fres);
+    }
+    // Faroles de noche: charcos de luz ámbar al pie de cada farol de gas (y más tenues los de
+    // sebo), y el vidrio del farol encendido.
+    if (g.params.y > 0.02) {
+        col += albedo * luz_faroles(v.world, ln) * 2.6 * g.params.y;
+        if (mat == M_LUZ_GAS) {
+            col += vec3(1.0, 0.72, 0.36) * 2.4 * g.params.y;
+        }
     }
     // Ventanas iluminadas por velas de noche.
     if (glass > 0.0) {

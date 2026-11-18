@@ -106,7 +106,24 @@ pub const CARP_GRIS: Mat = 79;
 pub const CARP_OCRE: Mat = 80;
 /// Teja vieja con líquenes (#6F6A5A) [E].
 pub const TILE_LIQUEN: Mat = 81;
-pub const COUNT: usize = 82;
+// Época 2, Ciudad Nueva (ver docs/sistemas/arquitectura-epoca2.md y la paleta de
+// docs/epocas/02-ciudad-nueva.md §11).
+/// Revoque neoclásico ocre claro (#D9C29A) y su variante manchada.
+pub const OCRE_CLARO: Mat = 82;
+pub const OCRE_CLARO_SUCIA: Mat = 83;
+/// Revoque "símil piedra" gris (#A8A39A) y su variante manchada.
+pub const GRIS_PIEDRA: Mat = 84;
+pub const GRIS_PIEDRA_SUCIA: Mat = 85;
+/// Molduras, cornisas y pilastras en blanco piedra (#EEE9DF).
+pub const BLANCO_PIEDRA: Mat = 86;
+/// Hierro fundido de rejas, balcones, faroles y columnas (negro verdoso, #2F3530).
+pub const HIERRO_FUNDIDO: Mat = 87;
+/// Mármol de Carrara importado (escalones, zaguanes, patios en damero) y mármol gris.
+pub const MARMOL: Mat = 88;
+pub const MARMOL_GRIS: Mat = 89;
+/// Vidrio del farol de gas: de noche brilla ámbar (#F2B862).
+pub const LUZ_GAS: Mat = 90;
+pub const COUNT: usize = 91;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -192,11 +209,25 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [79, 93, 102],   // carpintería gris azulada
     [138, 106, 58],  // carpintería ocre
     [128, 86, 62],   // teja vieja con líquenes
+    [217, 194, 154], // revoque ocre claro (época 2)
+    [192, 172, 138], // ocre claro manchado
+    [168, 163, 154], // revoque gris piedra
+    [146, 141, 133], // gris piedra manchado
+    [238, 233, 223], // blanco piedra (molduras)
+    [47, 53, 48],    // hierro fundido
+    [228, 225, 218], // mármol blanco
+    [142, 140, 136], // mármol gris
+    [242, 184, 98],  // vidrio del farol de gas
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)
 pub fn is_window(m: Mat) -> bool {
     m == WINDOW || m == REJA
+}
+
+/// ¿El material es la luz de un farol (brilla de noche)?
+pub fn is_lamp(m: Mat) -> bool {
+    m == LUZ_GAS
 }
 
 pub fn color(m: Mat) -> [u8; 3] {

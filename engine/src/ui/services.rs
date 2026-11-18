@@ -50,6 +50,10 @@ fn icon_of(k: Kind) -> Icon {
         Kind::Astillero => Icon::Puerto,
         Kind::Imprenta => Icon::Escuela,
         Kind::Calera => Icon::Produccion,
+        Kind::UsinaGas => Icon::Sereno,
+        Kind::Teatro => Icon::Iglesia,
+        Kind::AguaCorriente => Icon::Agua,
+        Kind::Colector => Icon::Basura,
     }
 }
 
@@ -65,6 +69,8 @@ fn nombre_corto(k: Kind) -> &'static str {
         Kind::Basurero => "Basurero",
         Kind::EscuelaOficios => "Escuela de oficios",
         Kind::Astillero => "Astillero",
+        Kind::AguaCorriente => "Agua corriente",
+        Kind::Colector => "Colector",
         _ => services::info(k).name,
     }
 }
@@ -107,11 +113,13 @@ fn ordinance_card(game: &Game, o: Ordinance, icon: Icon) -> Card {
     }
 }
 
-/// Tarjetas de los servicios de las épocas siguientes de un grupo (desactivadas).
-fn future_cards(g: Grupo) -> Vec<Card> {
+/// Tarjetas de los servicios de las épocas siguientes de un grupo (desactivadas). Los que ya
+/// se juegan (época 2) aparecen como tarjeta de verdad al llegar su época.
+fn future_cards(g: Grupo, game: &Game) -> Vec<Card> {
     FUTUROS
         .iter()
         .filter(|f| f.grupo == g)
+        .filter(|f| !(game.city.en_epoca(f.desde) && matches!(f.nombre, "Agua corriente" | "Colectores")))
         .map(|f| Card {
             icon: grupo_icon(g),
             name: f.nombre,
@@ -139,7 +147,20 @@ pub fn group_cards(g: Grupo, game: &Game) -> Vec<Card> {
         ],
         Grupo::Otros => vec![church_card(game)],
     };
-    v.extend(future_cards(g));
+    // Época 2: usina de gas, agua corriente, colectores, teatro y la ordenanza de fachadas.
+    if game.city.en_epoca(crate::city::poblacion::Epoca::CiudadNueva) {
+        match g {
+            Grupo::Agua => v.push(place_card(game, Kind::AguaCorriente)),
+            Grupo::Seguridad => v.push(place_card(game, Kind::UsinaGas)),
+            Grupo::Saneamiento => v.push(place_card(game, Kind::Colector)),
+            Grupo::Otros => {
+                v.push(place_card(game, Kind::Teatro));
+                v.push(ordinance_card(game, Ordinance::Fachadas, Icon::Valor));
+            }
+            _ => {}
+        }
+    }
+    v.extend(future_cards(g, game));
     v
 }
 

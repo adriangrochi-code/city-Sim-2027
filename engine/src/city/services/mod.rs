@@ -33,6 +33,7 @@ use crate::buildings::{Edits, Rng};
 use crate::lod::{BASE_VOXEL, DESIGN_VOXEL};
 use crate::palette::AIR;
 use crate::structures::colonial;
+use crate::structures::epoca2;
 use crate::structures::Frame;
 use crate::terrain::TerrainGen;
 use glam::{IVec2, IVec3, Vec2};
@@ -71,6 +72,20 @@ pub enum Kind {
     Imprenta,
     // --- Materiales (ver `recursos::materiales`) ---
     Calera,
+    // --- Época 2, Ciudad Nueva (ver `city::epocas`) ---
+    UsinaGas,
+    Teatro,
+    AguaCorriente,
+    Colector,
+}
+
+/// Época desde la que se puede levantar cada servicio.
+pub fn epoca_de(k: Kind) -> super::poblacion::Epoca {
+    use super::poblacion::Epoca;
+    match k {
+        Kind::UsinaGas | Kind::Teatro | Kind::AguaCorriente | Kind::Colector => Epoca::CiudadNueva,
+        _ => Epoca::Colonial,
+    }
 }
 
 /// Grupos de servicios (pestañas del cajón de Servicios y capas de datos).
@@ -132,7 +147,7 @@ pub struct Info {
     pub plazas: i32,
 }
 
-pub const CATALOG: [Info; 25] = [
+pub const CATALOG: [Info; 29] = [
     Info { kind: Kind::Pozo, name: "Pozo de balde", key: "pozo", desc: "Agua de pozo para unas 60 personas cercanas. Calidad regular; los talleres cercanos la ensucian.", cost: 400, ladrillos: 0.0, piedra: 20.0, upkeep: 4, cap: 60, quality: 0.7, radius: 110.0, fire_reach: 140.0, size: (5.0, 5.0), frame: (10, 10), builder: colonial::pozo, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aljibe, name: "Aljibe público", key: "aljibe", desc: "Junta el agua de lluvia de los techos en una cisterna. Buena agua para unas 160 personas; en la sequía rinde menos.", cost: 1500, ladrillos: 60.0, piedra: 20.0, upkeep: 12, cap: 160, quality: 1.0, radius: 170.0, fire_reach: 180.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::aljibe_publico, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aguadores, name: "Puesto de aguadores", key: "aguadores", desc: "Los aguadores llenan sus pipas en un arroyo o manantial y las reparten en carro por las calles: llegan lejos, pero solo a donde llega la calle.", cost: 2500, ladrillos: 30.0, piedra: 0.0, upkeep: 30, cap: 360, quality: 0.9, radius: 1100.0, fire_reach: 450.0, size: (14.0, 18.0), frame: (28, 36), builder: colonial::puesto_aguadores, grupo: Grupo::Agua, plazas: 0 },
@@ -165,6 +180,11 @@ pub const CATALOG: [Info; 25] = [
     Info { kind: Kind::Molino, name: "Molino de viento", key: "molino", desc: "Muele el trigo de las chacras con el viento, y da más harina y más barata que las atahonas, con cuatro molineros.", cost: 2500, ladrillos: 40.0, piedra: 30.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::molino, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Astillero, name: "Carpintería de ribera", key: "astillero", desc: "Gradas, carpinteros y calafates que carenan los barcos de paso (un servicio que pagan de afuera) y arman lanchas. Va sobre la costa.", cost: 6000, ladrillos: 60.0, piedra: 40.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (35.0, 25.0), frame: (70, 50), builder: colonial::astillero, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Calera, name: "Horno de cal", key: "calera", desc: "Quema caliza (o conchilla, que rinde menos) con leña y da cal viva para morteros y revoques. Sin piedra de cal en el sitio no se puede: alrededor de Montevideo no hay caliza y la cal se trae por barco. Echa humo: lejos de la plaza.", cost: 1600, ladrillos: 40.0, piedra: 20.0, upkeep: 8, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (20.0, 20.0), frame: (40, 40), builder: colonial::horno_ladrillos, grupo: Grupo::Otros, plazas: 0 },
+    // Época 2, Ciudad Nueva (ver `city::epocas` y docs/epocas/02-ciudad-nueva.md).
+    Info { kind: Kind::UsinaGas, name: "Usina de gas", key: "usina_gas", desc: "Época 2. Destila carbón de piedra importado y reparte el gas por cañerías bajo las calles de su red (hasta 1,5 km): faroles de gas cada 25 m, que reemplazan a los de sebo. La noche se ilumina y baja el delito; el carbón se paga cada mes. En Montevideo, la primera usina es de 1853.", cost: 9000, ladrillos: 250.0, piedra: 60.0, upkeep: 60, cap: 0, quality: 0.0, radius: 1500.0, fire_reach: 0.0, size: (35.0, 30.0), frame: (70, 60), builder: epoca2::usina_gas, grupo: Grupo::Seguridad, plazas: 0 },
+    Info { kind: Kind::Teatro, name: "Teatro", key: "teatro", desc: "Época 2. El gran proyecto de la Ciudad Nueva: pórtico de columnas, sala y caja escénica. Atrae a las familias ricas, sube el valor del suelo alrededor y la felicidad de la ciudad. Uno por ciudad. (El Solís se inauguró el 25 de agosto de 1856.)", cost: 22000, ladrillos: 600.0, piedra: 200.0, upkeep: 90, cap: 0, quality: 0.0, radius: 600.0, fire_reach: 0.0, size: (40.0, 48.0), frame: (80, 96), builder: epoca2::teatro, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::AguaCorriente, name: "Usina de agua corriente", key: "agua_corriente", desc: "Época 2. Bombas a vapor y un tanque elevado: agua buena por cañería a todos los solares de su red de calles, hasta 3 km. Las fiebres y diarreas bajan mucho. (En Montevideo, el agua del Santa Lucía llegó el 18 de julio de 1871.)", cost: 15000, ladrillos: 300.0, piedra: 80.0, upkeep: 80, cap: 20000, quality: 1.0, radius: 3000.0, fire_reach: 400.0, size: (24.0, 22.0), frame: (48, 44), builder: epoca2::agua_corriente, grupo: Grupo::Agua, plazas: 0 },
+    Info { kind: Kind::Colector, name: "Colector y desagüe", key: "colector", desc: "Época 2. La boca de un colector en la costa: caños maestros bajo las calles de su red (hasta 1,5 km) se llevan las aguas servidas al río. Los pozos negros de esos solares dejan de ensuciar el agua y baja la insalubridad. (La red de Arteaga, de 1856, fue la primera de América Latina.)", cost: 7000, ladrillos: 200.0, piedra: 40.0, upkeep: 35, cap: 0, quality: 0.0, radius: 1500.0, fire_reach: 0.0, size: (12.0, 12.0), frame: (24, 24), builder: epoca2::colector, grupo: Grupo::Saneamiento, plazas: 0 },
     Info { kind: Kind::Imprenta, name: "Imprenta", key: "imprenta", desc: "Prensa de madera, tipos y papel para bandos, almanaques, cartillas y una gaceta con los precios corrientes. Una por ciudad, cerca de la plaza.", cost: 3000, ladrillos: 50.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 14.0), frame: (20, 28), builder: colonial::imprenta, grupo: Grupo::Otros, plazas: 0 },
 ];
 
@@ -230,6 +250,10 @@ pub enum Order {
     FundChurch,
     /// Demoler un edificio de servicio.
     Demolish(u32),
+    /// Pasar a la época siguiente con la decisión de la muralla (ver `epocas`).
+    PasarEpoca(super::epocas::Muralla),
+    /// Reformar una casa vieja (pagado por la ciudad; ver `epocas::rehabilitar`).
+    Reforma(u32, super::epocas::rehabilitar::Reforma),
 }
 
 /// Capas de datos sobre el mapa.
@@ -398,7 +422,8 @@ impl Services {
 
     /// Más pobladores con cada fase de la iglesia; la epidemia los espanta.
     pub fn attraction(&self) -> f32 {
-        self.church.attraction() * if self.epidemic.active() { 0.5 } else { 1.0 }
+        // El teatro (época 2) atrae a las familias de afuera.
+        self.church.attraction() * if self.epidemic.active() { 0.5 } else { 1.0 } * if self.count(Kind::Teatro) > 0 { 1.1 } else { 1.0 }
     }
 
     /// Mantenimiento mensual de los servicios, el muelle y la muralla.
@@ -427,7 +452,7 @@ pub fn near_coast(t: &TerrainGen, c: Vec2, r: f32) -> bool {
 }
 
 /// Componente conexa de la red de calles de cada nodo (los aguadores van por la calle).
-fn components(net: &RoadNetwork) -> BTreeMap<u32, u32> {
+pub(crate) fn components(net: &RoadNetwork) -> BTreeMap<u32, u32> {
     let mut comp = BTreeMap::new();
     for &start in net.nodes.keys() {
         if comp.contains_key(&start) {
@@ -451,7 +476,7 @@ fn components(net: &RoadNetwork) -> BTreeMap<u32, u32> {
 }
 
 /// Componente de la calle más cercana a `p` (a menos de `maxd` m).
-fn comp_at(net: &RoadNetwork, comp: &BTreeMap<u32, u32>, p: Vec2, maxd: f32) -> Option<u32> {
+pub(crate) fn comp_at(net: &RoadNetwork, comp: &BTreeMap<u32, u32>, p: Vec2, maxd: f32) -> Option<u32> {
     let n = net.nearest_edge(p, maxd)?;
     comp.get(&net.edges[&n.edge].a).copied()
 }
@@ -483,7 +508,10 @@ pub fn distribute_water(s: &mut Services, lots: &mut Lots, net: &RoadNetwork, fa
     for sid in order {
         let b = &s.buildings[&sid];
         let inf = b.info();
-        let src_comp = if b.kind == Kind::Aguadores { comp_at(net, &comp, b.c, 40.0) } else { None };
+        // Los aguadores y el agua corriente llegan por la calle (la red de cañerías va bajo
+        // las calles).
+        let por_red = matches!(b.kind, Kind::Aguadores | Kind::AguaCorriente);
+        let src_comp = if por_red { comp_at(net, &comp, b.c, 60.0) } else { None };
         let mut cands: Vec<(f32, u32)> = lots
             .lots
             .values()
@@ -493,7 +521,7 @@ pub fn distribute_water(s: &mut Services, lots: &mut Lots, net: &RoadNetwork, fa
                 if d > inf.radius {
                     return None;
                 }
-                if b.kind == Kind::Aguadores {
+                if por_red {
                     let front = l.c + l.f * (super::lots::D * 0.5 + 3.0);
                     if src_comp.is_none() || comp_at(net, &comp, front, 12.0) != src_comp {
                         return None;
@@ -557,6 +585,11 @@ impl City {
         if self.plaza.is_none() {
             return Some("Primero funda la plaza mayor".into());
         }
+        // Lo de las épocas siguientes llega con su época.
+        let ep = epoca_de(k);
+        if !self.en_epoca(ep) {
+            return Some(format!("Llega con la época «{}»", ep.nombre()));
+        }
         let cs = corners_of(c, f, inf.size.0, inf.size.1);
         let (mut hmin, mut hmax) = (f32::INFINITY, f32::NEG_INFINITY);
         for p in cs.iter().chain(std::iter::once(&c)) {
@@ -616,6 +649,13 @@ impl City {
         if let Some(p) = self.desarrollo_problema_sitio(t, k, c) {
             return Some(p);
         }
+        match k {
+            Kind::Teatro if self.services.count(Kind::Teatro) > 0 => return Some("La ciudad ya tiene teatro".into()),
+            Kind::Teatro if !far(900.0) => return Some("El teatro va en la ciudad, a menos de 900 m de la plaza".into()),
+            Kind::UsinaGas if far(250.0) => return Some("La usina de gas echa humo y olor: a más de 250 m de la plaza".into()),
+            Kind::Colector if !near_coast(t, c, 200.0) => return Some("El colector desagua en el río: junto a la costa (a menos de 200 m)".into()),
+            _ => {}
+        }
         if inf.cost > self.money {
             return Some(format!("Fondos insuficientes: hacen falta {} pesos", super::game::fmt_thousands(inf.cost)));
         }
@@ -650,6 +690,10 @@ impl City {
         if k == Kind::Serenos {
             self.refresh_lamps(t, &mut e);
         }
+        if k == Kind::UsinaGas {
+            self.refresh_gas(t, &mut e);
+        }
+        self.refresh_redes();
         self.refresh_barrio();
         self.refresh_suelo(t);
         Ok(e)
@@ -668,6 +712,10 @@ impl City {
         if b.kind == Kind::Serenos {
             self.refresh_lamps(t, &mut e);
         }
+        if b.kind == Kind::UsinaGas {
+            self.refresh_gas(t, &mut e);
+        }
+        self.refresh_redes();
         self.refresh_barrio();
         self.refresh_suelo(t);
         self.money -= 20;
@@ -730,6 +778,8 @@ impl City {
         }
         self.services.lamps = out;
         self.services.lamp_sig = (self.net.edges.len(), self.net.total_length() as i64);
+        // Donde ya hay gas, el farol de sebo sobra (ver `epocas::redes`).
+        self.quitar_sebo_bajo_gas(e);
     }
 
     /// Un paso de medio segundo de juego: fuego y contagios.
@@ -754,6 +804,7 @@ impl City {
         // insalubridad y delito de cada solar; después, los brotes y los delitos del mes.
         news.extend(self.saneamiento_month(t, e));
         self.refresh_water();
+        self.refresh_redes();
         self.refresh_barrio();
         // Recursos, molestias y valor del suelo de cada solar (ver `recursos`).
         self.refresh_suelo(t);
@@ -786,6 +837,10 @@ impl City {
         inp.production[Res::Piedra as usize] += CANTERA_PIEDRA * base(Kind::Cantera);
         inp.upkeep_services += s.upkeep();
         inp.lamps += s.lamps.len() as i32;
+        let carbon = self.costo_carbon();
+        if carbon > 0 {
+            inp.other.push(("Carbón de piedra para el gas".into(), -carbon));
+        }
         let pop = self.population();
         if pop > 0 {
             let served: i32 = self.lots.lots.values().filter(|l| s.water_of(l.id) > 0.0).map(|l| l.residents()).sum();
@@ -828,10 +883,16 @@ impl City {
         for &(v, b) in &self.services.lamps {
             colonial::farol(e, v, b);
         }
+        // Faroles de gas, plazas y alamedas del ensanche (época 2).
+        for &(v, b) in &self.epoca.faroles_gas {
+            super::epocas::redes::farol_gas(e, IVec2::new(v[0], v[1]), b);
+        }
+        self.ensanche_rebuild(t, e);
         self.port_rebuild(t, e);
         self.walls_rebuild(t, e);
         // Escuelas, salud y delito de cada solar (derivados: no se guardan); recursos,
         // molestias y valor del suelo (el valor se guarda: queda el de la partida).
+        self.refresh_redes();
         self.refresh_barrio();
         let valor = std::mem::take(&mut self.lots.valor);
         self.refresh_suelo(t);
@@ -878,6 +939,19 @@ impl City {
                 out.push(format!("Faroles encendidos: {}", self.services.lamps.len()));
                 out.push(format!("Alcance: {} m", inf.radius as i32));
             }
+            Kind::UsinaGas => {
+                out.push(format!("Faroles de gas: {} · carbón: {} pesos por mes", self.epoca.faroles_gas.len(), self.costo_carbon()));
+                out.push(format!("Red: las calles conectadas hasta {} m", inf.radius as i32));
+            }
+            Kind::AguaCorriente => {
+                out.push(format!("Solares con agua corriente: {}", self.epoca.agua_red.len()));
+                out.push(format!("Red: las calles conectadas hasta {} m", inf.radius as i32));
+            }
+            Kind::Colector => {
+                out.push(format!("Solares con colector: {}", self.epoca.cloaca.len()));
+                out.push(format!("Red: las calles conectadas hasta {} m", inf.radius as i32));
+            }
+            Kind::Teatro => out.push("Sube el valor del suelo alrededor y atrae a las familias ricas".into()),
             Kind::Lazareto => out.push(format!("En cuarentena: {} personas", self.services.epidemic.quarantined_now())),
             Kind::Chacra => out.push(format!("Trigo y maíz: {} raciones al año (año normal)", (CHACRA_GRAIN_YEAR * b.rinde.max(0.0)) as i32)),
             Kind::Estancia => {

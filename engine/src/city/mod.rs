@@ -7,13 +7,16 @@
 
 pub mod agentes;
 pub mod arquitectura;
+pub mod cauces;
 #[cfg(test)]
 mod arquitectura_tests;
 pub mod climate;
 pub mod desarrollo;
 pub mod economy;
+pub mod epocas;
 pub mod game;
 pub mod game_demo;
+pub mod game_demo2;
 pub mod lots;
 pub mod materiales;
 pub mod poblacion;
@@ -83,6 +86,12 @@ pub struct City {
     /// Materiales de construcción: existencias, demanda, importación y con qué se hizo cada
     /// servicio (las casas lo guardan en su solar; ver `materiales`).
     pub materiales: materiales::ciudad::Materiales,
+    /// La época de la ciudad, lo que se decidió al pasar de una a otra y lo propio de la
+    /// Ciudad Nueva: ensanche, redes de gas, agua y colectores, casas modernizadas (ver
+    /// `epocas`).
+    pub epoca: epocas::EstadoEpoca,
+    /// [mapa del país] Lo que el interior trajo en carreta el último mes (ver `crate::pais`).
+    pub interior: crate::pais::Aporte,
     /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
     mejoras: Vec<(u32, u8)>,
     rng: Rng,
@@ -93,7 +102,10 @@ pub struct City {
 
 impl Default for City {
     fn default() -> Self {
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion: poblacion::Poblacion::nueva(1726), suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        let mut poblacion = poblacion::Poblacion::nueva(1726);
+        // La época la decide la ciudad (ver `epocas`), no el calendario de la población.
+        poblacion.epoca_fija = true;
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion, suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), epoca: Default::default(), interior: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -503,6 +515,10 @@ impl City {
 
     /// Damero: varias calles a la vez (se validan todas antes de construir).
     pub fn build_grid(&mut self, t: &TerrainGen, lines: &[Vec<Vec2>], kind: RoadKind) -> Result<Edits, String> {
+        // [arroyos] Las calles del damero se cortan en las orillas de los arroyos (un puente
+        // suelto se hace con la calle recta o curva; ver `cauces`).
+        let cortadas: Vec<Vec<Vec2>> = lines.iter().flat_map(|l| cauces::cortar_en_arroyos(t, l)).collect();
+        let lines = &cortadas[..];
         if lines.is_empty() {
             return Err("Damero vacío".into());
         }
@@ -531,7 +547,7 @@ impl City {
 
     /// Después de agregar calles: borra los edificios de los solares que quedaron debajo,
     /// pinta las calzadas nuevas y genera solares nuevos.
-    fn after_roads(&mut self, t: &TerrainGen, new: &[u32], e: &mut Edits) {
+    pub(crate) fn after_roads(&mut self, t: &TerrainGen, new: &[u32], e: &mut Edits) {
         let removed = self.lots.on_roads_changed(&self.net, t, new);
         for lot in &removed {
             clear_voxels(e, lot);
@@ -628,6 +644,7 @@ impl City {
             news.extend(self.services_month(t, e));
             news.extend(self.desarrollo_month(t, e));
             news.extend(self.materiales_mes(t, e));
+            news.extend(self.epoca_mes(t, e));
             news.extend(self.month_tick());
             self.aplicar_mejoras(t, e);
         }
@@ -710,6 +727,8 @@ impl City {
         };
         self.services_input(&mut inp);
         self.desarrollo_input(&mut inp);
+        // [mapa del país] Cueros, sebo, ganado en pie y derechos del tasajo del interior.
+        self.interior.aplicar(&mut inp);
         inp
     }
 
@@ -802,6 +821,8 @@ impl City {
             let sin_techo = (1.0 - (self.pool as f32 - 100.0).max(0.0) / 500.0).max(0.1);
             let llegan = ((arrivals.max(0) + std::mem::take(&mut self.llegados_barco)) as f32 * sin_techo) as u32;
             let ent = self.entorno_poblacion(llegan, input.water_ratio, input.epidemic, weather.drought);
+            self.poblacion.epoca = self.epoca.actual;
+            self.poblacion.epoca_fija = true;
             let inf = self.poblacion.mes(&ent);
             // Los que esperan casa son la gente sin casa (y la que sobra en casas hacinadas).
             self.pool = inf.sin_casa.min(600);

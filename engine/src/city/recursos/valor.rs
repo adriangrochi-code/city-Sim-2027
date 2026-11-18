@@ -234,6 +234,11 @@ impl City {
         let costa = 0.05 * (1.0 - (est.costa / 250.0).clamp(0.0, 1.0));
         let molestia = m.total();
         let (gente, talleres) = cerca.contar(l.c, 150.0);
+        // Época 2: el teatro sube el valor alrededor (la "ciudad culta"), y las plazas del
+        // ensanche, el de su manzana [E].
+        let teatro = self.services.of_kind(super::super::services::Kind::Teatro).map(|b| 0.14 * (-l.c.distance(b.c) / 350.0).exp()).fold(0.0f32, f32::max);
+        let plaza_e = if self.epoca.ensanche.plazas.iter().any(|(c, _)| glam::Vec2::from(*c).distance(l.c) < 110.0) { 0.04 } else { 0.0 };
+        let costa = costa + teatro + plaza_e;
         let (acceso, comodidades, castigo, zona) = match l.kind() {
             Some(ZoneKind::Industrial) => {
                 // Talleres juntos (proveedores, oficiales, carretas), el puerto y la materia

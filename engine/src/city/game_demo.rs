@@ -13,7 +13,7 @@ pub const PLAZA: Vec2 = crate::terrain::FOUNDING_REAL;
 /// Punto medio del camino curvo que sale hacia el este (para la captura de cerca).
 pub const CURVE_VIEW: Vec2 = Vec2::new(PLAZA.x + 5.0 * BLOCK, PLAZA.y - 0.6 * BLOCK);
 
-fn apply(s: &mut Session, r: Result<crate::buildings::Edits, String>) -> String {
+pub(crate) fn apply(s: &mut Session, r: Result<crate::buildings::Edits, String>) -> String {
     match r {
         Ok(e) => {
             let t0 = Instant::now();
@@ -360,7 +360,7 @@ fn service_site(g: &super::game::Game, t: &crate::terrain::TerrainGen, k: Kind, 
     None
 }
 
-fn place(s: &mut Session, k: Kind, around: Vec2, max_r: f32) -> String {
+pub(crate) fn place(s: &mut Session, k: Kind, around: Vec2, max_r: f32) -> String {
     let t = s.terrain.clone();
     let g = s.game.as_mut().unwrap();
     let Some((c, f)) = service_site(g, &t, k, around, max_r) else {
@@ -948,7 +948,7 @@ pub static MUESTRAS_ARQ: std::sync::Mutex<Vec<MuestraArq>> = std::sync::Mutex::n
 
 /// Hileras de solares contiguos (cada 12 m) con el mismo frente, de al menos `n` solares,
 /// ordenadas por distancia a la plaza.
-fn hileras(c: &super::City, n: usize) -> Vec<Vec<u32>> {
+pub(crate) fn hileras(c: &super::City, n: usize) -> Vec<Vec<u32>> {
     let plaza = c.lots.plaza_center.unwrap_or(PLAZA);
     let mut vistos = std::collections::HashSet::new();
     let mut out: Vec<(f32, Vec<u32>)> = Vec::new();

@@ -158,6 +158,9 @@ pub fn city_steps() -> Vec<Act> {
     if std::env::var("MOTOR_SOLO_ARQ").is_ok() {
         return pasos_solo_arquitectura();
     }
+    if std::env::var("MOTOR_EPOCA2").is_ok() {
+        return pasos_epoca2();
+    }
     let c = d::PLAZA;
     let mut pasos = vec![
         Cam([c.x, c.y, 700.0, 200.0, 45.0]),
@@ -522,6 +525,124 @@ fn pasos_arquitectura() -> Vec<Act> {
         CamFn(|_| d::view_arquitectura(5, 20.0, 60.0, 40.0, 32.0)),
         WaitIdle("quintas de 1812"),
         Shot("motor-arq-quintas-1812"),
+    ]
+}
+
+/// Recorrido de la época 2, Ciudad Nueva (`MOTOR_EPOCA2=1`): la ciudad colonial de la
+/// demostración, el paso de época, el ensanche, gas, teatro, agua corriente y colector, unos
+/// años de crecimiento, calles de muestra, capturas de día y de noche, y guardar y cargar.
+fn pasos_epoca2() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use crate::city::game_demo2 as d2;
+    use crate::city::services::Kind;
+    use Act::*;
+    let c = d::PLAZA;
+    vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.5),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("escuelas, salud, seguridad y saneamiento", d::barrio),
+        Game("crecer 60 meses", d::grow),
+        Game("iglesia matriz", d::iglesia),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        WaitIdle("la ciudad colonial"),
+        Shot("epoca2-00-ciudad-colonial"),
+        Game("pasar a la Ciudad Nueva", d2::pasar),
+        UiShot("epoca2-ui-resumen", |s, u| ui_detail(s, u, ui::Detail::Epoca(1))),
+        Game("ensanche sobre el ejido", d2::ensanche),
+        Hour(10.0),
+        CamFn(|s| d2::view_ensanche(s, 0.5, 520.0, 52.0)),
+        WaitIdle("ensanche trazado"),
+        Shot("epoca2-01-ensanche-trazado"),
+        Game("zonificar el ensanche", d2::zonificar),
+        Game("usina de gas, teatro, agua corriente y colector", d2::servicios),
+        Game("cuatro años de Ciudad Nueva", d2::crecer),
+        Game("calles de muestra de la época 2", d2::muestras),
+        Game("medir los edificios de los solares", d::medir),
+        Hour(10.0),
+        Hour(10.0),
+        CamFn(|s| d2::view_ensanche(s, 0.5, 420.0, 40.0)),
+        WaitIdle("ensanche crecido"),
+        Shot("epoca2-02-ensanche-general"),
+        Hour(10.0),
+        CamFn(|s| d2::view_ensanche(s, 0.35, 90.0, 22.0)),
+        WaitIdle("bulevar"),
+        Shot("epoca2-03-bulevar"),
+        Hour(10.0),
+        CamFn(|_| d2::view_muestra(0, 21.0, 40.0, 50.0, 26.0)),
+        WaitIdle("casas neoclásicas de patio"),
+        Shot("epoca2-04-casas-neoclasicas"),
+        Hour(10.0),
+        CamFn(|_| d2::view_muestra(1, 21.0, 46.0, 50.0, 26.0)),
+        WaitIdle("casas de altos"),
+        Shot("epoca2-05-casas-de-altos"),
+        Hour(10.0),
+        CamFn(|_| d2::view_muestra(2, 21.0, 42.0, 50.0, 26.0)),
+        WaitIdle("almacenes"),
+        Shot("epoca2-06-almacenes"),
+        Hour(10.0),
+        CamFn(|_| d2::view_muestra(3, 21.0, 42.0, 50.0, 26.0)),
+        WaitIdle("calle vieja modernizada"),
+        Shot("epoca2-07-calle-mixta"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::Teatro, 95.0, 24.0)),
+        WaitIdle("teatro"),
+        Shot("epoca2-08-teatro"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::UsinaGas, 80.0, 30.0)),
+        WaitIdle("usina de gas"),
+        Shot("epoca2-09-usina-gas"),
+        Hour(10.0),
+        CamFn(|s| d2::view_plaza(s, 110.0, 34.0)),
+        WaitIdle("plaza del ensanche"),
+        Shot("epoca2-10-plaza-ensanche"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::AguaCorriente, 70.0, 28.0)),
+        WaitIdle("agua corriente"),
+        Shot("epoca2-11-agua-corriente"),
+        // De noche: los faroles de gas.
+        Hour(21.5),
+        Hour(21.5),
+        CamFn(|s| d2::view_ensanche(s, 0.35, 90.0, 22.0)),
+        WaitIdle("bulevar de noche"),
+        Shot("epoca2-12-noche-bulevar"),
+        Hour(21.5),
+        CamFn(|_| d2::view_muestra(3, 21.0, 42.0, 50.0, 26.0)),
+        WaitIdle("calle vieja de noche"),
+        Shot("epoca2-13-noche-calle-mixta"),
+        Hour(21.5),
+        CamFn(|s| d2::view_plaza(s, 110.0, 34.0)),
+        WaitIdle("plaza de noche"),
+        Shot("epoca2-14-noche-plaza"),
+        Hour(21.5),
+        CamFn(|s| d2::view_ensanche(s, 0.5, 420.0, 40.0)),
+        WaitIdle("la ciudad de noche"),
+        Shot("epoca2-15-noche-general"),
+        Hour(10.5),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        UiShot("epoca2-ui-epoca", |s, u| ui_detail(s, u, ui::Detail::Epoca(0))),
+        UiShot("epoca2-ui-ficha-reformada", |s, u| {
+            u.open = None;
+            u.detail = None;
+            let g = s.game.as_mut().unwrap();
+            g.set_tool(7);
+            g.inspected = None;
+            if let Some(p) = d2::solar_colonial(s) {
+                let g = s.game.as_mut().unwrap();
+                g.inspected = Some(p);
+                g.hover = Some(p);
+            }
+        }),
+        UiShot("epoca2-ui-servicios-seguridad", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Seguridad)),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        SaveLoad("guardar y cargar la Ciudad Nueva"),
+        CamFn(|s| d2::view_ensanche(s, 0.5, 420.0, 40.0)),
+        WaitIdle("Ciudad Nueva cargada"),
+        Shot("epoca2-16-cargada"),
     ]
 }
 
@@ -1129,7 +1250,7 @@ impl Tour {
                         let mut valor: Vec<(u32, [f32; 3])> = c.lots.valor.iter().map(|(&k, v)| (k, [v.valor, v.molestia, v.atractivo])).collect();
                         valor.sort_by_key(|x| x.0);
                         let rinde: Vec<f32> = sv.buildings.values().map(|b| b.rinde).collect();
-                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default(), (valor, rinde, format!("{:?}", c.suelo.molestias)), serde_json::to_string(&c.desarrollo).unwrap_or_default())
+                        (c.net.edges.len(), c.lots.lots.len(), c.lots.lots.values().map(|l| l.level as usize).sum::<usize>(), c.population(), c.money, c.month, c.economy.taxes, (sv.buildings.len(), sv.church.view_phase(), sv.walls.tramos.len(), sv.ruins.len(), sv.lamps.len(), sv.water.len()), (sv.barrio.guardar(), sv.barrio.escuela.len(), sv.barrio.delito.len()), serde_json::to_string(&c.poblacion).unwrap_or_default(), (valor, rinde, format!("{:?}", c.suelo.molestias)), (serde_json::to_string(&c.desarrollo).unwrap_or_default(), serde_json::to_string(&c.epoca).unwrap_or_default()))
                     };
                     // Lo derivado del barrio (escuelas, delito por solar) y del suelo (molestias,
                     // valor), al día con el estado que se guarda (al cargar se recalcula igual).

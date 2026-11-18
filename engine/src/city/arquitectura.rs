@@ -26,6 +26,7 @@ pub fn tradicion_de(o: Origen) -> Tradicion {
         Origen::Portugal | Origen::Brasil => Tradicion::Lusa,
         Origen::Misiones => Tradicion::Guarani,
         Origen::Italia => Tradicion::Italiana,
+        Origen::Francia => Tradicion::Francesa,
         _ => Tradicion::Ninguna,
     }
 }
@@ -95,6 +96,10 @@ impl City {
     /// Barrio del solar por la distancia a la plaza: 0 centro, 1 intramuros, 2 orillas,
     /// 3 extramuros (la península amurallada medía ~1 km [E]).
     pub fn lugar_de(&self, p: Vec2) -> u8 {
+        // Las manzanas del ensanche son ciudad, no extramuros (época 2).
+        if self.epoca.ensanche.contiene(p) {
+            return 1;
+        }
         match self.lots.plaza_center.map(|c| c.distance(p)) {
             Some(d) if d < 200.0 => 0,
             Some(d) if d < 550.0 => 1,
@@ -137,9 +142,11 @@ impl City {
             Some(h) => (Clase::ALL.iter().position(|&c| c == h.clase).unwrap_or(1) as u8, Some(h.origen)),
             None => (estilo::clase_probable(level, valor, l.seed), None),
         };
-        let origen = origen.unwrap_or_else(|| origen_probable(anio, l.seed));
+        let origen = origen.unwrap_or_else(|| origen_probable_en(self.epoca.actual, anio, l.seed));
         let puerto = self.services.port.pier.as_ref().is_some_and(|p| p.land.distance(l.c) < 350.0);
-        Contexto { anio, clase, esquina: self.esquina_de(l), lugar: self.lugar_de(l.c), puerto, giro: 0, tradicion: tradicion_de(origen).indice() }
+        // Lo que se levanta desde la Ciudad Nueva usa el kit de la época 2.
+        let epoca = u8::from(self.en_epoca(Epoca::CiudadNueva));
+        Contexto { anio, clase, esquina: self.esquina_de(l), lugar: self.lugar_de(l.c), puerto, giro: 0, tradicion: tradicion_de(origen).indice(), epoca, reforma: 0, antes: 0 }
     }
 
     /// Estilos de las casas vecinas sobre la misma calle (a un solar de distancia).
@@ -207,7 +214,16 @@ impl City {
         let ctx = self.contexto_solar(l.id, level);
         let t = Tradicion::de_indice(ctx.tradicion);
         let x = Rng::new(l.seed ^ 0x7EC40).f();
-        let primero = match (kind, level) {
+        let primero = if ctx.epoca >= 1 {
+            // Ciudad Nueva: azotea casi siempre (la teja queda para las quintas y las orillas) [E].
+            match (kind, level) {
+                (ZoneKind::Residencial | ZoneKind::Comercial, 2..) => Some(if x < if ctx.lugar >= 3 { 0.55 } else { 0.9 } { Techo::Azotea } else { Techo::Teja }),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let primero = if primero.is_some() { primero } else { match (kind, level) {
             (ZoneKind::Residencial, 1) if plan.techos.contains(&Techo::Paja) => Some(if x < estilo::prob_cuero(ctx.anio) { Techo::Cuero } else { Techo::Paja }),
             (ZoneKind::Residencial, 2) if density == Density::Alta => None,
             (ZoneKind::Residencial | ZoneKind::Comercial, 2) | (ZoneKind::Comercial, 1) => {
@@ -215,7 +231,7 @@ impl City {
             }
             (ZoneKind::Residencial, _) if ctx.anio < 1780 => Some(if x < (estilo::prob_azotea(ctx.anio, ctx.lugar, t) * 1.5).min(0.9) { Techo::Azotea } else { Techo::Teja }),
             _ => None,
-        };
+        } };
         if let Some(p) = primero {
             if let Some(i) = plan.techos.iter().position(|&x| x == p) {
                 let v = plan.techos.remove(i);
@@ -223,6 +239,13 @@ impl City {
             }
         }
         plan
+    }
+
+    /// Estilo con que se dibuja la casa de un solar (`None` si es un edificio del catálogo).
+    pub fn estilo_de_solar(&self, id: u32) -> Option<Estilo> {
+        let l = self.lots.lots.get(&id)?;
+        let (k, d) = zone_of(l.zone)?;
+        estilo_de(k, d, l.level, l.seed, &self.obra_de(l)?)
     }
 
     /// Líneas de la ficha sobre la casa: su tipo, el año y el origen de la familia.
@@ -239,6 +262,9 @@ impl City {
         } else {
             v.push(nombre);
         }
+        if es.reforma > 0 {
+            v.push(format!("Fachada modernizada en {}: misma planta, cara de la Ciudad Nueva", es.reforma));
+        }
         if let Some(t) = es.linea_origen() {
             v.push(t);
         }
@@ -249,7 +275,12 @@ impl City {
 /// Origen más probable de quien levanta una casa en ese año, sorteado (con la semilla del
 /// solar) con el peso de cada origen en las llegadas de la época.
 pub fn origen_probable(anio: u16, seed: u64) -> Origen {
-    let tabla = super::poblacion::origenes::tabla(Epoca::del_año(anio as i32));
+    origen_probable_en(Epoca::del_año(anio as i32), anio, seed)
+}
+
+/// Como [`origen_probable`], con la tabla de llegadas de una época dada (la de la ciudad).
+pub fn origen_probable_en(epoca: Epoca, anio: u16, seed: u64) -> Origen {
+    let tabla = super::poblacion::origenes::tabla(epoca);
     let total: f32 = tabla.iter().map(|l| l.peso).sum::<f32>() + 20.0;
     // Los nacidos en la ciudad pesan cada vez más.
     let criollos = 20.0 + (anio.saturating_sub(1726) as f32) * 0.3;

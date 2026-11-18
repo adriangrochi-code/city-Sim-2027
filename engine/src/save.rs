@@ -127,6 +127,10 @@ pub struct SaveFile {
     pub hora: f32,
     pub herramientas: ToolsData,
     pub ciudad: CityData,
+    /// [mapa del país] El país (escala país), aparte de la ciudad. Las partidas viejas no lo
+    /// traen: al cargarlas se simula el país hasta la fecha de la ciudad.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pais: Option<crate::pais::Pais>,
 }
 
 /// Solo la cabecera (para el listado; los campos de más se ignoran).
@@ -166,6 +170,7 @@ pub fn snapshot(game: &Game, cam: [f32; 5], hour: f32, auto: bool) -> SaveFile {
         hora: hour,
         herramientas: ToolsData { tipo_de_calle: kind_key(game.kind).into(), pincel: game.brush, zona: game.zone_kind as u8, densidad: game.density as u8, angulo_plaza: game.plaza_angle, velocidad: game.speed },
         ciudad: CityData::from_city(&game.city),
+        pais: Some(game.pais.clone()),
     }
 }
 
@@ -207,6 +212,9 @@ pub fn restore(f: &SaveFile, t: &TerrainGen) -> Result<(Game, Edits), String> {
     if g.city.plaza.is_some() {
         g.set_tool(inspect);
     }
+    // [mapa del país]
+    g.pais = f.pais.clone().unwrap_or_else(|| crate::pais::Pais::simulado_hasta(g.city.month));
+    g.city.interior = g.pais.ultimo.clone();
     let e = g.city.rebuild_edits(t);
     g.say(format!("Partida cargada: {}, {}", f.nombre, g.city.date()));
     Ok((g, e))

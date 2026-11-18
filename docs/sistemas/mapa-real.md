@@ -1,7 +1,7 @@
 # Mapa real: Montevideo (escala ciudad) y Uruguay (escala país)
 
 > Documento de sistema. Estado: **Montevideo implementado en el prototipo** como mapa por
-> defecto. El mapa del país es solo diseño.
+> defecto. El mapa del país está en [mapa-pais.md](mapa-pais.md).
 
 ## Qué es
 
@@ -308,6 +308,9 @@ Sin cambios para el resto del código: `height`, `is_land`, `arroyo_distance`, `
 
 ## Plan para el mapa del país (escala país, diseño)
 
+> Hecho de otra manera: ver [mapa-pais.md](mapa-pais.md) (MDT de la IDE a 1 km, capas del
+> MTOP, historia a mano con fuentes). Lo de abajo queda como el plan original.
+
 | Capa | Fuente posible | Resolución |
 |---|---|---|
 | Relieve | Los mismos Terrain Tiles a zoom 8–9 | 150–300 m |
@@ -337,4 +340,5 @@ Sin cambios para el resto del código: `height`, `is_land`, `arroyo_distance`, `
   de Maldonado es el de hoy (DGF 2021 × 1,5), sin la reconstrucción de 1726 del mapa; la capa
   `area_humeda_a` de la IDE no bajó (el servidor cortaba las conexiones) y los bañados salen de
   `banado_a` y del relieve. En Argentina el modelo es de superficie (Copernicus), no de suelo.
-- Calles y solares de Godot todavía no consultan `is_water`: se puede construir sobre un arroyo.
+- Calles y solares de Godot todavía no consultan `is_water`: se puede construir sobre un arroyo
+  (en el motor sí: ver [mapa-pais.md](mapa-pais.md#calles-y-solares-que-esquivan-los-arroyos)).

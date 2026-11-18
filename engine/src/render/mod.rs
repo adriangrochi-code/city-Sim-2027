@@ -305,6 +305,9 @@ pub struct Renderer {
     shadow_bg: wgpu::BindGroup,
     shadow_sampler: wgpu::Sampler,
     palette: wgpu::Buffer,
+    /// Luces de los faroles cerca de la cámara, en una grilla de celdas (ver [`luces`]).
+    luces: wgpu::Buffer,
+    luces_key: u64,
     /// Mapas de sombra: una capa por cascada (vista de todo el arreglo y una por capa).
     shadow_view: wgpu::TextureView,
     shadow_layers: Vec<wgpu::TextureView>,
@@ -503,7 +506,7 @@ fn make_shadow_maps(device: &wgpu::Device, q: ShadowQuality) -> (wgpu::TextureVi
 }
 
 #[allow(clippy::too_many_arguments)]
-fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer) -> wgpu::BindGroup {
+fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer, luces: &wgpu::Buffer) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout,
@@ -514,8 +517,64 @@ fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: 
             wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 4, resource: palette.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 5, resource: sombras.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 7, resource: luces.as_entire_binding() },
         ],
     })
+}
+
+/// Luces puntuales de los faroles (gas y sebo) para el sombreado de noche. Se arma en la CPU
+/// una grilla de [`luces::LADO`]² celdas de [`luces::CELDA`] m alrededor de la cámara; cada
+/// celda guarda hasta 8 luces (las más cercanas a su centro que la alcanzan). El fragmento
+/// mira solo las de su celda: costo fijo y chico, sin importar cuántos faroles haya.
+/// Formato (vec4): [0] = (luces, x0, z0, celda), [1] = (lado, 0, 0, 0), después 2 vec4 de
+/// índices por celda (−1 = vacío) y 2 vec4 por luz: (x, y, z, alcance), (r, g, b, intensidad).
+pub mod luces {
+    pub const LADO: usize = 48;
+    pub const CELDA: f32 = 12.0;
+    pub const MAX: usize = 256;
+    pub const POR_CELDA: usize = 8;
+    pub const VEC4: usize = 2 + LADO * LADO * 2 + MAX * 2;
+
+    /// Arma el contenido del búfer. `luces`: (x, y, z, alcance, intensidad); `tipo_gas` decide
+    /// el color (ámbar del gas o naranja más apagado del sebo).
+    pub fn armar(centro: glam::Vec2, luces: &[[f32; 5]]) -> Vec<[f32; 4]> {
+        let mut out = vec![[0.0f32; 4]; VEC4];
+        let n = luces.len().min(MAX);
+        let x0 = (centro.x / CELDA).floor() * CELDA - CELDA * (LADO / 2) as f32;
+        let z0 = (centro.y / CELDA).floor() * CELDA - CELDA * (LADO / 2) as f32;
+        out[0] = [n as f32, x0, z0, CELDA];
+        out[1] = [LADO as f32, 0.0, 0.0, 0.0];
+        for c in 0..LADO * LADO {
+            out[2 + c * 2] = [-1.0; 4];
+            out[3 + c * 2] = [-1.0; 4];
+        }
+        let base = 2 + LADO * LADO * 2;
+        let mut celdas: Vec<Vec<(f32, usize)>> = vec![Vec::new(); LADO * LADO];
+        for (i, l) in luces.iter().take(n).enumerate() {
+            let gas = l[4] > 0.6;
+            // Ámbar del gas (#F2B862 en lineal) o el naranja de la vela de sebo.
+            let col = if gas { [0.89, 0.48, 0.12] } else { [1.0, 0.45, 0.12] };
+            out[base + i * 2] = [l[0], l[1], l[2], l[3]];
+            out[base + i * 2 + 1] = [col[0], col[1], col[2], l[4]];
+            let r = l[3];
+            let (cx0, cx1) = (((l[0] - r - x0) / CELDA).floor() as i32, ((l[0] + r - x0) / CELDA).floor() as i32);
+            let (cz0, cz1) = (((l[2] - r - z0) / CELDA).floor() as i32, ((l[2] + r - z0) / CELDA).floor() as i32);
+            for cz in cz0.max(0)..=cz1.min(LADO as i32 - 1) {
+                for cx in cx0.max(0)..=cx1.min(LADO as i32 - 1) {
+                    let cc = glam::Vec2::new(x0 + (cx as f32 + 0.5) * CELDA, z0 + (cz as f32 + 0.5) * CELDA);
+                    let d = cc.distance(glam::Vec2::new(l[0], l[2]));
+                    celdas[cz as usize * LADO + cx as usize].push((d, i));
+                }
+            }
+        }
+        for (c, v) in celdas.iter_mut().enumerate() {
+            v.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (k, &(_, i)) in v.iter().take(POR_CELDA).enumerate() {
+                out[2 + c * 2 + k / 4][k % 4] = i as f32;
+            }
+        }
+        out
+    }
 }
 
 fn make_cull_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, cols: &wgpu::Buffer, args: &wgpu::Buffer, params: &wgpu::Buffer, visible: &wgpu::Buffer, hiz: &wgpu::TextureView) -> wgpu::BindGroup {
@@ -659,6 +718,7 @@ impl Renderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
+                storage_entry(7, wgpu::ShaderStages::FRAGMENT, true),
             ],
         });
         // Pase de sombras: orígenes de las columnas y la matriz de la cascada (desplazamiento
@@ -692,7 +752,9 @@ impl Renderer {
         }
         let palette = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("paleta"), contents: bytemuck::cast_slice(&pal), usage: wgpu::BufferUsages::UNIFORM });
         let simple_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("solo globales"), entries: &[uniform_entry] });
-        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras);
+        let luces_ini = luces::armar(glam::Vec2::ZERO, &[]);
+        let luces_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("luces de los faroles"), contents: bytemuck::cast_slice(&luces_ini), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
+        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras, &luces_buf);
         let shadow_vox_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &shadow_bgl,
@@ -1031,6 +1093,8 @@ impl Renderer {
             shadow_bg,
             shadow_sampler,
             palette,
+            luces: luces_buf,
+            luces_key: 0,
             shadow_view,
             shadow_layers,
             quality,
@@ -1240,6 +1304,25 @@ impl Renderer {
         *self.detail_buf.borrow_mut() = Some((buf, n as u32));
     }
 
+    /// Luces de los faroles alrededor de `centro` (x, y, z, alcance, intensidad): se suben solo
+    /// si cambiaron.
+    pub fn set_lights(&mut self, centro: glam::Vec2, ls: &[[f32; 5]]) {
+        let celda = (centro / luces::CELDA).floor();
+        let mut h = crate::fxhash::FxHasher::default();
+        std::hash::Hasher::write(&mut h, bytemuck::cast_slice(&[celda.x, celda.y]));
+        for l in ls {
+            std::hash::Hasher::write(&mut h, bytemuck::cast_slice(l));
+        }
+        let key = std::hash::Hasher::finish(&h);
+        if key == self.luces_key {
+            return;
+        }
+        self.luces_key = key;
+        self.scene_version += 1;
+        let datos = luces::armar(centro, ls);
+        self.queue.write_buffer(&self.luces, 0, bytemuck::cast_slice(&datos));
+    }
+
     /// Cajas de los vecinos y vehículos de este cuadro (vacío: no se dibuja ninguno).
     pub fn set_agents(&mut self, cajas: &[crate::city::agentes::dibujo::Caja]) {
         let bytes: &[u8] = bytemuck::cast_slice(cajas);
@@ -1315,7 +1398,7 @@ impl Renderer {
         }
         self.quality = q;
         let (all, layers) = make_shadow_maps(&self.device, q);
-        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras);
+        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras, &self.luces);
         self.shadow_view = all;
         self.shadow_layers = layers;
         *self.casc.borrow_mut() = CascState { force: true, dirty: [true; MAX_CASCADES], ..Default::default() };

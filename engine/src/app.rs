@@ -11,6 +11,7 @@
 //!   5 zona · 6 quitar zona · 7 demoler · 8 inspeccionar · Tab tipo de calle · R girar la
 //!   plaza · [ ] pincel · , . hora · Espacio pausa · 0 velocidad · clic derecho/Esc cancelar
 //!   · Esc (sin nada que cancelar) menú de pausa · F5 guardar · F9 cargar la última partida
+//!   · M mapa del país (ver `pais::ui`)
 //!
 //! Sin argumentos el juego abre en el menú principal (ver `menu.rs`).
 
@@ -162,7 +163,8 @@ impl App {
         self.menu.sync_pause(s);
         self.menu.animate_background(s, dt);
         self.menu.autosave(s);
-        let menu_open = self.menu.is_open();
+        // [mapa del país] Con el mapa del país abierto, el ratón y la cámara son del mapa.
+        let menu_open = self.menu.is_open() || self.ui.pais.abierto;
         // Cámara con el teclado (no con el menú abierto).
         let speed = s.cam.distance * 0.9 * dt;
         let k = |c| (self.keys.contains(&c) && !menu_open) as i32 as f32;
@@ -393,6 +395,22 @@ impl App {
     }
 
     fn key(&mut self, code: KeyCode, el: &ActiveEventLoop) {
+        // [mapa del país] M abre y cierra el mapa del país; abierto, Esc vuelve a la ciudad y las
+        // demás teclas son del mapa (las lee egui).
+        if self.session.game.is_some() && !self.menu.is_open() {
+            if code == KeyCode::KeyM {
+                self.ui.pais.alternar();
+                self.ui_repaint = true;
+                return;
+            }
+            if self.ui.pais.abierto {
+                if code == KeyCode::Escape {
+                    self.ui.pais.escape();
+                }
+                self.ui_repaint = true;
+                return;
+            }
+        }
         if self.menu_key(code) || self.game_key(code) {
             return;
         }
@@ -473,7 +491,8 @@ impl ApplicationHandler for App {
             self.ui_repaint = true;
         }
         // La interfaz ve el evento primero; si el cursor está sobre un panel, el mundo no.
-        let menu_open = self.menu.is_open();
+        // [mapa del país] Con el mapa del país abierto, el ratón y la cámara son del mapa.
+        let menu_open = self.menu.is_open() || self.ui.pais.abierto;
         let (ui_pointer, ui_keys) = match (self.gpu.as_mut(), self.session.game.is_some() || menu_open || self.menu.settings.mostrar_fps) {
             (Some(gpu), true) => {
                 let _ = gpu.egui.on_window_event(&gpu.window, &event);

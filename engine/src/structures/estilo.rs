@@ -39,6 +39,18 @@ pub struct Contexto {
     /// Tradición constructiva de la familia que la levantó (índice en [`Tradicion::ALL`]).
     #[serde(default)]
     pub tradicion: u8,
+    /// Época del kit con que se levantó: 0 colonial, 1 Ciudad Nueva (fachada neoclásica e
+    /// italianizante; ver `docs/sistemas/arquitectura-epoca2.md`). Las partidas viejas, 0.
+    #[serde(default)]
+    pub epoca: u8,
+    /// Año en que se modernizó la fachada en el lugar (rehabilitación: misma planta, fachada
+    /// nueva; 0 = nunca).
+    #[serde(default)]
+    pub reforma: u16,
+    /// Materiales de antes de la reforma (bit 0: sin revoque; bit 1: sin hierro): la planta se
+    /// sigue dibujando con ellos, así la casa reformada conserva su huella.
+    #[serde(default)]
+    pub antes: u8,
 }
 
 /// Tradición constructiva según el origen de la familia (ver [`RASGOS`]). Es un ajuste de
@@ -62,10 +74,12 @@ pub enum Tradicion {
     Guarani,
     /// Italianos (casi no los hay antes de 1830).
     Italiana,
+    /// Franceses y vascofranceses (época 2 en adelante).
+    Francesa,
 }
 
 impl Tradicion {
-    pub const ALL: [Tradicion; 9] = [Tradicion::Ninguna, Tradicion::Criolla, Tradicion::Canaria, Tradicion::Gallega, Tradicion::Andaluza, Tradicion::NorteEspana, Tradicion::Lusa, Tradicion::Guarani, Tradicion::Italiana];
+    pub const ALL: [Tradicion; 10] = [Tradicion::Ninguna, Tradicion::Criolla, Tradicion::Canaria, Tradicion::Gallega, Tradicion::Andaluza, Tradicion::NorteEspana, Tradicion::Lusa, Tradicion::Guarani, Tradicion::Italiana, Tradicion::Francesa];
     pub fn indice(self) -> u8 {
         Tradicion::ALL.iter().position(|&t| t == self).unwrap_or(0) as u8
     }
@@ -141,6 +155,9 @@ pub const RASGOS: &[Rasgos] = &[
     // Molduras, cornisas, balaustradas y colores "pompeyanos": italianizante, desde 1830–1860
     // [E]. En la colonia casi no hubo italianos: no se aplica antes de 1830.
     Rasgos { tradicion: Tradicion::Italiana, desde: 1830, colores: [0.0, 0.0, 0.1, 0.1, 0.1, 0.0, 0.0], ornamento: 0.8, texto: "molduras, cornisas y balaustradas", marca: "E", ..SIN },
+    // Franceses y vascofranceses (un 27 % de los europeos de 1860, Pollero y González Demuro
+    // [F]): persianas de madera, rejas de hierro y el gris "símil piedra" [E].
+    Rasgos { tradicion: Tradicion::Francesa, desde: 1830, colores: [0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.25], reja: 0.25, verde: 0.35, ornamento: 0.3, texto: "persianas, rejas de hierro y revoque gris piedra", marca: "E", ..SIN },
 ];
 
 /// Rasgos que se aplican a una casa de este año (fuera de su rango, ninguno).
@@ -352,6 +369,21 @@ pub struct Estilo {
     pub balcon_madera: bool,
     /// Vuelo del alero de teja (1 = 0,5 m; 2 = 1 m).
     pub alero: i32,
+    // --- Época 2: fachada neoclásica e italianizante ------------------------------------
+    /// Fachada de la Ciudad Nueva (pilastras, cornisa, pretil balaustrado, hierro fundido).
+    pub neo: bool,
+    /// Pilastras: 0 ninguna, 1 en los extremos, 2 también entre los vanos.
+    pub pilastras: u8,
+    /// Ventanas altas "de balcón", casi hasta el piso, alineadas con la puerta.
+    pub ventana_alta: bool,
+    /// Cancel de hierro y vidrio al fondo del zaguán (la puerta de calle queda abierta).
+    pub cancel: bool,
+    /// Escalón y zaguán de mármol importado.
+    pub marmol: bool,
+    /// Palmera en el jardín del frente (quintas).
+    pub palmera: bool,
+    /// Año de la fachada modernizada (0 = la original).
+    pub reforma: u16,
     pub seed: u64,
 }
 
@@ -386,6 +418,10 @@ fn pesos(r: &mut Rng, w: &[f32]) -> usize {
 /// Colores de cal de la guía (§4.2 y §6.5): blanca, hueso, ocre, rosado, almagre, celeste,
 /// gris y piedra vista, con los pesos de cada época [E].
 const CALES: [Mat; 7] = [CAL, CAL_HUESO, CAL_OCRE, CAL_ROSA, CAL_ALMAGRE, CAL_AZUL, CAL_GRIS];
+/// Colores de la época 2 en el mismo orden (el de los rasgos de cada tradición): blanca,
+/// hueso, ocre claro, rosado ("pompeyano"), almagre, celeste y gris piedra
+/// (docs/epocas/02-ciudad-nueva.md §11) [E].
+const NEO: [Mat; 7] = [CAL, CAL_HUESO, OCRE_CLARO, CAL_ROSA, CAL_ALMAGRE, CAL_AZUL, GRIS_PIEDRA];
 
 fn color_de_cal(r: &mut Rng, anio: u16, clase: u8, ra: &Rasgos) -> Mat {
     let mut w: [f32; 7] = match anio {
@@ -430,6 +466,8 @@ pub fn sucio(m: Mat) -> Mat {
         CAL_HUESO => HUESO_SUCIA,
         CAL_ALMAGRE => ALMAGRE_SUCIA,
         CAL_GRIS => GRIS_SUCIA,
+        OCRE_CLARO => OCRE_CLARO_SUCIA,
+        GRIS_PIEDRA => GRIS_PIEDRA_SUCIA,
         ADOBE => ADOBE_DARK,
         BRICK => BRICK_DARK,
         STONE => STONE_DARK,
@@ -442,7 +480,7 @@ pub fn sucio(m: Mat) -> Mat {
 
 /// ¿Es un revoque de cal (limpio o manchado)?
 pub fn es_cal(m: Mat) -> bool {
-    matches!(m, CAL | CAL_OCRE | CAL_ROSA | CAL_AZUL | CAL_HUESO | CAL_ALMAGRE | CAL_GRIS | CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA | HUESO_SUCIA | ALMAGRE_SUCIA | GRIS_SUCIA)
+    matches!(m, CAL | CAL_OCRE | CAL_ROSA | CAL_AZUL | CAL_HUESO | CAL_ALMAGRE | CAL_GRIS | CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA | HUESO_SUCIA | ALMAGRE_SUCIA | GRIS_SUCIA | OCRE_CLARO | OCRE_CLARO_SUCIA | GRIS_PIEDRA | GRIS_PIEDRA_SUCIA)
 }
 
 /// El color limpio de un revoque manchado.
@@ -455,6 +493,8 @@ pub fn limpio(m: Mat) -> Mat {
         HUESO_SUCIA => CAL_HUESO,
         ALMAGRE_SUCIA => CAL_ALMAGRE,
         GRIS_SUCIA => CAL_GRIS,
+        OCRE_CLARO_SUCIA => OCRE_CLARO,
+        GRIS_PIEDRA_SUCIA => GRIS_PIEDRA,
         m => m,
     }
 }
@@ -475,8 +515,15 @@ pub fn clase_probable(nivel: u8, valor: f32, seed: u64) -> u8 {
 const ANIO_SIN_DATO: u16 = 1750;
 
 /// Elige la tipología y todos los parámetros de una casa. Determinista.
-pub fn estilo(ctx: &Contexto, m: &MaterialesObra, uso: Uso, nivel: u8, alta: bool, seed: u64) -> Estilo {
+pub fn estilo(ctx: &Contexto, m_real: &MaterialesObra, uso: Uso, nivel: u8, alta: bool, seed: u64) -> Estilo {
+    // La casa reformada se dibuja con los materiales con que se levantó; la fachada nueva, con
+    // los de ahora.
+    let m_antes = MaterialesObra { revoque: m_real.revoque && ctx.antes & 1 == 0, hierro: m_real.hierro && ctx.antes & 2 == 0, ..*m_real };
+    let m = if ctx.reforma > 0 && ctx.epoca == 0 { &m_antes } else { m_real };
     let anio = if ctx.anio == 0 { ANIO_SIN_DATO } else { ctx.anio };
+    // Las casas del kit de la época 2 siguen las reglas de su tiempo aunque la partida (en
+    // historia alternativa) llegue antes a la Ciudad Nueva.
+    let anio = if ctx.epoca >= 1 { anio.max(ANIO_CIUDAD_NUEVA) } else { anio };
     let per = periodo(anio);
     let s = seed ^ (ctx.giro as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xE57110;
     let mut r = Rng::new(s);
@@ -703,6 +750,13 @@ pub fn estilo(ctx: &Contexto, m: &MaterialesObra, uso: Uso, nivel: u8, alta: boo
         tradicion,
         balcon_madera: false,
         alero: 1 + i32::from(r.f() < ra.alero),
+        neo: false,
+        pilastras: 0,
+        ventana_alta: false,
+        cancel: false,
+        marmol: false,
+        palmera: false,
+        reforma: 0,
         seed: s,
     };
     // Rejas por clase (§6.4) [E]; sin hierro, postigos.
@@ -922,7 +976,137 @@ pub fn estilo(ctx: &Contexto, m: &MaterialesObra, uso: Uso, nivel: u8, alta: boo
     e.farol = m.hierro && r.f() < if anio < 1780 { 0.02 } else { 0.10 } + if e.esquina > 0 { 0.15 } else { 0.0 };
     // Más vanos de los que entran: se recortan en el dibujo; acá se asegura un mínimo.
     e.vanos = e.vanos.max(if e.tienda > 0 { e.tienda + 1 } else { 1 });
+    if ctx.epoca >= 1 {
+        // Casa nueva de la Ciudad Nueva: fachada y algo de planta de la época 2.
+        fachada_neo(&mut e, m, ra, ctx, &mut r, false);
+    } else if ctx.reforma > 0 {
+        // Casa vieja modernizada en el lugar: la misma planta (todo lo de arriba sale igual),
+        // y solo la fachada se rehace con otra tirada.
+        let mut r2 = Rng::new(s ^ 0x2EF0_43A ^ (ctx.reforma as u64).wrapping_mul(0x9E37_79B9));
+        let ra2 = rasgos_de(tradicion, ctx.reforma.max(ANIO_CIUDAD_NUEVA));
+        fachada_neo(&mut e, m_real, ra2, ctx, &mut r2, true);
+        if e.neo {
+            e.reforma = ctx.reforma;
+        }
+    }
     e
+}
+
+/// Primer año de la Ciudad Nueva: el decreto de demolición de la muralla y el trazado de
+/// José María Reyes son de 1829 [F]; la primera Constitución, de 1830.
+pub const ANIO_CIUDAD_NUEVA: u16 = 1830;
+
+/// Fachada neoclásica e italianizante de la época 2 (1830–1880): pilastras, cornisa con
+/// friso, pretil con balaustres, ventanas altas con rejas de hierro fundido, puerta alta con
+/// montante, zaguán con cancel y escalón de mármol; colores ocre claro, gris piedra, hueso y
+/// rosado con molduras en blanco piedra (guía: `docs/sistemas/arquitectura-epoca2.md`; las
+/// proporciones son [E]). Con `reforma`, solo cambia la cara de la casa (no los vanos, la
+/// puerta ni la planta): así se rehabilita sin tocar la huella.
+fn fachada_neo(e: &mut Estilo, m: &MaterialesObra, ra: &Rasgos, ctx: &Contexto, r: &mut Rng, reforma: bool) {
+    let cal = m.revoque && !matches!(m.muro, Muro::Tablas);
+    if !cal || matches!(e.tipo, Tipo::Rancho | Tipo::RanchoCuero) {
+        // Sin revoque no hay fachada nueva: el ladrillo, el adobe o la piedra quedan a la vista.
+        return;
+    }
+    e.neo = true;
+    e.hierro = m.hierro;
+    let clase = e.clase;
+    let mut w = [0.10, 0.18, 0.30, 0.12, 0.05, 0.04, 0.21];
+    for (a, b) in w.iter_mut().zip(ra.colores) {
+        *a += b;
+    }
+    if clase == 0 {
+        w[5] = 0.0;
+        w[6] *= 0.5;
+    }
+    e.muro = NEO[pesos(r, &w)];
+    e.sustrato = match m.muro {
+        Muro::Piedra => MAMPOSTERIA,
+        Muro::Adobe => ADOBE,
+        Muro::Barro => QUINCHA,
+        _ => BRICK,
+    };
+    e.moldura = match e.muro {
+        CAL => if r.f() < 0.6 { GRIS_PIEDRA } else { CAL_HUESO },
+        GRIS_PIEDRA => if r.f() < 0.7 { BLANCO_PIEDRA } else { CAL_HUESO },
+        _ => BLANCO_PIEDRA,
+    };
+    e.piedra = false;
+    e.ornamento = match clase {
+        0 => 1,
+        1 => r.range(1, 2),
+        _ => r.range(2, 3),
+    } as u8;
+    if ra.ornamento > 0.0 && r.f() < ra.ornamento {
+        e.ornamento = (e.ornamento + 1).min(3);
+    }
+    e.cornisa = (e.ornamento + 1).min(3);
+    e.pilastras = match clase {
+        0 => u8::from(r.f() < 0.4),
+        1 => if r.f() < 0.35 { 2 } else { 1 },
+        _ => if r.f() < 0.7 { 2 } else { 1 },
+    };
+    e.zocalo = Some(if e.muro == GRIS_PIEDRA || clase >= 2 && r.f() < 0.5 { MARMOL_GRIS } else { GRIS_PIEDRA_SUCIA });
+    e.h_zocalo = 2;
+    e.carpinteria = [SHUTTER, WOOD_DARK, CARP_GRIS, CARP_ROJIZA][pesos(r, &[0.5 + ra.verde, 0.25, 0.12, 0.08])];
+    e.blanqueo = r.range(0, 2) as u8;
+    e.caido = 0.0;
+    e.marmol = clase >= 2 || r.f() < 0.3;
+    e.ventana_alta = e.alto >= 9 && r.f() < 0.85;
+    if m.hierro {
+        let mut rw = [0.0, 0.65 + ra.reja, 0.35 + ra.voladiza];
+        if clase == 0 {
+            rw[2] = 0.1;
+        }
+        e.reja = [Reja::Postigo, Reja::Plana, Reja::Voladiza][pesos(r, &rw)];
+    } else {
+        e.reja = Reja::Postigo;
+    }
+    if e.cubierta == Cubierta::Azotea {
+        e.pretil = 2;
+        e.pretil_tipo = if r.f() < 0.45 + 0.4 * ra.ornamento + if clase >= 2 { 0.2 } else { 0.0 } { 2 } else { 1 };
+        // Caños de bajada en lugar de gárgolas (quedan pocas) [E].
+        e.gargolas = u8::from(r.f() < 0.2);
+    }
+    if e.tipo == Tipo::CasaAltos {
+        e.balcon_madera = false;
+        e.balcon = if m.hierro { if r.f() < 0.55 { 2 } else { 1 } } else { 0 };
+        e.portada = e.portada.max(2);
+    } else if e.ornamento >= 2 {
+        e.portada = if clase >= 2 && r.f() < 0.4 { 3 } else { 2 };
+    } else {
+        e.portada = 1;
+    }
+    e.farol = false;
+    if reforma {
+        return;
+    }
+    // Casa nueva: la planta y el ritmo de la época.
+    e.simetria = r.f() < 0.75;
+    if matches!(e.tipo, Tipo::CasaAzotea | Tipo::CasaAltos | Tipo::Cuartos) {
+        e.zaguan = e.tipo != Tipo::Cuartos || e.renta;
+        // La "casa de tres vanos": puerta y dos ventanas; las ricas, cinco [E].
+        e.vanos = if clase >= 2 && r.f() < 0.4 { 5 } else { 3 };
+        if e.simetria {
+            e.puerta = Puerta::Centro;
+        }
+        e.ancho = 24;
+        e.libre_izq = false;
+        e.ampliaciones = e.ampliaciones.min(1);
+    }
+    e.cancel = e.zaguan && m.hierro && clase >= 1;
+    // Miradores: tema reiterado de la arquitectura montevideana del XIX (MEC) [F]; la
+    // frecuencia es [E].
+    e.mirador = matches!(e.tipo, Tipo::CasaAzotea | Tipo::CasaAltos) && e.cubierta == Cubierta::Azotea && clase >= 2 && r.f() < 0.18 * if ctx.puerto || ctx.lugar == 0 { 1.5 } else { 1.0 };
+    if e.tipo == Tipo::Quinta {
+        e.palmera = r.f() < 0.75;
+        e.pretil = if e.cubierta == Cubierta::Azotea { 2 } else { 0 };
+    }
+    if e.uso == Uso::Comercio && e.esquina > 0 {
+        // Almacén de esquina con la ochava [E].
+        e.entrada_esquina = if r.f() < 0.6 { 2 } else { 1 };
+        e.letrero = true;
+    }
 }
 
 /// Preferencia de techo de una casa de una planta (azotea frente a teja) por año, barrio y
@@ -969,6 +1153,7 @@ impl Estilo {
                 Tradicion::Lusa => "portuguesa o brasileña",
                 Tradicion::Guarani => "guaraní",
                 Tradicion::Italiana => "italiana",
+                Tradicion::Francesa => "francesa",
                 Tradicion::Ninguna => "",
             };
             // Solo los rasgos de la tradición que esta casa muestra de verdad (los materiales
@@ -993,6 +1178,10 @@ impl Estilo {
                 (self.tradicion == Tradicion::Lusa && matches!(self.muro, CAL_OCRE | CAL_ALMAGRE | CAL_ROSA | CAL_AZUL), "colores fuertes"),
                 (self.tradicion == Tradicion::Guarani && self.galeria, "galería al frente"),
                 (self.tradicion == Tradicion::Guarani && self.enramada, "enramada"),
+                (self.tradicion == Tradicion::Italiana && matches!(self.muro, CAL_ROSA | CAL_ALMAGRE | OCRE_CLARO), "colores pompeyanos"),
+                (self.tradicion == Tradicion::Francesa && self.carpinteria == SHUTTER, "persianas"),
+                (self.tradicion == Tradicion::Francesa && self.reja != Reja::Postigo, "rejas de hierro"),
+                (self.tradicion == Tradicion::Francesa && self.muro == GRIS_PIEDRA, "revoque gris piedra"),
             ];
             let tiene: Vec<&str> = candidatos.iter().filter(|c| c.0).map(|c| c.1).collect();
             if tiene.is_empty() {
@@ -1048,6 +1237,11 @@ impl Estilo {
     /// Nombre para la ficha: "casa de azotea con zaguán, dos patios y aljibe".
     pub fn nombre(&self) -> String {
         let mut base = match (self.tipo, self.uso) {
+            (Tipo::CasaAzotea, Uso::Vivienda) if self.neo && self.reforma == 0 => "casa neoclásica de patio".to_string(),
+            (Tipo::CasaAltos, Uso::Vivienda) if self.neo && self.reforma == 0 && !self.renta => "casa de altos neoclásica".to_string(),
+            (Tipo::Quinta, _) if self.neo && self.reforma == 0 => "quinta italianizante".to_string(),
+            (Tipo::CasaAzotea | Tipo::CasaTeja, Uso::Comercio) if self.neo && self.mostrador && self.esquina > 0 => "almacén de esquina".to_string(),
+            (Tipo::CasaAzotea | Tipo::CasaTeja, Uso::Comercio) if self.neo => "casa con almacén al frente".to_string(),
             (Tipo::CasaAltos, _) if self.pisos >= 3 => "casa de tres plantas".to_string(),
             (Tipo::Rancho, Uso::Comercio) => "pulpería de campaña".into(),
             (Tipo::Rancho, _) if self.muro == TABLAS => "rancho de tablas".into(),
@@ -1086,6 +1280,12 @@ impl Estilo {
         }
         if self.hastial {
             extras.push("hastial a la calle");
+        }
+        if self.cancel {
+            extras.push("cancel de hierro");
+        }
+        if self.palmera {
+            extras.push("palmera");
         }
         if !extras.is_empty() {
             let n = extras.len();

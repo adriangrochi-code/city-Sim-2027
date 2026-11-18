@@ -24,6 +24,8 @@ pub enum Tool {
     Inspect,
     /// Colocar un servicio, el muelle o la muralla (`Game::service`); no tiene atajo numérico.
     Service,
+    /// Trazar el ensanche de la Ciudad Nueva (época 2; ver `epocas::ensanche`).
+    Ensanche,
 }
 
 pub const TOOLS: [(Tool, &str); 8] = [
@@ -105,6 +107,8 @@ pub struct Game {
     pub vis: Visibilidad,
     /// Aptitud de los solares vacíos para la zona elegida (zona, mes, solares → aptitud).
     aptitud_cache: Mutex<Option<((u8, u32, usize), std::collections::HashMap<u32, f32>)>>,
+    /// [mapa del país] El país alrededor de la ciudad (escala país, ver `crate::pais`).
+    pub pais: crate::pais::Pais,
 }
 
 type CapaTerreno = ((u8, i32, i32, u32, usize), Vec<OverlayVertex>);
@@ -174,6 +178,7 @@ impl Default for Game {
             message_at: Instant::now(),
             message_seq: 1,
             inspected: None,
+            pais: crate::pais::Pais::default(),
         }
     }
 }
@@ -364,10 +369,10 @@ impl Game {
     }
 
     /// Texto junto al cursor mientras se traza una calle: largo, ángulo y enganche.
-    pub fn draft_label(&self, _t: &TerrainGen) -> Option<String> {
+    pub fn draft_label(&self, t: &TerrainGen) -> Option<String> {
         let h = self.hover?;
         let (from, to) = match (self.tool, self.stage) {
-            (Tool::Straight | Tool::Curve, 1) | (Tool::Grid, 1) => (self.p0, self.draft(self.p0, h)),
+            (Tool::Straight | Tool::Curve, 1) | (Tool::Grid | Tool::Ensanche, 1) => (self.p0, self.draft(self.p0, h)),
             _ => return None,
         };
         let v = to.end - from;
@@ -385,6 +390,14 @@ impl Game {
         }
         if self.free_draw {
             s.push_str(" · libre (Shift)");
+        }
+        // [arroyos] Qué arroyos cruza (y el puente) o si pisa un bañado.
+        if let Some(a) = super::cauces::aviso_trazado(t, &line(from, to.end)) {
+            s.push_str(" · ");
+            s.push_str(&a);
+            if self.tool == Tool::Grid {
+                s.push_str(" (el damero se corta en los arroyos)");
+            }
         }
         Some(s)
     }
@@ -446,6 +459,27 @@ impl Game {
                     let e = self.report(r)?;
                     self.p0 = self.p1;
                     self.stage = 1;
+                    Some(e)
+                }
+            },
+            Tool::Ensanche => match self.stage {
+                0 => {
+                    self.p0 = self.snap(p);
+                    self.stage = 1;
+                    None
+                }
+                1 => {
+                    self.p1 = self.draft(self.p0, p).end;
+                    if self.p1.distance(self.p0) > BLOCK * 1.5 {
+                        self.stage = 2;
+                    }
+                    None
+                }
+                _ => {
+                    let r = self.city.trazar_ensanche(t, self.p0, self.p1, p);
+                    let e = self.report(r)?;
+                    self.say("Trazado el ensanche: calles, bulevar con su alameda y plazas. Zonificá las manzanas nuevas");
+                    self.stage = 0;
                     Some(e)
                 }
             },
@@ -646,6 +680,7 @@ impl Game {
             Tool::Straight => "Clic en el inicio y clic en el final. Sigue encadenando tramos; Esc para terminar.",
             Tool::Curve => "Clic en el inicio, clic en el final y mueve el ratón para doblarla. Un tercer clic la fija.",
             Tool::Grid => "Clic en una esquina, clic en la punta del primer lado y extiende las manzanas (cuadras de 84 m).",
+            Tool::Ensanche => "Ensanche sobre el ejido: clic en una esquina, clic en la punta del primer lado y extiende las manzanas hacia el interior. El bulevar arbolado va por el medio y hay una plaza cada tres manzanas.",
             Tool::Zone => "Pinta los solares junto a las calles: residencial (casas), comercial (tiendas) o industrial (talleres), en densidad baja, media o alta.",
             Tool::Dezone => "Pinta para quitar la zona (derriba lo construido).",
             Tool::Demolish => "Clic sobre un tramo de calle para demolerlo.",
@@ -673,6 +708,10 @@ impl Game {
                 let (c, e) = road(&self.curve_points(h));
                 (Some(c), e)
             }
+            Tool::Ensanche if self.stage == 2 => match super::epocas::ensanche::plan(self.p0, self.p1, h) {
+                Some(p) => (Some(self.city.ensanche_costo(t, &p)), self.city.ensanche_problema(t, &p)),
+                None => (None, Some("El ensanche necesita al menos dos manzanas de lado".into())),
+            },
             Tool::Grid if self.stage == 2 => {
                 let lines = grid_lines(self.p0, self.p1, h);
                 let cost: i64 = lines.iter().map(|l| City::road_cost(t, l, self.kind)).sum();
@@ -741,6 +780,14 @@ impl Game {
                     e.extend(ed);
                     "Servicio demolido".to_string()
                 }),
+                Order::PasarEpoca(m) => self.city.pasar_epoca(t, m, false).map(|(ed, aviso)| {
+                    e.extend(ed);
+                    aviso
+                }),
+                Order::Reforma(id, r) => self.city.rehabilitar(t, id, r, true).map(|ed| {
+                    e.extend(ed);
+                    format!("{}: hecho", r.nombre())
+                }),
             };
             match r {
                 Ok(m) | Err(m) => self.say(m),
@@ -749,11 +796,25 @@ impl Game {
                 self.inspected = None;
             }
         }
-        let news = self.city.tick(t, dt * self.speed, &mut e);
+        let mut news = self.city.tick(t, dt * self.speed, &mut e);
+        // [mapa del país] El país sigue el calendario de la ciudad y le deja su aporte (cueros,
+        // sebo, tasajo y ganado que llegan en carreta) para el mes siguiente.
+        if self.pais.mes < self.city.month {
+            let sequia = self.city.economy.climate_drought.unwrap_or(false);
+            news.extend(self.pais.mes_tick(self.city.month, self.city.population(), sequia));
+            self.city.interior = self.pais.ultimo.clone();
+        }
         for n in news {
             self.say(n);
         }
         (!e.is_empty()).then_some(e)
+    }
+
+    /// [mapa del país] Una obra del cabildo en el país (se paga con el tesoro de la ciudad).
+    pub fn accion_pais(&mut self, a: &crate::pais::Accion) {
+        match self.pais.aplicar(a, &mut self.city.money) {
+            Ok(m) | Err(m) => self.say(m),
+        }
     }
 
     pub fn status(&self) -> String {
@@ -874,10 +935,21 @@ impl Game {
                 self.road_preview(&mut out, t, &line(self.p0, d.end));
             }
             Tool::Curve if self.stage == 2 => self.road_preview(&mut out, t, &self.curve_points(h)),
-            Tool::Grid if self.stage == 1 => {
+            Tool::Grid | Tool::Ensanche if self.stage == 1 => {
                 let d = self.draft(self.p0, h);
                 self.guides_preview(&mut out, t, &d);
                 ribbon(&mut out, t, &line(self.p0, d.end), 3.0, [1.0, 1.0, 1.0, 0.6]);
+            }
+            Tool::Ensanche if self.stage == 2 => {
+                if let Some(p) = super::epocas::ensanche::plan(self.p0, self.p1, h) {
+                    let good = self.city.ensanche_problema(t, &p).is_none();
+                    for l in &p.lineas {
+                        ribbon(&mut out, t, l, RoadKind::Stone.width(), if good { ok } else { bad });
+                    }
+                    for &(c, f) in &p.plazas {
+                        outline(&mut out, t, &corners_of(c, f, 70.0, 70.0), 3.0, [0.4, 0.8, 0.4, 0.7]);
+                    }
+                }
             }
             Tool::Grid if self.stage == 2 => {
                 let lines = grid_lines(self.p0, self.p1, h);
@@ -900,7 +972,7 @@ impl Game {
             _ => {}
         }
         // Marca del punto de enganche.
-        if matches!(self.tool, Tool::Straight | Tool::Curve | Tool::Grid) {
+        if matches!(self.tool, Tool::Straight | Tool::Curve | Tool::Grid | Tool::Ensanche) {
             let sn = self.city.net.snap(h);
             let col = if sn.node.is_some() || sn.edge.is_some() { [1.0, 0.85, 0.3, 0.9] } else { [1.0, 1.0, 1.0, 0.7] };
             let pts: Vec<Vec2> = (0..=12).map(|i| sn.pos + Vec2::from_angle(i as f32 / 12.0 * std::f32::consts::TAU) * 3.0).collect();

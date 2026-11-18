@@ -207,7 +207,7 @@ fn todo_queda_dentro_del_solar() {
     let combos = [(Pared::Ladrillo, Techo::Azotea, true, true), (Pared::Piedra, Techo::Teja, true, true), (Pared::Adobe, Techo::Paja, false, false), (Pared::Barro, Techo::Cuero, false, false), (Pared::Piedra, Techo::Azotea, true, true)];
     for s in 0..60u64 {
         let (p, te, rev, rej) = combos[(s % 5) as usize];
-        let c = Contexto { anio: 1726 + (s as u16 * 13) % 105, clase: (s % 4) as u8, esquina: (s % 3) as u8, lugar: (s % 4) as u8, puerto: s % 2 == 0, giro: 0, tradicion: (s % 9) as u8 };
+        let c = Contexto { anio: 1726 + (s as u16 * 13) % 105, clase: (s % 4) as u8, esquina: (s % 3) as u8, lugar: (s % 4) as u8, puerto: s % 2 == 0, giro: 0, tradicion: (s % 9) as u8, ..Default::default() };
         let o = obra(p, te, rev, rej, c);
         for (uso, nivel) in [(Uso::Vivienda, 1), (Uso::Vivienda, 2), (Uso::Vivienda, 3), (Uso::Comercio, 1), (Uso::Comercio, 3)] {
             let e = estilo::estilo(&o.contexto, &materiales_obra(&o), uso, nivel, s % 5 == 0, s);
@@ -263,7 +263,7 @@ fn el_origen_de_la_familia_cambia_los_rasgos() {
 
 #[test]
 fn el_contexto_se_guarda_y_las_partidas_viejas_cargan() {
-    let o = obra(Pared::Ladrillo, Techo::Azotea, true, true, Contexto { anio: 1799, clase: 2, esquina: 1, lugar: 0, puerto: true, giro: 3, tradicion: 2 });
+    let o = obra(Pared::Ladrillo, Techo::Azotea, true, true, Contexto { anio: 1799, clase: 2, esquina: 1, lugar: 0, puerto: true, giro: 3, tradicion: 2, ..Default::default() });
     let j = serde_json::to_string(&o).unwrap();
     let back: Obra = serde_json::from_str(&j).unwrap();
     assert_eq!(back, o);

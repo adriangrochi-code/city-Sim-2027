@@ -57,6 +57,8 @@ pub enum MenuAction {
     Save,
     SaveAs(String),
     Resume,
+    /// [mapa del país] Vuelve al juego con el mapa del país abierto.
+    MapaPais,
     Leave(Leave),
     SaveAndLeave(Leave),
     ApplySettings(Settings),
@@ -424,6 +426,11 @@ impl Menu {
                 self.stack.clear();
                 self.status = None;
             }
+            MenuAction::MapaPais => {
+                self.stack.clear();
+                self.status = None;
+                gui.pais.abierto = true;
+            }
             MenuAction::SaveAndLeave(to) => match self.save_to(s, None) {
                 Ok(_) => return self.perform(MenuAction::Leave(to), s, r, gui),
                 Err(e) => self.status = Some((format!("No se pudo guardar: {e}"), true)),
@@ -597,6 +604,10 @@ impl Menu {
                 ui.spacing_mut().item_spacing.y = 7.0;
                 if menu_button(ui, "Volver al juego", None, true).on_hover_text("Atajo: Esc").clicked() {
                     acts.push(MenuAction::Resume);
+                }
+                // [mapa del país]
+                if menu_button(ui, "Mapa del país", None, game.is_some()).on_hover_text("El Uruguay entero: pueblos, caminos, estancias y saladeros · atajo: M").clicked() {
+                    acts.push(MenuAction::MapaPais);
                 }
                 if menu_button(ui, "Guardar", None, game.is_some()).on_hover_text("Atajo: F5").clicked() {
                     acts.push(MenuAction::Save);
