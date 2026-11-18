@@ -569,6 +569,8 @@ impl Menu {
                     acts.push(MenuAction::Leave(Leave::Quit));
                 }
                 self.status_line(ui);
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("Versión {}", crate::version::completa())).small().color(theme::INK_SOFT));
             });
         });
         if let Some(s) = next {

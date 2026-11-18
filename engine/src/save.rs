@@ -110,6 +110,9 @@ pub struct ToolsData {
 pub struct SaveFile {
     pub formato: u32,
     pub juego: String,
+    /// Versión del motor que guardó la partida (ver `version`); vacía en las partidas viejas.
+    #[serde(default)]
+    pub version: String,
     pub nombre: String,
     /// Segundos desde 1970 (UTC) en que se guardó.
     pub guardada: u64,
@@ -152,6 +155,7 @@ pub fn snapshot(game: &Game, cam: [f32; 5], hour: f32, auto: bool) -> SaveFile {
     SaveFile {
         formato: FORMAT,
         juego: GAME_ID.into(),
+        version: crate::version::completa(),
         nombre: game.city_name.clone(),
         guardada: now_secs(),
         autoguardado: auto,

@@ -429,7 +429,7 @@ impl ApplicationHandler for App {
         if self.gpu.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title(if self.menu.is_open() { "City Sim 2027" } else { "Motor de vóxeles" }).with_inner_size(LogicalSize::new(self.opts.size.0, self.opts.size.1));
+        let attrs = Window::default_attributes().with_title(format!("{} · {}", if self.menu.is_open() { "City Sim 2027" } else { "Motor de vóxeles" }, crate::version::completa())).with_inner_size(LogicalSize::new(self.opts.size.0, self.opts.size.1));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {

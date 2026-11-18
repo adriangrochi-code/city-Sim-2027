@@ -95,6 +95,7 @@ pub fn run(o: &Options) -> Result<(), String> {
     println!("Memoria: con las ediciones cargadas {rss_store:.0} MB · con el renderer creado {rss_gpu:.0} MB");
     let q = r.shadow_quality();
     let mut md = String::new();
+    let _ = writeln!(md, "Versión: {}\n", crate::version::completa());
     let _ = writeln!(md, "Adaptador: {} · dibujo {} · Hi-Z {} · {} hilos · {} niveles · MSAA {}× · {}×{} · {} cuadros por vista", r.adapter_name, r.draw_mode.name(), if r.hiz_supported { "disponible" } else { "no disponible" }, o.threads, o.levels, o.msaa, o.size.0, o.size.1, o.frames);
     let _ = writeln!(md, "Sombras: {} cascadas de {}² ({:.0} MB)", q.cascades, q.resolution, q.bytes() as f64 / 1048576.0);
     let _ = writeln!(md, "Escena ciudad: armada en {:.2?} · {} vóxeles editados guardados en todos los niveles · ediciones ≈ {:.1} MB\n", t_scene, edit_voxels, edit_bytes as f64 / 1048576.0);

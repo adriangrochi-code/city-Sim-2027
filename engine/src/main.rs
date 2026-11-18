@@ -15,6 +15,7 @@
 //!   --sin-suavizar (sin el suavizado de los escalones del terreno)
 //!   --draw directo|indirecto|gpu (modo de dibujo), --hiz 0|1 (descarte de lo tapado; por omisión, sí con descarte en GPU)
 
+mod version;
 mod app;
 mod bench;
 mod buildings;
@@ -279,6 +280,11 @@ fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("City Sim 2027 · motor {}", version::completa());
+        return;
+    }
+    println!("City Sim 2027 · motor {}", version::completa());
     let mut args = parse_args();
     let plaza = Vec2::new(13500.0, 16300.0);
     if let Some(dir) = &args.bench {

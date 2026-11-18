@@ -37,6 +37,10 @@ JUGAR:  jugar.bat
   R girar la plaza · Shift trazar libre · Espacio pausa · Esc cancelar /
   cerrar / menú de pausa · F5 guardar · F9 cargar la última partida
 
+VERSIÓN: el menú principal y el título de la ventana dicen la versión (por ejemplo
+  "v0.9.0 (a6f6997, 2026-11-18)"). Al avisar un problema, decí qué versión es. Los informes
+  de medir-fps y medir-tirones y las partidas guardadas también la anotan.
+
 SANDBOX:  sandbox.bat   (recorrer, colocar estructuras, excavar y rellenar)
 
 MEDIR EL RENDIMIENTO:
