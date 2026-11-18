@@ -108,12 +108,21 @@ ritmo natural aunque el día pase rápido.
 | Ciudad del recorrido (1516 vecinos, 335 en la calle, vista a 110 m) | 4362 instancias (antes 1520): 205 KB por cuadro |
 | Multitud de prueba (2500 agentes en grilla de 6 m, los ≈ 1000 de menos de 110 m con detalle) | 88 095 instancias, 4,1 MB, armadas en ~6 ms, subidas en 2,3 ms |
 
-El banco de pruebas (`motor --bench carpeta`) agrega la tabla «Personajes y animales» con la
-misma multitud en las vistas «Ciudad de cerca» y «Calle»: cuadro sin agentes, con solo cajas y
-con micro-vóxeles (ver los números en `docs/sistemas/motor-voxel.md` cuando se corra con GPU).
-En este entorno (render por CPU, lavapipe) los tiempos de cuadro son de 1 a 3 s y varían más que
-la diferencia; la cuenta que importa en GPU es de vértices: 36 por caja, ≈ 3,2 M vértices para
-la multitud de prueba completa (el terreno de la misma vista son 3,5 M triángulos).
+El banco de pruebas (`motor --bench carpeta`) agrega la tabla «Personajes y animales»: la misma
+multitud en las vistas «Ciudad de cerca» y «Calle», sin agentes, con solo cajas y con los
+micro-vóxeles cerca. Medido en este entorno, **render por CPU** (llvmpipe, 1280×720, MSAA 4×,
+mínimo de 3 cuadros; sin GPU real todavía):
+
+| Vista | Sin agentes | Solo cajas (17 750 instancias, 832 KB) | Con micro-vóxeles (88 095 instancias, 4,1 MB) |
+|---|---|---|---|
+| Ciudad de cerca (150 m) | 1096 ms | 1196 ms (armadas en 1,4 ms) | 1844 ms (armadas en 5,6 ms) |
+| Calle (28 m) | 880 ms | 883 ms (1,9 ms) | 1392 ms (2,7 ms) |
+
+En llvmpipe todo el costo es de rasterizar (los vértices y los fragmentos van por la CPU): la
+multitud de prueba, con ~1000 agentes de detalle a menos de 110 m (≈ 3,2 M vértices), es el peor
+caso, muy por encima de una calle real del recorrido (4362 instancias: ahí el cuadro con y sin
+vecinos mide lo mismo dentro del ruido, 1260 / 1264 ms). En GPU los vértices son lo barato; si
+hiciera falta, el radio de detalle (`dibujo::CERCA`) puede bajar según la cantidad de agentes.
 
 ## Capturas
 
