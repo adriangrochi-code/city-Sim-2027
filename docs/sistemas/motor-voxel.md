@@ -111,8 +111,10 @@ y la distancia que cubre:
 - **Vóxeles**: color del material con variación por vóxel, bordes marcados que se
   desvanecen con la distancia, oclusión ambiental, luz del sol y del cielo. Las ventanas se
   iluminan de noche con luz de vela.
-- **Agua**: plano translúcido al nivel del mar, color "león", con reflejo del cielo
-  (Fresnel) y brillo del sol.
+- **Agua**: en vóxeles (§18): el río, la bahía y los arroyos llenan celdas de la grilla, con
+  color "león", reflejo del cielo (Fresnel), brillo del sol por celda y la profundidad sacada
+  del fondo de cada columna. El plano de 400 km solo queda como respaldo más allá del último
+  anillo.
 - **Niebla de distancia** hacia el color del horizonte, más tenue cuanto más se aleja la cámara.
 - **Fin del mundo dibujado** (`Renderer::reach`, `reach_fog` en voxel.wgsl y water.wgsl): desde el
   60 % del radio que cubre seguro el último anillo, el terreno y el agua se funden con la niebla,
@@ -177,8 +179,8 @@ este orden:
   guardarlas directamente en chunks dispersos de ediciones.
 - **Generación incremental y en segundo plano**: hecha (§10). Queda pendiente quitar las
   columnas viejas antes, sin esperar a que el *streamer* quede ocioso.
-- **Árboles y agua**: el agua es un plano. Los arroyos sobre el nivel del mar, las mareas y
-  las sudestadas necesitarán un nivel de agua por zona.
+- **Árboles y agua**: resuelto en §18 (agua en vóxeles con nivel por arroyo y marea en el
+  shader).
 - **Estética**: la variación de tono y los bordes de los vóxeles deben ajustarse con arte
   real (paleta definitiva, materiales con más textura: adoquín, ladrillo visto, paja).
 
@@ -1142,3 +1144,116 @@ verde, azul, amarilla).
 - Escalones del terreno de 0,25 m: con texels finos y sesgo chico se veían líneas punteadas de
   sombra en los bordes; lo resuelve la consulta corrida hacia el sol en el terreno
   (`voxel.wgsl`, integrada después). Vigilarlo con sol muy bajo.
+
+## 18. Agua, terreno y calles en vóxeles
+
+Pedido: que el suelo, el agua y todo lo demás se vea hecho de vóxeles, como un juego de
+vóxeles, sin volver a los problemas ya resueltos (rayas a lo lejos, agua sobre tierra seca,
+titileo).
+
+### Agua en vóxeles (`engine/src/agua.rs`, `stream.rs`, `water.wgsl`)
+
+- Cada columna de vóxeles de un chunk puede tener agua sobre su suelo. Se calcula en
+  `stream::build_column` junto con el terreno (copia con borde de 34 × 34 columnas) y se
+  malla aparte (`agua::mallar`): solo las caras que dan al aire, las de arriba unidas con
+  *greedy meshing* (el río abierto queda en caras de 32 × 32 vóxeles). Las caras usan el
+  formato compacto del terreno (`mesher::Quad`, 20 bytes): el material lleva el tipo de agua,
+  `smooth` la corriente (mm/s) y el fondo (m). Van en el mismo bloque del megabúfer que la
+  columna, después de las del terreno, y se dibujan en el pase transparente con un solo
+  dibujo indirecto múltiple (un tramo por columna con agua, de lejos a cerca).
+- **Río y bahía: nivel variable sin rehacer mallas.** Toda columna cuyo suelo quede por
+  debajo del nivel más alto posible (`NIVEL_MAX` = 3,5 m) y que esté en el río o a menos de
+  400 m de él (`sea_distance`) lleva una cara de arriba "al ras de su suelo". El vertex
+  shader la sube al nivel de este momento (marea + viento + caudal, `extra.y`) redondeado a
+  0,25 m en **todos** los niveles de detalle (no hay escalón entre niveles) y la esconde si el
+  suelo de la columna queda arriba. Se eligió esto y no re-mallar las columnas de la costa
+  cuando el nivel cruza un vóxel: con la marea moviéndose todo el tiempo serían cientos de
+  columnas por cambio en cada nivel, y en el shader cuesta una comparación por vértice. Las
+  caras se unen por fondo; por debajo de 4 m bajo el nivel mínimo el fondo se recorta
+  (`HONDO`), así el río abierto sigue siendo pocas caras grandes. Las hondonadas a más de
+  400 m del río no se inundan con la marea (antes, el plano tapaba toda la tierra baja).
+- **Arroyos: nivel fijo por tramo.** `TerrainGen::stream_water` (reemplaza a las cintas
+  `stream_ribbons`) da una muestra cada 5 m de cada cauce con su nivel (un tercio de la
+  profundidad del cauce bajo las orillas), su alcance y su corriente; el nivel no sube aguas
+  abajo (promedio de "nunca más alto que arriba" y "nunca más bajo que abajo", test).
+  `agua::Arroyos` las busca en una grilla de 32 m. Las columnas del cauce con el suelo debajo
+  se llenan hasta ese nivel redondeado al vóxel del nivel de detalle; donde el agua da a una
+  orilla o a un tramo más bajo se mallan los costados (cascadas, con espuma clara que cae).
+  Donde el cauce baja al nivel del río, manda el río.
+- **Sombreado (`water.wgsl`, `vs_quad`):** celdas del tamaño del vóxel (o más grandes si
+  medirían menos de ~6 píxeles), cada una con su tinte, su inclinación para el brillo del sol
+  y un brillo que sube y baja (la ola es de luz, no de geometría), borde de celda de cerca,
+  dibujo que corre con la corriente en los arroyos, y la transparencia según la profundidad
+  (en la orilla se ve la arena; lejos y en la niebla, opaca: no se notan los escalones del
+  fondo entre niveles).
+- **Niveles gruesos (vóxel de 64 m o más, malla bajada):** el agua no pasa de 2 m (la tierra
+  firme queda a 3 m, ver `top_from_height_far`), así nunca tapa tierra. Los arroyos no se
+  generan ahí.
+- **Plano de respaldo:** el de 400 km sigue, pero el shader lo descarta dentro del 97 % del
+  radio que cubre el último anillo: solo aparece donde ya todo es niebla (sin costura).
+
+Tests (`agua::tests`): el agua del río nunca queda sobre tierra seca en ningún nivel (11
+niveles, 5 costas, 5 niveles del río de −1,3 a 2,4 m: con el agua visible, la tierra está por
+debajo del nivel más medio vóxel; un vóxel bajo el nivel medio, donde `top_from_height` baja
+el suelo); hay agua visible en la bahía y el río en todos los niveles a la misma altura; 9 de
+12 arroyos tienen agua en el nivel 0 y llevan su corriente; la marea cambia lo que se moja en
+la playa de Pocitos y sube el agua de a 0,25 m; el nivel de los arroyos no sube aguas abajo.
+
+### Terreno con aspecto de vóxeles (`voxel.wgsl`, Opciones)
+
+Nueva opción **Aspecto del terreno: Vóxeles / Suave** (`Settings::terreno_voxeles`, por
+omisión vóxeles; `extra.x` = 2 / 1). En "vóxeles", de cerca (un vóxel de más de ~10 píxeles)
+cada vóxel del terreno se ilumina con la normal de su cara, con un tinte propio, su borde
+oscuro y la oclusión de sus esquinas: se ven los escalones. Entre 10 y 3 píxeles por vóxel
+pasa a la luz de la ladera (la normal suave del mallado), así que a lo lejos no vuelven las
+curvas de nivel. `MOTOR_TERRENO=suave` lo cambia en las capturas.
+
+### Calles en vóxeles con diseño de época (`city/voxelize.rs`)
+
+Cada tipo de calle tiene su diseño en vóxeles de 0,25 m en una tabla (`Diseno`, `diseno()`):
+franjas desde el borde (altura y material), material de la calzada, huellas de carreta y
+borde irregular. Un tipo nuevo (el bulevar del ensanche) agrega su fila.
+
+- **Calle empedrada:** vereda de laja un vóxel más alta (1,25 m), cordón de piedra, cuneta de
+  desagüe un vóxel más baja y la calzada de empedrado; el shader dibuja las piedras de
+  25 × 12,5 cm en tresbolillo con su tono y la junta, y lajas de 50 cm en veredas y plaza.
+- **Camino de tierra:** dos huellas de carreta por carril hundidas un vóxel (barro, y charcos
+  que reflejan el cielo en tramos de unos 2 m), pasto entre las huellas de cada carril, el
+  borde comido por el pasto y terrones en la tierra.
+- **Cruces y esquinas:** cada vóxel toma el diseño de la calle que lo tiene más adentro
+  (`RoadNetwork::deepest`): la bocacalle queda con calzada y la vereda da la vuelta a la
+  esquina, sin dientes (test). La altura sigue siendo la de `road_height` (escalones de un
+  vóxel en las pendientes) y el pasto (flora) sigue sin crecer en la calzada.
+- **Puentes:** rampa de un vóxel por metro desde la calle hasta el tablero (antes, un
+  escalón de hasta 2,5 m), con terraplén bajo el tablero sobre la orilla; los vecinos y
+  carros suben por la misma rampa (`agentes::dibujo::perfil`).
+
+### Medidas (`motor --bench`, 1280×720, MSAA 4×, lavapipe)
+
+Con otros dos procesos del motor corriendo a la vez en la misma máquina: los tiempos son
+ruidosos; triángulos, caras y dibujos son exactos.
+
+| Vista | Triángulos antes → después | Columnas con agua dibujadas |
+|---|---|---|
+| Ciudad de cerca | 1,58 M → 1,60 M | 164 |
+| Península | 1,06 M → 1,08 M | 641 |
+| Lejos (9 km) | 0,51 M → 0,52 M | 1154 |
+| Calle | 1,61 M → 1,63 M | 803 |
+| Cerro rasante | 4,14 M → 4,16 M | 925 |
+
+Las columnas con agua se dibujaban primero con un dibujo cada una (hasta 1155 por cuadro);
+ahora van en un solo dibujo indirecto múltiple (`args_agua`), con un dibujo por columna solo
+en el modo directo (adaptadores sin dibujo indirecto).
+
+El agua suma 1–2 % de caras (el río abierto son caras de 32 × 32 vóxeles; casi todo lo que
+se agrega es la franja de la costa y los arroyos). Las cintas de los arroyos y la mitad de la
+superficie del plano dejan de dibujarse.
+
+### Pendiente
+
+- Crecientes de los arroyos (`Flood::Arroyos`) en el agua dibujada: hoy el nivel de los
+  arroyos es fijo; subirlo con el temporal es re-mallar las columnas de los cauces.
+- Lagunas sin cauce (`BIO_LAGUNA`) siguen como material `STREAM` del terreno.
+- Puentes al final de un tramo: la rampa no sigue al tramo vecino.
+- Medir en GPU real.
+

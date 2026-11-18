@@ -238,6 +238,23 @@ impl RoadNetwork {
         best
     }
 
+    /// [agua en vóxeles] La calzada que tiene al punto más adentro: cuánto adentro de su borde
+    /// (m), su tipo y la distancia a su eje. En un cruce manda la calle más "honda" en cada
+    /// vóxel, así las esquinas y las bocacalles quedan resueltas sin dientes (ver
+    /// `voxelize::perfil`). Empates: el tramo de número menor.
+    pub fn deepest(&self, p: Vec2, maxd: f32) -> Option<(f32, RoadKind, f32)> {
+        let mut best: Option<(f32, u32, RoadKind, f32)> = None;
+        for (eid, si) in self.segments_near(p, maxd) {
+            let e = &self.edges[&eid];
+            let d = p.distance(closest_on_segment(p, e.pts[si], e.pts[si + 1]));
+            let inset = e.kind.width() * 0.5 - d;
+            if inset >= 0.0 && best.is_none_or(|b| inset > b.0 || (inset == b.0 && eid < b.1)) {
+                best = Some((inset, eid, e.kind, d));
+            }
+        }
+        best.map(|b| (b.0, b.2, b.3))
+    }
+
     /// Distancia del punto al borde de la calzada más cercana (negativa si está encima).
     pub fn clearance(&self, p: Vec2, maxd: f32) -> f32 {
         let mut best = f32::INFINITY;

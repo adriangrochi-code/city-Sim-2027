@@ -58,16 +58,126 @@ fn set_column(e: &mut Edits, x: i32, z: i32, g: i32, top: i32, mat: Mat) {
     e.set(IVec3::new(x, top, z), mat);
 }
 
-/// Deshace `set_column` (vuelve a la altura natural, con pasto arriba).
+/// Deshace `set_column` (vuelve a la altura natural, con pasto arriba). La obra pudo dejar la
+/// superficie entre `top − 1` y `top + 1` (cunetas, veredas: ver `perfil`), o más alta en las
+/// rampas de los puentes (`top` ya las incluye).
 fn restore_column(e: &mut Edits, x: i32, z: i32, g: i32, top: i32) {
     e.ground.insert(IVec2::new(x, z), g);
-    for y in (g + 1)..=top.max(g) {
+    for y in (g + 1)..=(top + 1).max(g) {
         e.set(IVec3::new(x, y, z), AIR);
     }
-    for y in (top + 1)..g {
+    for y in top..g {
         e.set(IVec3::new(x, y, z), DIRT);
     }
     e.set(IVec3::new(x, g, z), GRASS);
+}
+
+// [agua en vóxeles] Diseño de las calles en vóxeles de 0,25 m --------------------------------
+
+/// Una franja del perfil de una calle, desde el borde de la calzada hacia el eje.
+#[derive(Clone, Copy, Debug)]
+pub struct Franja {
+    /// Hasta qué distancia del borde (m) llega.
+    pub hasta: f32,
+    /// Altura respecto de la calzada (vóxeles): veredas arriba, cunetas abajo.
+    pub dy: i32,
+    pub mat: Mat,
+}
+
+/// Diseño en vóxeles de un tipo de calle. Es una tabla: un tipo nuevo (el bulevar del
+/// ensanche, por ejemplo) agrega su fila en [`diseno`].
+#[derive(Debug)]
+pub struct Diseno {
+    /// Franjas desde el borde hacia el eje (veredas, cordón, cuneta…).
+    pub franjas: &'static [Franja],
+    /// Material de la calzada (el resto, hasta el eje).
+    pub calzada: Mat,
+    /// Huellas de carreta, de a pares (una por rueda): distancia al eje (m). Se hunden un
+    /// vóxel (con charcos en algunos tramos) y entre las dos de cada par crece pasto.
+    pub huellas: &'static [f32],
+    /// Borde irregular: hasta cuántos metros adentro de la calzada llega el pasto en el borde.
+    pub borde_irregular: f32,
+}
+
+/// Calle empedrada (12 varas): vereda de laja algo más alta que la calzada, cordón de piedra,
+/// cuneta de desagüe al costado y la calzada de piedras en tresbolillo (el dibujo de las
+/// piedras lo hace el shader, por material).
+pub const EMPEDRADA: Diseno = Diseno {
+    franjas: &[Franja { hasta: 1.25, dy: 1, mat: PLAZA }, Franja { hasta: 1.5, dy: 1, mat: STONE }, Franja { hasta: 2.0, dy: -1, mat: STONE_DARK }],
+    calzada: COBBLE,
+    huellas: &[],
+    borde_irregular: 0.0,
+};
+
+/// Camino de tierra (10 varas): dos huellas de carreta por carril (trocha de 1,6 m), pasto en
+/// el medio de cada par, charcos en lo hundido y el borde comido por el pasto.
+pub const TIERRA: Diseno = Diseno { franjas: &[], calzada: DIRT_ROAD, huellas: &[1.0, 2.6], borde_irregular: 0.9 };
+
+pub fn diseno(kind: RoadKind) -> &'static Diseno {
+    match kind {
+        RoadKind::Stone => &EMPEDRADA,
+        RoadKind::Dirt => &TIERRA,
+    }
+}
+
+fn azar(x: i32, z: i32, sal: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (z as u32).wrapping_mul(0xd816_3841) ^ sal.wrapping_mul(0x9e37_79b9);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5bd1_e995);
+    h ^= h >> 15;
+    (h & 0xffff) as f32 / 65536.0
+}
+
+/// Altura (respecto de la calzada, en vóxeles) y material de un vóxel de calle según su tipo,
+/// cuánto adentro de la calzada está (`inset`, m desde el borde) y su distancia al eje.
+pub fn perfil(kind: RoadKind, inset: f32, eje: f32, c: IVec2) -> (i32, Mat) {
+    let dz = diseno(kind);
+    // Borde irregular: manchas de 1 m (de a 4 vóxeles) con algún vóxel suelto.
+    if dz.borde_irregular > 0.0 {
+        let k = 0.6 * azar(c.x >> 2, c.y >> 2, 11) + 0.4 * azar(c.x, c.y, 12);
+        if inset < dz.borde_irregular * k {
+            return (0, if azar(c.x, c.y, 13) < 0.3 { GRASS_DRY } else { GRASS });
+        }
+    }
+    let mut desde = 0.0;
+    for f in dz.franjas {
+        if inset < f.hasta && inset >= desde {
+            return (f.dy, f.mat);
+        }
+        desde = f.hasta;
+    }
+    for par in dz.huellas.chunks(2) {
+        for &h in par {
+            if (eje - h).abs() < 0.2 {
+                // Charcos: tramos de unos 2 m (de a 8 vóxeles) en las huellas.
+                let charco = azar(c.x >> 3, c.y >> 3, 14) < 0.2;
+                return (-1, if charco { STREAM } else { MUD });
+            }
+        }
+        if par.len() == 2 {
+            let medio = 0.5 * (par[0] + par[1]);
+            if (eje - medio).abs() < 0.45 && azar(c.x, c.y, 15) < 0.55 {
+                return (0, GRASS);
+            }
+        }
+    }
+    let m = if dz.calzada == DIRT_ROAD && azar(c.x, c.y, 16) < 0.12 { DIRT } else { dz.calzada };
+    (0, m)
+}
+
+/// Metros de rampa por cada vóxel (0,25 m) que sube la calle hacia el tablero de un puente.
+const RAMPA_M: f32 = 1.0;
+
+/// Altura mínima de la calle (índice de vóxel) a `s` metros a lo largo del tramo, por las rampas
+/// de sus puentes: sube de a un vóxel cada [`RAMPA_M`] hasta el tablero (antes, el tablero
+/// arrancaba con un escalón de hasta 2,5 m).
+pub(crate) fn rampa(spans: &[(f32, f32)], decks: &[i32], s: f32) -> i32 {
+    let mut out = i32::MIN;
+    for (&(a, b), &deck) in spans.iter().zip(decks) {
+        let dist = if s < a { a - s } else if s > b { s - b } else { 0.0 };
+        out = out.max(deck - (dist / RAMPA_M).floor() as i32);
+    }
+    out
 }
 
 /// Columnas cercanas a un tramo con su distancia al eje y el punto del eje más cercano.
@@ -98,9 +208,9 @@ fn edge_columns(e: &Edge, reach: f32) -> HashMap<IVec2, (f32, Vec2, f32)> {
 }
 
 /// Altura (índice de vóxel) de la superficie en una columna de un tramo: calzada o banquina.
-fn road_top(t: &TerrainGen, kind: RoadKind, d: f32, p: Vec2, g: i32) -> Option<i32> {
+fn road_top(t: &TerrainGen, kind: RoadKind, d: f32, p: Vec2, g: i32, min_top: i32) -> Option<i32> {
     let hw = kind.width() * 0.5;
-    let yr = top_index(road_height(t, p));
+    let yr = top_index(road_height(t, p)).max(min_top);
     if d <= hw {
         Some(yr)
     } else if d <= hw + SHOULDER {
@@ -198,22 +308,20 @@ pub fn road_edits(t: &TerrainGen, net: &RoadNetwork, eid: u32, plaza: PlazaSquar
     let decks: Vec<i32> = spans.iter().map(|&sp| deck_top(t, edge, sp)).collect();
     for (c, (d, p, s)) in edge_columns(edge, hw + SHOULDER) {
         if let Some(k) = spans.iter().position(|&(a, b)| s >= a && s <= b) {
-            bridge_column(e, edge.kind, c, d, hw, s - spans[k].0, spans[k].1 - spans[k].0, decks[k], top_at(t, c.x, c.y), false);
+            bridge_column(t, e, edge.kind, c, d, hw, s - spans[k].0, spans[k].1 - spans[k].0, decks[k], top_at(t, c.x, c.y), false);
             continue;
         }
         let q = vox_center(c.x, c.y);
         let g = top_at(t, c.x, c.y);
-        let Some(top) = road_top(t, edge.kind, d, p, g) else { continue };
+        let Some(top) = road_top(t, edge.kind, d, p, g, rampa(&spans, &decks, s)) else { continue };
         // ¿Está dentro de la calzada de otra calle (por ejemplo, en un cruce)?
         let inside_any = net.clearance(q, 20.0);
         if d <= hw {
-            let mat = match edge.kind {
-                RoadKind::Dirt => DIRT_ROAD,
-                // Vereda de piedra en el metro y medio de afuera, salvo dentro de otra calzada.
-                RoadKind::Stone if d > hw - 1.5 && inside_any >= -1.5 => PLAZA,
-                RoadKind::Stone => COBBLE,
-            };
-            set_column(e, c.x, c.y, g, top, mat);
+            // [agua en vóxeles] El diseño de la calle que tiene al vóxel más adentro (en un cruce,
+            // la que pasa por el medio; en una esquina, la vereda que da la vuelta).
+            let (inset, kind, eje) = net.deepest(q, 20.0).unwrap_or((hw - d, edge.kind, d));
+            let (dy, mat) = perfil(kind, inset, eje, c);
+            set_column(e, c.x, c.y, g, top + dy, mat);
         } else if inside_any > 0.0 && !on_plaza(q, plaza) {
             set_column(e, c.x, c.y, g, top, GRASS);
         }
@@ -223,9 +331,18 @@ pub fn road_edits(t: &TerrainGen, net: &RoadNetwork, eid: u32, plaza: PlazaSquar
 /// Una columna de puente: tablero de 1 m, pretiles (0,5 m de madera, 1 m de piedra) y, cada
 /// 8 m, un pilar hasta el fondo. Con `remove`, borra lo mismo (al demoler).
 #[allow(clippy::too_many_arguments)]
-fn bridge_column(e: &mut Edits, kind: RoadKind, c: IVec2, d: f32, hw: f32, along: f32, span: f32, deck: i32, ground: i32, remove: bool) {
+fn bridge_column(t: &TerrainGen, e: &mut Edits, kind: RoadKind, c: IVec2, d: f32, hw: f32, along: f32, span: f32, deck: i32, ground: i32, remove: bool) {
     if d > hw {
         return;
+    }
+    // [agua en vóxeles] Estribos: sobre tierra firme, el tablero se apoya en un terraplén (sin
+    // hueco debajo, que se veía como un escalón colgado).
+    let q = vox_center(c.x, c.y);
+    if !t.is_water(q.x, q.y) {
+        let thick = n_vox(1.0);
+        for y in (ground + 1)..=(deck - thick) {
+            e.set(IVec3::new(c.x, y, c.y), if remove { AIR } else { DIRT });
+        }
     }
     let (deck_m, rail_m, pier_m) = match kind {
         RoadKind::Stone => (STONE, STONE, STONE_DARK),
@@ -258,14 +375,14 @@ pub fn road_restore(t: &TerrainGen, edge: &Edge, plaza: PlazaSquare, e: &mut Edi
     let decks: Vec<i32> = spans.iter().map(|&sp| deck_top(t, edge, sp)).collect();
     for (c, (d, p, s)) in edge_columns(edge, hw + SHOULDER) {
         if let Some(k) = spans.iter().position(|&(a, b)| s >= a && s <= b) {
-            bridge_column(e, edge.kind, c, d, hw, s - spans[k].0, spans[k].1 - spans[k].0, decks[k], top_at(t, c.x, c.y), true);
+            bridge_column(t, e, edge.kind, c, d, hw, s - spans[k].0, spans[k].1 - spans[k].0, decks[k], top_at(t, c.x, c.y), true);
             continue;
         }
         let g = top_at(t, c.x, c.y);
         if on_plaza(vox_center(c.x, c.y), plaza) {
             continue;
         }
-        if let Some(top) = road_top(t, edge.kind, d, p, g) {
+        if let Some(top) = road_top(t, edge.kind, d, p, g, rampa(&spans, &decks, s)) {
             restore_column(e, c.x, c.y, g, top);
         }
     }
@@ -474,9 +591,40 @@ mod tests {
         let mid = IVec2::new(((p.x + 30.0) / vs) as i32, (p.y / vs) as i32);
         let top = (0..400).rev().find(|&y| e.voxels.get(&IVec3::new(mid.x, y, mid.y)).is_some_and(|&m| m != AIR)).unwrap();
         assert_eq!(e.voxels[&IVec3::new(mid.x, top, mid.y)], COBBLE);
-        // Vereda en el borde (a casi 4 m del eje) y calzada a la misma altura que en el eje (la
-        // calle es plana de lado a lado).
-        let edge = IVec2::new(mid.x, mid.y + (3.8 / vs) as i32);
-        assert_eq!(e.voxels.get(&IVec3::new(edge.x, top, edge.y)).copied(), Some(PLAZA));
+        // [agua en vóxeles] Vereda de laja un vóxel más alta en el borde (a 4,6 m del eje),
+        // cordón de piedra, cuneta un vóxel más baja y la calzada a la misma altura que en el eje.
+        let at = |d: f32| IVec2::new(mid.x, mid.y + (d / vs) as i32);
+        let vereda = at(4.6);
+        assert_eq!(e.voxels.get(&IVec3::new(vereda.x, top + 1, vereda.y)).copied(), Some(PLAZA));
+        let cordon = at(3.85);
+        assert_eq!(e.voxels.get(&IVec3::new(cordon.x, top + 1, cordon.y)).copied(), Some(STONE));
+        let cuneta = at(3.5);
+        assert_eq!(e.voxels.get(&IVec3::new(cuneta.x, top - 1, cuneta.y)).copied(), Some(STONE_DARK));
+        assert_eq!(e.voxels.get(&IVec3::new(cuneta.x, top, cuneta.y)).copied(), Some(AIR));
+        let calzada = at(2.0);
+        assert_eq!(e.voxels.get(&IVec3::new(calzada.x, top, calzada.y)).copied(), Some(COBBLE));
+    }
+
+    /// [agua en vóxeles] Camino de tierra: huellas hundidas un vóxel, pasto entre ellas y el
+    /// borde irregular; en un cruce de dos calles empedradas, la bocacalle no tiene vereda.
+    #[test]
+    fn el_camino_de_tierra_tiene_huellas_y_el_cruce_no_tiene_dientes() {
+        assert_eq!(perfil(RoadKind::Dirt, 3.35, 1.0, IVec2::new(7, 9)).0, -1);
+        assert_eq!(perfil(RoadKind::Dirt, 1.75, 2.6, IVec2::new(7, 9)).0, -1);
+        assert!(matches!(perfil(RoadKind::Dirt, 3.0, 1.35, IVec2::new(7, 9)), (0, DIRT_ROAD) | (0, DIRT)));
+        let pastos = (0..200).filter(|&k| perfil(RoadKind::Dirt, 2.55, 1.8, IVec2::new(k, 3)).1 == GRASS).count();
+        assert!(pastos > 60 && pastos < 160, "{pastos} vóxeles de pasto entre las huellas");
+        let bordes = (0..200).filter(|&k| perfil(RoadKind::Dirt, 0.1, 4.25, IVec2::new(k, 3)).1 != DIRT_ROAD).count();
+        assert!(bordes > 20, "el borde del camino no es irregular ({bordes})");
+        // Cruce en T de dos empedradas: en la boca de la calle lateral, la vereda de la calle
+        // principal se corta (manda la calzada de la que llega); en la esquina, vereda.
+        let mut net = RoadNetwork::default();
+        let p = Vec2::new(13500.0, 16100.0);
+        net.add_road(&super::super::roads::line(p, p + Vec2::new(80.0, 0.0)), RoadKind::Stone);
+        net.add_road(&super::super::roads::line(p + Vec2::new(40.0, 0.0), p + Vec2::new(40.0, 60.0)), RoadKind::Stone);
+        let (inset, kind, eje) = net.deepest(p + Vec2::new(40.0, 4.8), 20.0).unwrap();
+        assert_eq!(perfil(kind, inset, eje, IVec2::ZERO), (0, COBBLE), "la bocacalle quedó con vereda");
+        let (inset, kind, eje) = net.deepest(p + Vec2::new(34.0, 4.8), 20.0).unwrap();
+        assert_eq!(perfil(kind, inset, eje, IVec2::ZERO), (1, PLAZA));
     }
 }

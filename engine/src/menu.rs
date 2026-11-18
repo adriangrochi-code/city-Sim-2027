@@ -836,6 +836,16 @@ impl Menu {
                     }
                 });
                 ui.end_row();
+                // [agua en vóxeles]
+                ui.label("Aspecto del terreno");
+                ui.horizontal(|ui| {
+                    for (v, name, tip) in [(true, "Vóxeles", "Los escalones de los vóxeles se ven de cerca, con luz por cara"), (false, "Suave", "Las laderas se iluminan con su pendiente, sin escalones")] {
+                        if ui.selectable_label(d.terreno_voxeles == v, name).on_hover_text(tip).clicked() {
+                            d.terreno_voxeles = v;
+                        }
+                    }
+                });
+                ui.end_row();
                 ui.label("Autoguardado");
                 ui.horizontal(|ui| {
                     for (v, name) in [(0, "Nunca"), (6, "6 meses"), (12, "12 meses"), (24, "24 meses")] {

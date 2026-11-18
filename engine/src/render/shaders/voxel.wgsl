@@ -10,7 +10,7 @@ struct Globals {
     sky_top: vec4<f32>,
     sky_horizon: vec4<f32>,
     params: vec4<f32>,
-    extra: vec4<f32>, // x: suavizado de escalones del terreno (1 = activo)
+    extra: vec4<f32>, // x: escalones del terreno (0 = sin suavizar, 1 = suave, 2 = vóxeles)
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 // Mapa de sombras en cascadas y `shadow()`: sombras.wgsl (se antepone a este archivo).
@@ -301,7 +301,14 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
             ln = normalize(mix(normalize(n * 0.15 + ln), ln, far));
         }
     }
-    albedo *= 1.0 - select(0.18, 0.05, terr) * line;
+    // [agua en vóxeles] Aspecto "vóxeles" (extra.x = 2): de cerca (vóxel de más de ~10 píxeles)
+    // cada vóxel del terreno tiene la luz de su cara, su tinte, su borde y la oclusión de sus
+    // esquinas, como un juego de vóxeles; al alejarse (3 a 10 píxeles) pasa a la luz de la
+    // ladera, así los escalones no forman curvas de nivel a lo lejos.
+    let vox_look = select(0.0, 1.0 - smoothstep(0.1, 0.3, fw), terr && g.extra.x > 1.5);
+    ln = normalize(mix(ln, n, vox_look));
+    albedo *= mix(1.0, 0.93 + 0.14 * hash3(cell + vec3(5.0, 11.0, 3.0)), vox_look);
+    albedo *= 1.0 - mix(select(0.18, 0.05, terr), 0.22, vox_look) * line;
     // Monte visto de lejos: en los niveles sin árboles (vóxel de más de 4 m) el suelo del
     // monte toma el color de las copas, y a media distancia se mezcla con él (desde lejos,
     // entre árbol y árbol se ven más copas que hojarasca).
@@ -417,10 +424,26 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
         albedo *= mix(1.0, 0.9 + 0.12 * (c - 2.0 * floor(c * 0.5)), near);
     }
 
+    // [agua en vóxeles] Calles en vóxeles (ver `voxelize::perfil`): piedras del empedrado en
+    // tresbolillo (25 × 12,5 cm, cada una con su tono y la junta oscura), lajas de 50 cm en las
+    // veredas y la plaza, y la tierra de los caminos con terrones.
+    if (n.y > 0.5 && (mat == 12u || mat == 17u)) {
+        let k = select(vec2(4.0, 8.0), vec2(2.0, 2.0), mat == 17u);
+        let q = v.world.xz * k;
+        let row = floor(q.y);
+        let x = q.x + 0.5 * (row - 2.0 * floor(row * 0.5));
+        let f = fract(vec2(x, q.y));
+        let j = min(min(f.x, 1.0 - f.x) * k.y / k.x, min(f.y, 1.0 - f.y));
+        let tone = select(0.78 + 0.4, 0.9 + 0.18, mat == 17u) - select(0.4, 0.18, mat == 17u) * hash3(vec3(floor(x), row, 7.0));
+        albedo *= mix(1.0, tone * (1.0 - 0.45 * (1.0 - smoothstep(0.0, 0.12, j))), near);
+    } else if (mat == 13u) {
+        albedo *= mix(1.0, 0.86 + 0.28 * hash3(floor(v.world * 8.0)), near * 0.7);
+    }
+
     // De lejos, el terreno no se oscurece en los escalones: si no, cada escalón dibuja una
     // curva de nivel y la ladera se ve rayada.
     let far_t = smoothstep(0.08, 0.35, fw);
-    let ao_min = select(0.42, mix(0.9, 1.0, far_t), terr);
+    let ao_min = select(0.42, mix(mix(0.9, 1.0, far_t), 0.5, vox_look), terr);
     let ao = mix(ao_min, 1.0, clamp(v.ao / 3.0, 0.0, 1.0));
     let ndl = max(dot(ln, g.sun_dir.xyz), 0.0);
     // Las caras que no miran al sol no reciben su luz: no hace falta consultar la sombra

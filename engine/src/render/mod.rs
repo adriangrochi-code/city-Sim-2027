@@ -192,6 +192,9 @@ struct Batch {
     /// Dónde empieza cada grupo de caras (por dirección), relativo a `start`.
     groups: [u32; 7],
     quads: u32,
+    /// [agua en vóxeles] Caras del agua: van en el bloque después de las del terreno (desde
+    /// `groups[6]`), y se dibujan aparte, en el pase del agua.
+    water: u32,
     lod: u32,
     /// Posición de esta columna en las tablas de la GPU (origen y descarte).
     slot: u32,
@@ -319,6 +322,8 @@ pub struct Renderer {
     shadow_pipe: wgpu::RenderPipeline,
     sky_pipe: wgpu::RenderPipeline,
     water_pipe: wgpu::RenderPipeline,
+    /// [agua en vóxeles] Caras del agua de las columnas (mismo formato que las del terreno).
+    water_quad_pipe: wgpu::RenderPipeline,
     overlay_pipe: wgpu::RenderPipeline,
     /// Flora baja en micro-vóxeles: piezas de cada columna, y el búfer de instancias que se
     /// rearma (perezoso) cuando cambian.
@@ -335,7 +340,6 @@ pub struct Renderer {
     agent_key: u64,
     water: wgpu::Buffer,
     /// Agua de los arroyos (cintas sobre el cauce), si el mapa las tiene.
-    streams: Option<wgpu::Buffer>,
     origins: wgpu::Buffer,
     shadow_vox_bg: wgpu::BindGroup,
     /// Megabúfer con las caras de todas las columnas y su asignador por bloques.
@@ -350,6 +354,8 @@ pub struct Renderer {
     args_main2: wgpu::Buffer,
     args_shadow: Vec<wgpu::Buffer>,
     args_cpu: wgpu::Buffer,
+    /// [agua en vóxeles] Un dibujo por columna con agua, en un solo dibujo indirecto múltiple.
+    args_agua: wgpu::Buffer,
     cull_pipe: Option<wgpu::ComputePipeline>,
     cull_bgl: wgpu::BindGroupLayout,
     cull_params_main: wgpu::Buffer,
@@ -392,6 +398,9 @@ pub struct Renderer {
     pub adapter_name: String,
     /// Suaviza el sombreado de los escalones del terreno (evita las líneas oscuras de lejos).
     pub smooth_terrain: bool,
+    /// [agua en vóxeles] Aspecto del terreno en vóxeles: de cerca, luz por cara, bordes y
+    /// oclusión de cada vóxel; de lejos, igual que suave (sin curvas de nivel).
+    pub voxel_terrain: bool,
     /// Nivel del río (m sobre el nivel medio): mareas, sudestadas, bajantes.
     pub water_level: f32,
     /// [entorno amplio] Hasta dónde llega el terreno dibujado: centro de los anillos de detalle
@@ -776,6 +785,7 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![0 => Uint32, 1 => Uint32, 2 => Uint32x2, 3 => Uint32],
         };
+        let quad_layout_agua = quad_layout.clone();
         let ms = wgpu::MultisampleState { count: msaa, mask: !0, alpha_to_coverage_enabled: false };
         let reverse_depth = |write: bool, compare| wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
@@ -842,6 +852,18 @@ impl Renderer {
             // del fondo, por debajo), así que no hay empate que resolver. Un sesgo por pendiente
             // acercaba los planos grandes del agua, vistos de costado, varios metros a la cámara
             // y el agua se dibujaba encima de la tierra baja.
+            depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::Greater)),
+            multisample: ms,
+            multiview: None,
+            cache: None,
+        });
+        // [agua en vóxeles] Caras del agua: una instancia por cara, como el terreno, con mezcla.
+        let water_quad_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("agua en vóxeles"),
+            layout: Some(&main_layout),
+            vertex: wgpu::VertexState { module: &water_mod, entry_point: "vs_quad", compilation_options: Default::default(), buffers: &[quad_layout_agua] },
+            fragment: Some(wgpu::FragmentState { module: &water_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[blend_target.clone()] }),
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
             depth_stencil: Some(reverse_depth(false, wgpu::CompareFunction::Greater)),
             multisample: ms,
             multiview: None,
@@ -936,6 +958,7 @@ impl Renderer {
         let args_main2 = buf("args principal (Hi-Z)", args_size, indirect_usage);
         let args_shadow: Vec<wgpu::Buffer> = (0..MAX_CASCADES).map(|_| buf("args sombras", args_size, indirect_usage)).collect();
         let args_cpu = buf("args cpu", args_size * 2, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
+        let args_agua = buf("args agua", ORIGIN_SLOTS as u64 * std::mem::size_of::<DrawArgs>() as u64, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
         let params_size = std::mem::size_of::<CullParams>() as u64;
         let params_usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
         let cull_params_main = buf("descarte principal", params_size, params_usage);
@@ -1083,7 +1106,7 @@ impl Renderer {
             shadow_pipe,
             sky_pipe,
             water_pipe,
-            streams: None,
+            water_quad_pipe,
             overlay_pipe,
             detail_pipe,
             detail_cols: HashMap::default(),
@@ -1105,6 +1128,7 @@ impl Renderer {
             args_main,
             args_shadow,
             args_cpu,
+            args_agua,
             cull_pipe,
             cull_params_main,
             cull_params_shadow,
@@ -1138,6 +1162,7 @@ impl Renderer {
             shadow_redraws: std::cell::Cell::new(0),
             adapter_name,
             smooth_terrain: true,
+            voxel_terrain: true,
             water_level: 0.0,
             reach: [0.0; 3],
             moon: 0.5,
@@ -1204,6 +1229,8 @@ impl Renderer {
         let (lo, hi) = m.bounds();
         self.shadow_dirty_box(lo, hi);
         let (mut quads, groups) = m.quads_grouped();
+        // [agua en vóxeles]
+        quads.extend_from_slice(&m.water);
         let slot = self.alloc_slot();
         for q in quads.iter_mut() {
             q.slot = slot;
@@ -1218,7 +1245,7 @@ impl Renderer {
         self.queue.write_buffer(&self.visible, slot as u64 * 4, bytemuck::bytes_of(&1u32));
         let col = ColGpu { lo: [lo.x, lo.y, lo.z, lod as f32], hi: [hi.x, hi.y, hi.z, 1.0], start, g: [groups[0], groups[1], groups[2], groups[3], groups[4], groups[5], groups[6]] };
         self.queue.write_buffer(&self.cols, slot as u64 * 64, bytemuck::bytes_of(&col));
-        Some(Batch { start, order, groups, quads: quads.len() as u32, lod, slot, lo, hi })
+        Some(Batch { start, order, groups, quads: quads.len() as u32, water: m.water.len() as u32, lod, slot, lo, hi })
     }
 
     /// Un cambio de geometría solo obliga a rehacer una cascada si cae dentro de su caja de luz
@@ -1326,15 +1353,6 @@ impl Renderer {
     /// Piezas de flora baja cargadas.
     pub fn detail_count(&self) -> usize {
         self.detail_static.len() + self.detail_cols.values().map(|v| v.len()).sum::<usize>()
-    }
-
-    /// Sube el agua de los arroyos (una vez por mapa).
-    pub fn set_streams(&mut self, verts: &[[f32; 5]]) {
-        self.streams = (!verts.is_empty()).then(|| self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("arroyos"), contents: bytemuck::cast_slice(verts), usage: wgpu::BufferUsages::VERTEX }));
-    }
-
-    pub fn has_streams(&self) -> bool {
-        self.streams.is_some()
     }
 
     pub fn remove_column(&mut self, key: (u32, IVec2)) {
@@ -1660,7 +1678,7 @@ impl Renderer {
             // Niebla: más tenue cuanto más se aleja la cámara, para que la vista del mapa no se lave.
             // Bruma: en un día claro se ven 30 a 40 km sobre el río; desde muy alto, algo más.
             params: Vec4::new(1.0 / (32000.0f32).max(cam.distance * 10.0), l.night, self.time, l.ambient).into(),
-            extra: [if self.smooth_terrain { 1.0 } else { 0.0 }, self.water_level, self.moon, self.wind.0.rem_euclid(360.0).round() * 100.0 + self.wind.1.clamp(0.0, 99.0)],
+            extra: [if !self.smooth_terrain { 0.0 } else if self.voxel_terrain { 2.0 } else { 1.0 }, self.water_level, self.moon, self.wind.0.rem_euclid(360.0).round() * 100.0 + self.wind.1.clamp(0.0, 99.0)],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
         View { eye: cam.eye(), view_proj, near: (cam.distance * 0.002).clamp(0.1, 20.0), sun, cascades: draw }
@@ -1952,16 +1970,44 @@ impl Renderer {
             pass.set_vertex_buffer(0, buf.slice(..));
             pass.draw(0..30, 0..self.agent_count);
         }
+        // [agua en vóxeles] El plano del río solo queda como respaldo más allá del último anillo
+        // (el shader lo recorta adentro, ver `water.wgsl`); el agua son las caras de las columnas,
+        // de lejos a cerca (son transparentes).
         pass.set_pipeline(&self.water_pipe);
         pass.set_bind_group(0, &self.shadow_bg, &[]);
         pass.set_vertex_buffer(0, self.water.slice(..));
         pass.draw(0..(self.water.size() / 20) as u32, 0..1);
-        if let Some(stb) = &self.streams {
-            pass.set_vertex_buffer(0, stb.slice(..));
-            pass.draw(0..(stb.size() / 20) as u32, 0..1);
+        let vp = frustum_planes(view.view_proj);
+        let mut agua: Vec<(f32, u32, u32)> = self
+            .columns
+            .values()
+            .filter(|b| b.water > 0 && {
+                let (lo, hi) = curved_box(view.eye, b.lo, b.hi);
+                box_visible(&vp, lo, hi)
+            })
+            .map(|b| (((b.lo + b.hi) * 0.5 - view.eye).length_squared(), b.start + b.groups[6], b.water))
+            .collect();
+        if !agua.is_empty() {
+            agua.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1)));
+            pass.set_pipeline(&self.water_quad_pipe);
+            pass.set_bind_group(0, &self.main_bg, &[]);
+            pass.set_vertex_buffer(0, self.quads.slice(..));
+            pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
+            if self.can_indirect {
+                let args: Vec<DrawArgs> = agua.iter().map(|&(_, first, n)| draw_args(first, n)).collect();
+                self.queue.write_buffer(&self.args_agua, 0, bytemuck::cast_slice(&args));
+                pass.multi_draw_indexed_indirect(&self.args_agua, 0, args.len() as u32);
+                st.draws_main += 1;
+            } else {
+                for (_, first, n) in &agua {
+                    pass.draw_indexed(0..6, 0, *first..*first + *n);
+                }
+                st.draws_main += agua.len() as u32;
+            }
         }
         if self.overlay_count > 0 {
             pass.set_pipeline(&self.overlay_pipe);
+            pass.set_bind_group(0, &self.shadow_bg, &[]);
             pass.set_vertex_buffer(0, self.overlay.slice(..));
             pass.draw(0..self.overlay_count, 0..1);
         }

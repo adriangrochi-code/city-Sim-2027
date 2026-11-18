@@ -1921,12 +1921,14 @@ impl TerrainGen {
 
 // --- Agua de los arroyos ----------------------------------------------------------------------
 
+// [agua en vóxeles] Antes había cintas de triángulos sobre el cauce (`stream_ribbons`); ahora el
+// agua son vóxeles (ver `agua.rs`) y de acá sale solo el nivel del agua a lo largo de cada cauce.
 impl TerrainGen {
-    /// Superficie del agua de los arroyos y cañadas: cintas de triángulos que siguen el cauce
-    /// por debajo de las orillas, a la altura del lecho de cada tramo (bajan aguas abajo).
-    /// Cada vértice lleva [x, y, z, fx, fz]: (fx, fz) es la dirección y velocidad de la
-    /// corriente (m/s), para que el agua se vea correr. Solo en el mapa real.
-    pub fn stream_ribbons(&self) -> Vec<[f32; 5]> {
+    /// Agua de los arroyos y cañadas: una muestra cada ~5 m a lo largo de cada cauce, con el
+    /// nivel del agua (un tercio de la profundidad del cauce por debajo de las orillas, sin
+    /// subidas aguas abajo), hasta dónde llega desde el eje y la corriente (0,3 a 1 m/s, de lo
+    /// alto a lo bajo). Donde el cauce baja al nivel del río, manda el río. Solo en el mapa real.
+    pub fn stream_water(&self) -> Vec<Vec<crate::agua::Muestra>> {
         let mut out = Vec::new();
         if self.real.is_none() {
             return out;
@@ -1935,9 +1937,8 @@ impl TerrainGen {
             if pts.len() < 2 || ws.len() != pts.len() {
                 continue;
             }
-            // La corriente va de lo alto a lo bajo.
+            // La corriente va de lo alto a lo bajo: las muestras quedan ordenadas aguas abajo.
             let down = self.height(pts[0].x, pts[0].y) >= self.height(pts[pts.len() - 1].x, pts[pts.len() - 1].y);
-            // Muestreo cada ~5 m a lo largo del arroyo.
             let mut samples: Vec<(Vec2, f32)> = Vec::new();
             for k in 0..pts.len() - 1 {
                 let (a, b) = (pts[k], pts[k + 1]);
@@ -1948,7 +1949,22 @@ impl TerrainGen {
                 }
             }
             samples.push((pts[pts.len() - 1], ws[ws.len() - 1]));
-            let mut prev: Option<([f32; 5], [f32; 5])> = None;
+            if !down {
+                samples.reverse();
+            }
+            // Tramos seguidos sobre el nivel del río (cada uno con sus niveles sin subidas).
+            let mut tramo: Vec<crate::agua::Muestra> = Vec::new();
+            let mut raw: Vec<f32> = Vec::new();
+            let cerrar = |tramo: &mut Vec<crate::agua::Muestra>, raw: &mut Vec<f32>, out: &mut Vec<Vec<crate::agua::Muestra>>| {
+                if tramo.len() >= 2 {
+                    for (m, l) in tramo.iter_mut().zip(crate::agua::niveles_sin_subidas(raw)) {
+                        m.nivel = l;
+                    }
+                    out.push(std::mem::take(tramo));
+                }
+                tramo.clear();
+                raw.clear();
+            };
             for i in 0..samples.len() {
                 let (p, w) = samples[i];
                 let (a, b) = (samples[i.saturating_sub(1)].0, samples[(i + 1).min(samples.len() - 1)].0);
@@ -1958,27 +1974,18 @@ impl TerrainGen {
                 }
                 let hw = w * 0.5;
                 let (depth, reach) = cauce(hw);
-                // En el río (bajo el nivel del mar) ya está el plano del río.
-                let raw = self.height(p.x, p.y) + depth;
-                if raw < 0.6 {
-                    prev = None;
+                // En el río (bajo el nivel del mar) manda el agua del río.
+                let bank = self.height(p.x, p.y) + depth;
+                if bank < 0.6 {
+                    cerrar(&mut tramo, &mut raw, &mut out);
                     continue;
                 }
-                // Nivel del agua: un tercio de la profundidad del cauce por debajo de las orillas.
-                let y = raw - depth * 0.35;
-                // Hasta donde la orilla sube por encima del nivel del agua.
-                let half = hw + (reach - hw) * 0.55;
-                let nrm = Vec2::new(-tan.y, tan.x) * half;
                 // Más rápido en cauces angostos: unos 0,3 a 1 m/s.
                 let speed = (0.35 + 1.2 / (1.0 + hw)).min(1.0);
-                let f = if down { tan * speed } else { -tan * speed };
-                let l = [p.x + nrm.x, y, p.y + nrm.y, f.x, f.y];
-                let r = [p.x - nrm.x, y, p.y - nrm.y, f.x, f.y];
-                if let Some((pl, pr)) = prev {
-                    out.extend_from_slice(&[pl, pr, r, pl, r, l]);
-                }
-                prev = Some((l, r));
+                raw.push(bank - depth * 0.35);
+                tramo.push(crate::agua::Muestra { p, alcance: hw + (reach - hw) * 0.55, nivel: 0.0, corriente: tan * speed });
             }
+            cerrar(&mut tramo, &mut raw, &mut out);
         }
         out
     }

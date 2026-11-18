@@ -61,6 +61,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 8. [x] Vóxel de 0,25 m con capa de detalle de 0,125 m (flora) y monte con nivel de detalle
 9. [x] Hojas sueltas de 0,125 m en la superficie de las copas (tiemblan con el viento)
 10. [ ] Ramas colgantes del sauce en micro-vóxeles, curva tonal
+11. [x] Todo en vóxeles: el río, la bahía y los arroyos son vóxeles de agua (la marea sube y baja la cara de arriba en el shader, sin rehacer mallas; nunca tapa tierra seca en ningún nivel), terreno con aspecto de vóxeles de cerca y suave de lejos (opción en Opciones), calles con diseño de época en vóxeles (empedrado en tresbolillo con vereda, cordón y cuneta; camino de tierra con huellas, pasto y charcos; esquinas sin dientes) y rampas de los puentes (ver [sistemas/motor-voxel.md](sistemas/motor-voxel.md) §18). Falta: crecientes de los arroyos en el agua dibujada
 
 ## Fase 3: diseño de todas las épocas
 
