@@ -7,6 +7,7 @@
 
 pub mod agentes;
 pub mod arquitectura;
+pub mod cauces;
 #[cfg(test)]
 mod arquitectura_tests;
 pub mod climate;
@@ -89,6 +90,8 @@ pub struct City {
     /// Ciudad Nueva: ensanche, redes de gas, agua y colectores, casas modernizadas (ver
     /// `epocas`).
     pub epoca: epocas::EstadoEpoca,
+    /// [mapa del país] Lo que el interior trajo en carreta el último mes (ver `crate::pais`).
+    pub interior: crate::pais::Aporte,
     /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
     mejoras: Vec<(u32, u8)>,
     rng: Rng,
@@ -102,7 +105,7 @@ impl Default for City {
         let mut poblacion = poblacion::Poblacion::nueva(1726);
         // La época la decide la ciudad (ver `epocas`), no el calendario de la población.
         poblacion.epoca_fija = true;
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion, suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), epoca: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion, suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), epoca: Default::default(), interior: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
     }
 }
 
@@ -512,6 +515,10 @@ impl City {
 
     /// Damero: varias calles a la vez (se validan todas antes de construir).
     pub fn build_grid(&mut self, t: &TerrainGen, lines: &[Vec<Vec2>], kind: RoadKind) -> Result<Edits, String> {
+        // [arroyos] Las calles del damero se cortan en las orillas de los arroyos (un puente
+        // suelto se hace con la calle recta o curva; ver `cauces`).
+        let cortadas: Vec<Vec<Vec2>> = lines.iter().flat_map(|l| cauces::cortar_en_arroyos(t, l)).collect();
+        let lines = &cortadas[..];
         if lines.is_empty() {
             return Err("Damero vacío".into());
         }
@@ -720,6 +727,8 @@ impl City {
         };
         self.services_input(&mut inp);
         self.desarrollo_input(&mut inp);
+        // [mapa del país] Cueros, sebo, ganado en pie y derechos del tasajo del interior.
+        self.interior.aplicar(&mut inp);
         inp
     }
 

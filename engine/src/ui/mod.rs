@@ -491,6 +491,8 @@ pub enum UiAction {
     Visibilidad(Visibilidad),
     /// Épocas: pasar de época, ensanche, reformas (ver `ui::epocas`).
     Epoca(epocas::Act),
+    /// [mapa del país] Una obra en el mapa del país (ver `crate::pais::ui`).
+    Pais(crate::pais::Accion),
 }
 
 /// Estado propio de la interfaz entre cuadros.
@@ -515,11 +517,13 @@ pub struct GameUi {
     zones_were_open: bool,
     /// Panel de detalle abierto desde una ficha de la barra (recurso, opinión o clima).
     pub detail: Option<Detail>,
+    /// [mapa del país] El modo «Mapa del país» (ver `crate::pais::ui`).
+    pub pais: crate::pais::ui::PaisUi,
 }
 
 impl Default for GameUi {
     fn default() -> Self {
-        GameUi { zones_were_open: false, detail: None, list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0 }
+        GameUi { zones_were_open: false, detail: None, list: ListPanel::ordinances(&Economy::default(), 0, false), budget: false, open: None, toasts: VecDeque::new(), last_seq: 0, time: 0.0, month_mark: None, balance: None, bar_h: 74.0, drawer_h: 0.0, pais: Default::default() }
     }
 }
 
@@ -576,6 +580,11 @@ impl GameUi {
 
     /// Dibuja toda la interfaz del juego y devuelve las acciones pedidas.
     pub fn draw(&mut self, ctx: &egui::Context, game: &Game, terrain: &TerrainGen, hour: f32, extra_status: &str) -> Vec<UiAction> {
+        // [mapa del país] Con el mapa del país abierto se dibuja solo él; si no, su botón.
+        if self.pais.abierto {
+            return self.pais.draw(ctx, game).into_iter().map(UiAction::Pais).collect();
+        }
+        self.pais.boton(ctx);
         let mut acts = Vec::new();
         if self.list.ordinances {
             self.list = ListPanel::ordinances(&game.city.economy, game.city.money, self.list.open);
@@ -1421,6 +1430,7 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             }
             UiAction::Density(d) => game.density = *d,
             UiAction::Visibilidad(v) => game.vis = *v,
+            UiAction::Pais(a) => game.accion_pais(a),
             UiAction::Brush(b) => game.brush = b.clamp(10.0, 150.0),
             UiAction::Speed(v) => game.speed = *v,
             UiAction::Hour(d) => hour_delta += d,
