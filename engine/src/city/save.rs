@@ -267,6 +267,7 @@ impl CityData {
             llegados_barco: 0,
             desarrollo: self.desarrollo.clone().unwrap_or_default(),
             materiales: self.materiales.clone().unwrap_or_default(),
+            interior: Default::default(),
         };
         // Partidas de antes de los materiales: cada casa queda con los de su tipo.
         city.inferir_obras();

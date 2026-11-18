@@ -1,0 +1,3895 @@
+{
+ "descripcion": "Historia del país (escala país). DOCUMENTADO / ESTIMADO en cada dato. Ver docs/sistemas/mapa-pais.md.",
+ "consultado": "2026-11-18",
+ "pueblos": [
+  {
+   "id": "montevideo",
+   "nombre": "Montevideo",
+   "anio": 1726,
+   "tipo": "capital",
+   "pos": [
+    217.91,
+    537.04
+   ],
+   "lon": -56.1683,
+   "lat": -34.8833,
+   "posicion": "localidades MTOP",
+   "departamento": "Montevideo",
+   "poblacion_inicial": 0,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Montevideo",
+   "nota": "La ciudad del jugador (escala ciudad): fortificación en 1724, fundación con los primeros pobladores en 1726."
+  },
+  {
+   "id": "colonia",
+   "nombre": "Colonia del Sacramento",
+   "anio": 1680,
+   "tipo": "ciudad",
+   "pos": [
+    61.76,
+    490.4
+   ],
+   "lon": -57.8391,
+   "lat": -34.4636,
+   "posicion": "localidades MTOP",
+   "departamento": "Colonia",
+   "poblacion_inicial": 1500,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Colonia_del_Sacramento",
+   "nota": "Fundada por Manuel Lobo (portugueses) en 1680; española desde el Tratado de San Ildefonso (1777)."
+  },
+  {
+   "id": "soriano",
+   "nombre": "Santo Domingo Soriano",
+   "anio": 1718,
+   "tipo": "reduccion",
+   "pos": [
+    18.0,
+    371.0
+   ],
+   "lon": -58.3182,
+   "lat": -33.3903,
+   "posicion": "localidades MTOP",
+   "departamento": "Soriano",
+   "poblacion_inicial": 400,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Villa_Soriano",
+   "nota": "Reducción de los dominicos: en 1718 pasa al sur del Río Negro y en 1726 a su sitio actual (antes, desde 1624, en otros lugares)."
+  },
+  {
+   "id": "las_piedras",
+   "nombre": "Las Piedras",
+   "anio": 1744,
+   "tipo": "pueblo",
+   "pos": [
+    213.89,
+    519.11
+   ],
+   "lon": -56.2114,
+   "lat": -34.722,
+   "posicion": "localidades MTOP",
+   "departamento": "Canelones",
+   "poblacion_inicial": 120,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Las_Piedras_(Canelones)",
+   "nota": "El proceso fundacional empieza el 8 de marzo de 1744 (Luis de Sosa Mascareñas); capilla de San Isidro en 1765."
+  },
+  {
+   "id": "maldonado",
+   "nombre": "San Fernando de Maldonado",
+   "anio": 1755,
+   "tipo": "villa",
+   "pos": [
+    331.07,
+    538.63
+   ],
+   "lon": -54.9576,
+   "lat": -34.8977,
+   "posicion": "localidades MTOP",
+   "departamento": "Maldonado",
+   "poblacion_inicial": 200,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Maldonado_(Uruguay)",
+   "nota": "José Joaquín de Viana sale con unas familias en agosto de 1755; Pérez Montero fecha la fundación a fines de 1757."
+  },
+  {
+   "id": "santa_teresa",
+   "nombre": "Fortaleza de Santa Teresa",
+   "anio": 1762,
+   "tipo": "fuerte",
+   "pos": [
+    462.62,
+    435.56
+   ],
+   "lon": -53.55,
+   "lat": -33.97,
+   "posicion": "tabla",
+   "departamento": "Rocha",
+   "poblacion_inicial": 100,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Fortaleza_de_Santa_Teresa",
+   "nota": "Fortaleza empezada por los portugueses en 1762 y tomada por Cevallos en 1763."
+  },
+  {
+   "id": "san_carlos",
+   "nombre": "San Carlos",
+   "anio": 1763,
+   "tipo": "villa",
+   "pos": [
+    334.43,
+    526.75
+   ],
+   "lon": -54.9216,
+   "lat": -34.7908,
+   "posicion": "localidades MTOP",
+   "departamento": "Maldonado",
+   "poblacion_inicial": 250,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/San_Carlos_(Uruguay)",
+   "nota": "Fundada en 1763 por el gobernador Pedro de Cevallos, con familias azorianas."
+  },
+  {
+   "id": "paysandu",
+   "nombre": "Paysandú",
+   "anio": 1772,
+   "tipo": "pueblo",
+   "pos": [
+    37.99,
+    251.92
+   ],
+   "lon": -58.0935,
+   "lat": -32.3173,
+   "posicion": "localidades MTOP",
+   "departamento": "Paysandú",
+   "poblacion_inicial": 100,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Paysandú",
+   "nota": "La tradición fecha la reducción en 1772 (1 de enero); el «paso de Paisandú» ya figura en 1754. Parroquia en 1805."
+  },
+  {
+   "id": "rosario",
+   "nombre": "Rosario del Colla",
+   "anio": 1775,
+   "tipo": "villa",
+   "pos": [
+    107.33,
+    474.24
+   ],
+   "lon": -57.3516,
+   "lat": -34.3182,
+   "posicion": "localidades MTOP",
+   "departamento": "Colonia",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Rosario_(Uruguay)",
+   "nota": "Villa de Nuestra Señora del Rosario del Colla, fundada por Benito Herosa el 24 de enero de 1775."
+  },
+  {
+   "id": "santa_lucia",
+   "nombre": "San Juan Bautista (Santa Lucía)",
+   "anio": 1781,
+   "tipo": "villa",
+   "pos": [
+    197.13,
+    490.99
+   ],
+   "lon": -56.3907,
+   "lat": -34.4689,
+   "posicion": "localidades MTOP",
+   "departamento": "Canelones",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Santa_Lucía_(Uruguay)",
+   "nota": "Pobladores desde el 26 de octubre de 1781 (Francisco Zurdo); cabildo en 1783."
+  },
+  {
+   "id": "canelones",
+   "nombre": "Guadalupe (Canelones)",
+   "anio": 1783,
+   "tipo": "villa",
+   "pos": [
+    207.96,
+    496.47
+   ],
+   "lon": -56.2748,
+   "lat": -34.5182,
+   "posicion": "localidades MTOP",
+   "departamento": "Canelones",
+   "poblacion_inicial": 300,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Canelones",
+   "nota": "Villa de Nuestra Señora de Guadalupe, fundada el 24 de abril de 1783 (ya tenía 70 casas y capilla)."
+  },
+  {
+   "id": "minas",
+   "nombre": "Concepción de las Minas",
+   "anio": 1783,
+   "tipo": "villa",
+   "pos": [
+    304.22,
+    480.2
+   ],
+   "lon": -55.2449,
+   "lat": -34.3718,
+   "posicion": "localidades MTOP",
+   "departamento": "Lavalleja",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Minas_(Uruguay)",
+   "nota": "Villa de la Concepción de las Minas, trazada por Rafael Pérez del Puerto en marzo de 1783."
+  },
+  {
+   "id": "san_jose",
+   "nombre": "San José",
+   "anio": 1783,
+   "tipo": "villa",
+   "pos": [
+    167.33,
+    477.19
+   ],
+   "lon": -56.7095,
+   "lat": -34.3447,
+   "posicion": "localidades MTOP",
+   "departamento": "San José",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/San_José_de_Mayo",
+   "nota": "Fundada el 1 de junio de 1783 por el teniente de dragones Eusebio Vidal."
+  },
+  {
+   "id": "mercedes",
+   "nombre": "Capilla Nueva de las Mercedes",
+   "anio": 1788,
+   "tipo": "villa",
+   "pos": [
+    43.51,
+    355.41
+   ],
+   "lon": -58.0344,
+   "lat": -33.2487,
+   "posicion": "localidades MTOP",
+   "departamento": "Soriano",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Mercedes_(Uruguay)",
+   "nota": "Fundada en 1788 por el presbítero Manuel Antonio de Castro y Careaga."
+  },
+  {
+   "id": "pando",
+   "nombre": "Pando",
+   "anio": 1788,
+   "tipo": "pueblo",
+   "pos": [
+    237.2,
+    519.45
+   ],
+   "lon": -55.9619,
+   "lat": -34.725,
+   "posicion": "localidades MTOP",
+   "departamento": "Canelones",
+   "poblacion_inicial": 100,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Pando_(Uruguay)",
+   "nota": "Año de la fundación según el artículo; sin fundador."
+  },
+  {
+   "id": "rocha",
+   "nombre": "Rocha",
+   "anio": 1793,
+   "tipo": "villa",
+   "pos": [
+    389.16,
+    492.09
+   ],
+   "lon": -54.3359,
+   "lat": -34.4788,
+   "posicion": "localidades MTOP",
+   "departamento": "Rocha",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Rocha_(Uruguay)",
+   "nota": "Rafael Pérez del Puerto elige el sitio el 22 de noviembre de 1793; capilla de los Remedios en 1794."
+  },
+  {
+   "id": "melo",
+   "nombre": "Villa de Melo",
+   "anio": 1795,
+   "tipo": "villa",
+   "pos": [
+    405.02,
+    257.78
+   ],
+   "lon": -54.1662,
+   "lat": -32.37,
+   "posicion": "localidades MTOP",
+   "departamento": "Cerro Largo",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Melo",
+   "nota": "Fundada el 27 de junio de 1795 por Agustín de la Rosa a orillas del arroyo Conventos, a pedido del virrey Melo."
+  },
+  {
+   "id": "dolores",
+   "nombre": "Dolores",
+   "anio": 1801,
+   "tipo": "pueblo",
+   "pos": [
+    26.22,
+    386.61
+   ],
+   "lon": -58.2194,
+   "lat": -33.5295,
+   "posicion": "localidades MTOP",
+   "departamento": "Soriano",
+   "poblacion_inicial": 100,
+   "estado": "ESTIMADO",
+   "fuente": null,
+   "nota": "Año de fundación sin verificar en esta corrida."
+  },
+  {
+   "id": "belen",
+   "nombre": "Belén",
+   "anio": 1801,
+   "tipo": "pueblo",
+   "pos": [
+    68.0,
+    82.0
+   ],
+   "lon": -57.7794,
+   "lat": -30.7852,
+   "posicion": "localidades MTOP",
+   "departamento": "Salto",
+   "poblacion_inicial": 80,
+   "estado": "ESTIMADO",
+   "fuente": null,
+   "nota": "Año sin verificar (pueblo de la frontera del norte)."
+  },
+  {
+   "id": "trinidad",
+   "nombre": "Santísima Trinidad de los Porongos",
+   "anio": 1804,
+   "tipo": "pueblo",
+   "pos": [
+    149.63,
+    385.76
+   ],
+   "lon": -56.8989,
+   "lat": -33.5219,
+   "posicion": "localidades MTOP",
+   "departamento": "Flores",
+   "poblacion_inicial": 100,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Trinidad_(Uruguay)",
+   "nota": "Tierras concedidas a fray Manuel de Úbeda el 14 de abril de 1804 (hay controversia sobre los fundadores)."
+  },
+  {
+   "id": "florida",
+   "nombre": "San Fernando de la Florida Blanca",
+   "anio": 1809,
+   "tipo": "villa",
+   "pos": [
+    213.24,
+    450.58
+   ],
+   "lon": -56.2183,
+   "lat": -34.1053,
+   "posicion": "localidades MTOP",
+   "departamento": "Florida",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Florida_(Uruguay)",
+   "nota": "Fundada el 24 de abril de 1809 por orden del Cabildo de Montevideo."
+  },
+  {
+   "id": "carmelo",
+   "nombre": "Carmelo",
+   "anio": 1816,
+   "tipo": "pueblo",
+   "pos": [
+    20.42,
+    438.56
+   ],
+   "lon": -58.2815,
+   "lat": -33.997,
+   "posicion": "localidades MTOP",
+   "departamento": "Colonia",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Carmelo_(Uruguay)",
+   "nota": "Fundada por Artigas el 12 de febrero de 1816 (traslado del pueblo de Las Víboras a la boca del arroyo de las Vacas)."
+  },
+  {
+   "id": "salto",
+   "nombre": "Salto",
+   "anio": 1817,
+   "tipo": "pueblo",
+   "pos": [
+    49.41,
+    149.2
+   ],
+   "lon": -57.9713,
+   "lat": -31.3928,
+   "posicion": "localidades MTOP",
+   "departamento": "Salto",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Salto_(Uruguay)",
+   "nota": "Fuerte de San Antonio en 1757 (Viana y Cevallos), abandonado en 1763; población permanente desde 1817."
+  },
+  {
+   "id": "durazno",
+   "nombre": "San Pedro del Durazno",
+   "anio": 1821,
+   "tipo": "villa",
+   "pos": [
+    184.52,
+    369.3
+   ],
+   "lon": -56.5256,
+   "lat": -33.3737,
+   "posicion": "localidades MTOP",
+   "departamento": "Durazno",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Durazno_(Uruguay)",
+   "nota": "Fundada por Fructuoso Rivera el 12 de octubre de 1821."
+  },
+  {
+   "id": "bella_union",
+   "nombre": "Santa Rosa del Cuareim",
+   "anio": 1829,
+   "tipo": "pueblo",
+   "pos": [
+    83.82,
+    22.84
+   ],
+   "lon": -57.6031,
+   "lat": -30.2556,
+   "posicion": "localidades MTOP",
+   "departamento": "Artigas",
+   "poblacion_inicial": 300,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Bella_Unión",
+   "nota": "Fundada en 1829 por Fructuoso Rivera con los guaraníes de las Misiones Orientales; Bella Unión desde 1853."
+  },
+  {
+   "id": "nueva_palmira",
+   "nombre": "Nueva Palmira",
+   "anio": 1831,
+   "tipo": "pueblo",
+   "pos": [
+    8.19,
+    425.44
+   ],
+   "lon": -58.4124,
+   "lat": -33.879,
+   "posicion": "localidades MTOP",
+   "departamento": "Colonia",
+   "poblacion_inicial": 100,
+   "estado": "ESTIMADO",
+   "fuente": null,
+   "nota": "Año sin verificar (puerto de Higueritas)."
+  },
+  {
+   "id": "tacuarembo",
+   "nombre": "San Fructuoso (Tacuarembó)",
+   "anio": 1832,
+   "tipo": "villa",
+   "pos": [
+    234.48,
+    185.44
+   ],
+   "lon": -55.991,
+   "lat": -31.719,
+   "posicion": "localidades MTOP",
+   "departamento": "Tacuarembó",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Tacuarembó",
+   "nota": "Fundada por el coronel Bernabé Rivera el 27 de enero de 1832; se llama Tacuarembó desde 1912."
+  },
+  {
+   "id": "artigas",
+   "nombre": "San Eugenio del Cuareim",
+   "anio": 1852,
+   "tipo": "pueblo",
+   "pos": [
+    190.3,
+    38.76
+   ],
+   "lon": -56.4638,
+   "lat": -30.3989,
+   "posicion": "localidades MTOP",
+   "departamento": "Artigas",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Artigas_(Uruguay)",
+   "nota": "Fundada por Carlos Catalá el 12 de septiembre de 1852."
+  },
+  {
+   "id": "treinta_y_tres",
+   "nombre": "Treinta y Tres",
+   "anio": 1853,
+   "tipo": "pueblo",
+   "pos": [
+    384.54,
+    353.49
+   ],
+   "lon": -54.3854,
+   "lat": -33.2314,
+   "posicion": "localidades MTOP",
+   "departamento": "Treinta y Tres",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Treinta_y_Tres_(Uruguay)",
+   "nota": "Fundada el 10 de marzo de 1853 (el artículo nombra a Dionisio Coronel y a Carlos Graña)."
+  },
+  {
+   "id": "fray_bentos",
+   "nombre": "Villa Independencia (Fray Bentos)",
+   "anio": 1859,
+   "tipo": "pueblo",
+   "pos": [
+    17.81,
+    340.85
+   ],
+   "lon": -58.3094,
+   "lat": -33.1176,
+   "posicion": "localidades MTOP",
+   "departamento": "Río Negro",
+   "poblacion_inicial": 150,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Fray_Bentos",
+   "nota": "Fundada oficialmente el 16 de abril de 1859 como Villa Independencia; Fray Bentos desde 1900."
+  },
+  {
+   "id": "nueva_helvecia",
+   "nombre": "Colonia Suiza (Nueva Helvecia)",
+   "anio": 1862,
+   "tipo": "colonia",
+   "pos": [
+    119.0,
+    470.87
+   ],
+   "lon": -57.2267,
+   "lat": -34.2878,
+   "posicion": "localidades MTOP",
+   "departamento": "Colonia",
+   "poblacion_inicial": 200,
+   "estado": "ESTIMADO",
+   "fuente": null,
+   "nota": "Colonia agrícola de inmigrantes suizos; año sin verificar en esta corrida."
+  },
+  {
+   "id": "castillos",
+   "nombre": "Castillos",
+   "anio": 1866,
+   "tipo": "pueblo",
+   "pos": [
+    434.09,
+    460.82
+   ],
+   "lon": -53.8552,
+   "lat": -34.1974,
+   "posicion": "localidades MTOP",
+   "departamento": "Rocha",
+   "poblacion_inicial": 100,
+   "estado": "ESTIMADO",
+   "fuente": null,
+   "nota": "Año sin verificar."
+  },
+  {
+   "id": "rivera",
+   "nombre": "Pueblo Rivera",
+   "anio": 1867,
+   "tipo": "pueblo",
+   "pos": [
+    275.7,
+    95.7
+   ],
+   "lon": -55.5501,
+   "lat": -30.9113,
+   "posicion": "localidades MTOP",
+   "departamento": "Rivera",
+   "poblacion_inicial": 200,
+   "estado": "DOCUMENTADO",
+   "fuente": "https://es.wikipedia.org/wiki/Rivera_(Uruguay)",
+   "nota": "Acta de fundación en Cuñapirú el 20 de julio de 1867 (decreto de junio); ley de 1862 de la Villa de Ceballos."
+  }
+ ],
+ "caminos": [
+  {
+   "desde": "montevideo",
+   "hasta": "rosario",
+   "nombre": "Camino Real a la Colonia",
+   "anio": 1730,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     217.91,
+     537.04
+    ],
+    [
+     213.0,
+     531.0
+    ],
+    [
+     213.0,
+     525.0
+    ],
+    [
+     209.0,
+     522.0
+    ],
+    [
+     205.0,
+     521.0
+    ],
+    [
+     201.0,
+     518.0
+    ],
+    [
+     198.0,
+     520.0
+    ],
+    [
+     188.0,
+     520.0
+    ],
+    [
+     159.0,
+     495.0
+    ],
+    [
+     157.0,
+     494.0
+    ],
+    [
+     149.0,
+     494.0
+    ],
+    [
+     146.0,
+     496.0
+    ],
+    [
+     137.0,
+     495.0
+    ],
+    [
+     135.0,
+     494.0
+    ],
+    [
+     129.0,
+     487.0
+    ],
+    [
+     125.0,
+     486.0
+    ],
+    [
+     121.0,
+     481.0
+    ],
+    [
+     117.0,
+     480.0
+    ],
+    [
+     111.0,
+     476.0
+    ],
+    [
+     109.0,
+     477.0
+    ],
+    [
+     107.33,
+     474.24
+    ]
+   ]
+  },
+  {
+   "desde": "rosario",
+   "hasta": "colonia",
+   "nombre": "Camino Real a la Colonia",
+   "anio": 1730,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     107.33,
+     474.24
+    ],
+    [
+     104.0,
+     471.0
+    ],
+    [
+     101.0,
+     471.0
+    ],
+    [
+     100.0,
+     470.0
+    ],
+    [
+     89.0,
+     470.0
+    ],
+    [
+     88.0,
+     469.0
+    ],
+    [
+     87.0,
+     470.0
+    ],
+    [
+     86.0,
+     469.0
+    ],
+    [
+     83.0,
+     469.0
+    ],
+    [
+     80.0,
+     472.0
+    ],
+    [
+     76.0,
+     472.0
+    ],
+    [
+     70.0,
+     477.0
+    ],
+    [
+     69.0,
+     481.0
+    ],
+    [
+     61.76,
+     490.4
+    ]
+   ]
+  },
+  {
+   "desde": "colonia",
+   "hasta": "soriano",
+   "nombre": "Camino de la costa del Uruguay",
+   "anio": 1730,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     61.76,
+     490.4
+    ],
+    [
+     63.0,
+     487.0
+    ],
+    [
+     59.0,
+     480.0
+    ],
+    [
+     60.0,
+     472.0
+    ],
+    [
+     63.0,
+     468.0
+    ],
+    [
+     62.0,
+     459.0
+    ],
+    [
+     59.0,
+     453.0
+    ],
+    [
+     60.0,
+     443.0
+    ],
+    [
+     57.0,
+     439.0
+    ],
+    [
+     57.0,
+     435.0
+    ],
+    [
+     55.0,
+     432.0
+    ],
+    [
+     50.0,
+     428.0
+    ],
+    [
+     49.0,
+     424.0
+    ],
+    [
+     37.0,
+     413.0
+    ],
+    [
+     34.0,
+     413.0
+    ],
+    [
+     25.0,
+     403.0
+    ],
+    [
+     22.0,
+     401.0
+    ],
+    [
+     20.0,
+     401.0
+    ],
+    [
+     18.0,
+     399.0
+    ],
+    [
+     18.0,
+     396.0
+    ],
+    [
+     16.0,
+     394.0
+    ],
+    [
+     16.0,
+     392.0
+    ],
+    [
+     13.0,
+     387.0
+    ],
+    [
+     13.0,
+     382.0
+    ],
+    [
+     17.0,
+     378.0
+    ],
+    [
+     17.0,
+     373.0
+    ],
+    [
+     18.0,
+     371.0
+    ]
+   ]
+  },
+  {
+   "desde": "montevideo",
+   "hasta": "las_piedras",
+   "nombre": "Camino de las Piedras",
+   "anio": 1744,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     217.91,
+     537.04
+    ],
+    [
+     213.0,
+     531.0
+    ],
+    [
+     213.0,
+     520.0
+    ],
+    [
+     213.89,
+     519.11
+    ]
+   ]
+  },
+  {
+   "desde": "montevideo",
+   "hasta": "pando",
+   "nombre": "Camino Real a Maldonado",
+   "anio": 1757,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     217.91,
+     537.04
+    ],
+    [
+     226.0,
+     532.0
+    ],
+    [
+     237.2,
+     519.45
+    ]
+   ]
+  },
+  {
+   "desde": "pando",
+   "hasta": "san_carlos",
+   "nombre": "Camino Real a Maldonado",
+   "anio": 1763,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     237.2,
+     519.45
+    ],
+    [
+     240.0,
+     521.0
+    ],
+    [
+     246.0,
+     521.0
+    ],
+    [
+     247.0,
+     522.0
+    ],
+    [
+     250.0,
+     522.0
+    ],
+    [
+     251.0,
+     521.0
+    ],
+    [
+     258.0,
+     521.0
+    ],
+    [
+     259.0,
+     522.0
+    ],
+    [
+     278.0,
+     522.0
+    ],
+    [
+     282.0,
+     525.0
+    ],
+    [
+     288.0,
+     525.0
+    ],
+    [
+     289.0,
+     526.0
+    ],
+    [
+     291.0,
+     525.0
+    ],
+    [
+     293.0,
+     527.0
+    ],
+    [
+     296.0,
+     527.0
+    ],
+    [
+     301.0,
+     532.0
+    ],
+    [
+     305.0,
+     532.0
+    ],
+    [
+     307.0,
+     530.0
+    ],
+    [
+     313.0,
+     535.0
+    ],
+    [
+     324.0,
+     535.0
+    ],
+    [
+     327.0,
+     533.0
+    ],
+    [
+     330.0,
+     528.0
+    ],
+    [
+     334.43,
+     526.75
+    ]
+   ]
+  },
+  {
+   "desde": "san_carlos",
+   "hasta": "maldonado",
+   "nombre": "Camino Real a Maldonado",
+   "anio": 1763,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     334.43,
+     526.75
+    ],
+    [
+     332.0,
+     527.0
+    ],
+    [
+     330.0,
+     531.0
+    ],
+    [
+     329.0,
+     538.0
+    ],
+    [
+     331.07,
+     538.63
+    ]
+   ]
+  },
+  {
+   "desde": "san_carlos",
+   "hasta": "santa_teresa",
+   "nombre": "Camino a la Angostura",
+   "anio": 1763,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     334.43,
+     526.75
+    ],
+    [
+     337.0,
+     527.0
+    ],
+    [
+     341.0,
+     525.0
+    ],
+    [
+     344.0,
+     525.0
+    ],
+    [
+     345.0,
+     526.0
+    ],
+    [
+     347.0,
+     524.0
+    ],
+    [
+     353.0,
+     522.0
+    ],
+    [
+     358.0,
+     523.0
+    ],
+    [
+     366.0,
+     517.0
+    ],
+    [
+     375.0,
+     517.0
+    ],
+    [
+     386.0,
+     506.0
+    ],
+    [
+     388.0,
+     506.0
+    ],
+    [
+     393.0,
+     501.0
+    ],
+    [
+     393.0,
+     498.0
+    ],
+    [
+     395.0,
+     495.0
+    ],
+    [
+     399.0,
+     492.0
+    ],
+    [
+     399.0,
+     490.0
+    ],
+    [
+     401.0,
+     488.0
+    ],
+    [
+     403.0,
+     488.0
+    ],
+    [
+     406.0,
+     485.0
+    ],
+    [
+     413.0,
+     485.0
+    ],
+    [
+     416.0,
+     483.0
+    ],
+    [
+     419.0,
+     483.0
+    ],
+    [
+     422.0,
+     480.0
+    ],
+    [
+     422.0,
+     470.0
+    ],
+    [
+     425.0,
+     467.0
+    ],
+    [
+     431.0,
+     467.0
+    ],
+    [
+     433.0,
+     469.0
+    ],
+    [
+     442.0,
+     461.0
+    ],
+    [
+     442.0,
+     457.0
+    ],
+    [
+     445.0,
+     454.0
+    ],
+    [
+     448.0,
+     454.0
+    ],
+    [
+     449.0,
+     455.0
+    ],
+    [
+     459.0,
+     446.0
+    ],
+    [
+     462.0,
+     443.0
+    ],
+    [
+     462.62,
+     435.56
+    ]
+   ]
+  },
+  {
+   "desde": "soriano",
+   "hasta": "mercedes",
+   "nombre": "Camino de la costa del Uruguay",
+   "anio": 1788,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     18.0,
+     371.0
+    ],
+    [
+     18.0,
+     372.0
+    ],
+    [
+     21.0,
+     371.0
+    ],
+    [
+     29.0,
+     371.0
+    ],
+    [
+     31.0,
+     369.0
+    ],
+    [
+     33.0,
+     369.0
+    ],
+    [
+     44.0,
+     356.0
+    ],
+    [
+     43.51,
+     355.41
+    ]
+   ]
+  },
+  {
+   "desde": "mercedes",
+   "hasta": "paysandu",
+   "nombre": "Camino de la costa del Uruguay",
+   "anio": 1788,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     43.51,
+     355.41
+    ],
+    [
+     44.0,
+     354.0
+    ],
+    [
+     38.0,
+     347.0
+    ],
+    [
+     38.0,
+     339.0
+    ],
+    [
+     43.0,
+     332.0
+    ],
+    [
+     43.0,
+     329.0
+    ],
+    [
+     45.0,
+     327.0
+    ],
+    [
+     45.0,
+     317.0
+    ],
+    [
+     37.0,
+     307.0
+    ],
+    [
+     37.0,
+     301.0
+    ],
+    [
+     35.0,
+     297.0
+    ],
+    [
+     36.0,
+     282.0
+    ],
+    [
+     34.0,
+     279.0
+    ],
+    [
+     33.0,
+     272.0
+    ],
+    [
+     31.0,
+     270.0
+    ],
+    [
+     31.0,
+     266.0
+    ],
+    [
+     34.0,
+     264.0
+    ],
+    [
+     36.0,
+     261.0
+    ],
+    [
+     36.0,
+     258.0
+    ],
+    [
+     35.0,
+     257.0
+    ],
+    [
+     38.0,
+     254.0
+    ],
+    [
+     37.99,
+     251.92
+    ]
+   ]
+  },
+  {
+   "desde": "las_piedras",
+   "hasta": "canelones",
+   "nombre": "Camino Real del Norte",
+   "anio": 1783,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     213.89,
+     519.11
+    ],
+    [
+     216.0,
+     519.0
+    ],
+    [
+     218.0,
+     517.0
+    ],
+    [
+     218.0,
+     515.0
+    ],
+    [
+     215.0,
+     511.0
+    ],
+    [
+     215.0,
+     504.0
+    ],
+    [
+     208.0,
+     498.0
+    ],
+    [
+     207.96,
+     496.47
+    ]
+   ]
+  },
+  {
+   "desde": "canelones",
+   "hasta": "santa_lucia",
+   "nombre": "Camino a Santa Lucía",
+   "anio": 1783,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     207.96,
+     496.47
+    ],
+    [
+     204.0,
+     493.0
+    ],
+    [
+     198.0,
+     493.0
+    ],
+    [
+     197.13,
+     490.99
+    ]
+   ]
+  },
+  {
+   "desde": "montevideo",
+   "hasta": "san_jose",
+   "nombre": "Camino a San José",
+   "anio": 1783,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     217.91,
+     537.04
+    ],
+    [
+     213.0,
+     531.0
+    ],
+    [
+     213.0,
+     525.0
+    ],
+    [
+     209.0,
+     522.0
+    ],
+    [
+     205.0,
+     521.0
+    ],
+    [
+     201.0,
+     518.0
+    ],
+    [
+     198.0,
+     520.0
+    ],
+    [
+     191.0,
+     520.0
+    ],
+    [
+     190.0,
+     519.0
+    ],
+    [
+     189.0,
+     514.0
+    ],
+    [
+     187.0,
+     512.0
+    ],
+    [
+     187.0,
+     509.0
+    ],
+    [
+     182.0,
+     507.0
+    ],
+    [
+     170.0,
+     493.0
+    ],
+    [
+     171.0,
+     484.0
+    ],
+    [
+     169.0,
+     482.0
+    ],
+    [
+     167.33,
+     477.19
+    ]
+   ]
+  },
+  {
+   "desde": "san_jose",
+   "hasta": "mercedes",
+   "nombre": "Camino a Mercedes",
+   "anio": 1788,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     167.33,
+     477.19
+    ],
+    [
+     165.0,
+     474.0
+    ],
+    [
+     158.0,
+     471.0
+    ],
+    [
+     153.0,
+     467.0
+    ],
+    [
+     152.0,
+     464.0
+    ],
+    [
+     148.0,
+     460.0
+    ],
+    [
+     148.0,
+     458.0
+    ],
+    [
+     143.0,
+     454.0
+    ],
+    [
+     138.0,
+     447.0
+    ],
+    [
+     132.0,
+     442.0
+    ],
+    [
+     131.0,
+     440.0
+    ],
+    [
+     131.0,
+     434.0
+    ],
+    [
+     130.0,
+     433.0
+    ],
+    [
+     127.0,
+     433.0
+    ],
+    [
+     124.0,
+     431.0
+    ],
+    [
+     122.0,
+     431.0
+    ],
+    [
+     120.0,
+     429.0
+    ],
+    [
+     118.0,
+     430.0
+    ],
+    [
+     112.0,
+     430.0
+    ],
+    [
+     102.0,
+     421.0
+    ],
+    [
+     98.0,
+     419.0
+    ],
+    [
+     95.0,
+     416.0
+    ],
+    [
+     95.0,
+     409.0
+    ],
+    [
+     89.0,
+     404.0
+    ],
+    [
+     86.0,
+     399.0
+    ],
+    [
+     82.0,
+     398.0
+    ],
+    [
+     79.0,
+     395.0
+    ],
+    [
+     76.0,
+     395.0
+    ],
+    [
+     73.0,
+     392.0
+    ],
+    [
+     67.0,
+     385.0
+    ],
+    [
+     67.0,
+     381.0
+    ],
+    [
+     61.0,
+     374.0
+    ],
+    [
+     61.0,
+     372.0
+    ],
+    [
+     53.0,
+     364.0
+    ],
+    [
+     51.0,
+     359.0
+    ],
+    [
+     48.0,
+     356.0
+    ],
+    [
+     43.51,
+     355.41
+    ]
+   ]
+  },
+  {
+   "desde": "pando",
+   "hasta": "minas",
+   "nombre": "Camino a Minas",
+   "anio": 1783,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     237.2,
+     519.45
+    ],
+    [
+     238.0,
+     514.0
+    ],
+    [
+     234.0,
+     509.0
+    ],
+    [
+     234.0,
+     505.0
+    ],
+    [
+     232.0,
+     502.0
+    ],
+    [
+     234.0,
+     497.0
+    ],
+    [
+     233.0,
+     494.0
+    ],
+    [
+     238.0,
+     487.0
+    ],
+    [
+     240.0,
+     487.0
+    ],
+    [
+     245.0,
+     483.0
+    ],
+    [
+     254.0,
+     479.0
+    ],
+    [
+     261.0,
+     480.0
+    ],
+    [
+     264.0,
+     478.0
+    ],
+    [
+     272.0,
+     477.0
+    ],
+    [
+     277.0,
+     474.0
+    ],
+    [
+     280.0,
+     474.0
+    ],
+    [
+     281.0,
+     473.0
+    ],
+    [
+     284.0,
+     475.0
+    ],
+    [
+     290.0,
+     476.0
+    ],
+    [
+     294.0,
+     479.0
+    ],
+    [
+     299.0,
+     479.0
+    ],
+    [
+     300.0,
+     478.0
+    ],
+    [
+     304.22,
+     480.2
+    ]
+   ]
+  },
+  {
+   "desde": "san_carlos",
+   "hasta": "rocha",
+   "nombre": "Camino a Rocha",
+   "anio": 1793,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     334.43,
+     526.75
+    ],
+    [
+     337.0,
+     527.0
+    ],
+    [
+     341.0,
+     525.0
+    ],
+    [
+     344.0,
+     525.0
+    ],
+    [
+     345.0,
+     526.0
+    ],
+    [
+     347.0,
+     524.0
+    ],
+    [
+     353.0,
+     522.0
+    ],
+    [
+     358.0,
+     523.0
+    ],
+    [
+     366.0,
+     517.0
+    ],
+    [
+     375.0,
+     517.0
+    ],
+    [
+     386.0,
+     506.0
+    ],
+    [
+     388.0,
+     506.0
+    ],
+    [
+     391.0,
+     503.0
+    ],
+    [
+     392.0,
+     497.0
+    ],
+    [
+     390.0,
+     494.0
+    ],
+    [
+     390.0,
+     492.0
+    ],
+    [
+     389.16,
+     492.09
+    ]
+   ]
+  },
+  {
+   "desde": "minas",
+   "hasta": "melo",
+   "nombre": "Camino a Cerro Largo",
+   "anio": 1795,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     304.22,
+     480.2
+    ],
+    [
+     303.0,
+     479.0
+    ],
+    [
+     304.0,
+     476.0
+    ],
+    [
+     307.0,
+     476.0
+    ],
+    [
+     311.0,
+     478.0
+    ],
+    [
+     314.0,
+     476.0
+    ],
+    [
+     317.0,
+     476.0
+    ],
+    [
+     320.0,
+     472.0
+    ],
+    [
+     322.0,
+     470.0
+    ],
+    [
+     324.0,
+     470.0
+    ],
+    [
+     332.0,
+     461.0
+    ],
+    [
+     332.0,
+     459.0
+    ],
+    [
+     335.0,
+     456.0
+    ],
+    [
+     336.0,
+     453.0
+    ],
+    [
+     340.0,
+     454.0
+    ],
+    [
+     344.0,
+     452.0
+    ],
+    [
+     350.0,
+     452.0
+    ],
+    [
+     352.0,
+     449.0
+    ],
+    [
+     352.0,
+     447.0
+    ],
+    [
+     354.0,
+     445.0
+    ],
+    [
+     362.0,
+     445.0
+    ],
+    [
+     364.0,
+     444.0
+    ],
+    [
+     372.0,
+     433.0
+    ],
+    [
+     376.0,
+     430.0
+    ],
+    [
+     392.0,
+     429.0
+    ],
+    [
+     398.0,
+     425.0
+    ],
+    [
+     401.0,
+     425.0
+    ],
+    [
+     411.0,
+     415.0
+    ],
+    [
+     412.0,
+     409.0
+    ],
+    [
+     429.0,
+     389.0
+    ],
+    [
+     429.0,
+     379.0
+    ],
+    [
+     430.0,
+     378.0
+    ],
+    [
+     431.0,
+     371.0
+    ],
+    [
+     437.0,
+     365.0
+    ],
+    [
+     436.0,
+     348.0
+    ],
+    [
+     440.0,
+     342.0
+    ],
+    [
+     440.0,
+     322.0
+    ],
+    [
+     442.0,
+     319.0
+    ],
+    [
+     444.0,
+     319.0
+    ],
+    [
+     444.0,
+     315.0
+    ],
+    [
+     442.0,
+     309.0
+    ],
+    [
+     442.0,
+     301.0
+    ],
+    [
+     440.0,
+     301.0
+    ],
+    [
+     434.0,
+     295.0
+    ],
+    [
+     434.0,
+     293.0
+    ],
+    [
+     429.0,
+     288.0
+    ],
+    [
+     428.0,
+     283.0
+    ],
+    [
+     420.0,
+     274.0
+    ],
+    [
+     419.0,
+     271.0
+    ],
+    [
+     415.0,
+     269.0
+    ],
+    [
+     405.02,
+     257.78
+    ]
+   ]
+  },
+  {
+   "desde": "san_jose",
+   "hasta": "trinidad",
+   "nombre": "Camino a Porongos",
+   "anio": 1804,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     167.33,
+     477.19
+    ],
+    [
+     166.0,
+     475.0
+    ],
+    [
+     168.0,
+     472.0
+    ],
+    [
+     170.0,
+     455.0
+    ],
+    [
+     173.0,
+     452.0
+    ],
+    [
+     174.0,
+     437.0
+    ],
+    [
+     173.0,
+     436.0
+    ],
+    [
+     173.0,
+     433.0
+    ],
+    [
+     170.0,
+     428.0
+    ],
+    [
+     170.0,
+     425.0
+    ],
+    [
+     167.0,
+     421.0
+    ],
+    [
+     167.0,
+     416.0
+    ],
+    [
+     168.0,
+     414.0
+    ],
+    [
+     166.0,
+     412.0
+    ],
+    [
+     166.0,
+     408.0
+    ],
+    [
+     163.0,
+     404.0
+    ],
+    [
+     157.0,
+     399.0
+    ],
+    [
+     157.0,
+     396.0
+    ],
+    [
+     149.63,
+     385.76
+    ]
+   ]
+  },
+  {
+   "desde": "canelones",
+   "hasta": "florida",
+   "nombre": "Camino Real del Norte",
+   "anio": 1809,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     207.96,
+     496.47
+    ],
+    [
+     204.0,
+     493.0
+    ],
+    [
+     204.0,
+     491.0
+    ],
+    [
+     201.0,
+     487.0
+    ],
+    [
+     201.0,
+     480.0
+    ],
+    [
+     199.0,
+     477.0
+    ],
+    [
+     199.0,
+     475.0
+    ],
+    [
+     197.0,
+     473.0
+    ],
+    [
+     197.0,
+     470.0
+    ],
+    [
+     201.0,
+     465.0
+    ],
+    [
+     208.0,
+     459.0
+    ],
+    [
+     211.0,
+     452.0
+    ],
+    [
+     213.24,
+     450.58
+    ]
+   ]
+  },
+  {
+   "desde": "paysandu",
+   "hasta": "salto",
+   "nombre": "Camino de la costa del Uruguay",
+   "anio": 1817,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     37.99,
+     251.92
+    ],
+    [
+     41.0,
+     252.0
+    ],
+    [
+     42.0,
+     251.0
+    ],
+    [
+     42.0,
+     247.0
+    ],
+    [
+     50.0,
+     240.0
+    ],
+    [
+     50.0,
+     238.0
+    ],
+    [
+     54.0,
+     232.0
+    ],
+    [
+     54.0,
+     230.0
+    ],
+    [
+     58.0,
+     226.0
+    ],
+    [
+     57.0,
+     225.0
+    ],
+    [
+     58.0,
+     222.0
+    ],
+    [
+     58.0,
+     208.0
+    ],
+    [
+     56.0,
+     205.0
+    ],
+    [
+     56.0,
+     200.0
+    ],
+    [
+     60.0,
+     197.0
+    ],
+    [
+     61.0,
+     192.0
+    ],
+    [
+     56.0,
+     184.0
+    ],
+    [
+     56.0,
+     178.0
+    ],
+    [
+     54.0,
+     172.0
+    ],
+    [
+     51.0,
+     169.0
+    ],
+    [
+     50.0,
+     164.0
+    ],
+    [
+     46.0,
+     161.0
+    ],
+    [
+     46.0,
+     157.0
+    ],
+    [
+     49.0,
+     154.0
+    ],
+    [
+     50.0,
+     151.0
+    ],
+    [
+     49.41,
+     149.2
+    ]
+   ]
+  },
+  {
+   "desde": "florida",
+   "hasta": "durazno",
+   "nombre": "Camino Real del Norte",
+   "anio": 1821,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     213.24,
+     450.58
+    ],
+    [
+     211.0,
+     451.0
+    ],
+    [
+     207.0,
+     446.0
+    ],
+    [
+     207.0,
+     440.0
+    ],
+    [
+     204.0,
+     437.0
+    ],
+    [
+     203.0,
+     434.0
+    ],
+    [
+     203.0,
+     426.0
+    ],
+    [
+     202.0,
+     424.0
+    ],
+    [
+     194.0,
+     417.0
+    ],
+    [
+     192.0,
+     412.0
+    ],
+    [
+     189.0,
+     409.0
+    ],
+    [
+     189.0,
+     401.0
+    ],
+    [
+     187.0,
+     395.0
+    ],
+    [
+     185.0,
+     393.0
+    ],
+    [
+     185.0,
+     387.0
+    ],
+    [
+     186.0,
+     385.0
+    ],
+    [
+     184.0,
+     378.0
+    ],
+    [
+     184.52,
+     369.3
+    ]
+   ]
+  },
+  {
+   "desde": "trinidad",
+   "hasta": "durazno",
+   "nombre": "Camino de Porongos al Durazno",
+   "anio": 1821,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     149.63,
+     385.76
+    ],
+    [
+     154.0,
+     387.0
+    ],
+    [
+     159.0,
+     386.0
+    ],
+    [
+     168.0,
+     380.0
+    ],
+    [
+     170.0,
+     380.0
+    ],
+    [
+     176.0,
+     374.0
+    ],
+    [
+     180.0,
+     373.0
+    ],
+    [
+     184.52,
+     369.3
+    ]
+   ]
+  },
+  {
+   "desde": "salto",
+   "hasta": "bella_union",
+   "nombre": "Camino del Cuareim",
+   "anio": 1829,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     49.41,
+     149.2
+    ],
+    [
+     54.0,
+     146.0
+    ],
+    [
+     58.0,
+     146.0
+    ],
+    [
+     61.0,
+     144.0
+    ],
+    [
+     70.0,
+     142.0
+    ],
+    [
+     76.0,
+     136.0
+    ],
+    [
+     77.0,
+     132.0
+    ],
+    [
+     82.0,
+     127.0
+    ],
+    [
+     83.0,
+     125.0
+    ],
+    [
+     82.0,
+     121.0
+    ],
+    [
+     87.0,
+     116.0
+    ],
+    [
+     88.0,
+     105.0
+    ],
+    [
+     91.0,
+     99.0
+    ],
+    [
+     89.0,
+     93.0
+    ],
+    [
+     83.0,
+     86.0
+    ],
+    [
+     85.0,
+     81.0
+    ],
+    [
+     85.0,
+     77.0
+    ],
+    [
+     88.0,
+     75.0
+    ],
+    [
+     92.0,
+     68.0
+    ],
+    [
+     99.0,
+     61.0
+    ],
+    [
+     99.0,
+     56.0
+    ],
+    [
+     95.0,
+     50.0
+    ],
+    [
+     95.0,
+     47.0
+    ],
+    [
+     93.0,
+     44.0
+    ],
+    [
+     93.0,
+     40.0
+    ],
+    [
+     90.0,
+     35.0
+    ],
+    [
+     90.0,
+     32.0
+    ],
+    [
+     87.0,
+     29.0
+    ],
+    [
+     86.0,
+     24.0
+    ],
+    [
+     83.82,
+     22.84
+    ]
+   ]
+  },
+  {
+   "desde": "durazno",
+   "hasta": "tacuarembo",
+   "nombre": "Camino Real del Norte",
+   "anio": 1832,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     184.52,
+     369.3
+    ],
+    [
+     187.0,
+     369.0
+    ],
+    [
+     190.0,
+     366.0
+    ],
+    [
+     190.0,
+     364.0
+    ],
+    [
+     192.0,
+     361.0
+    ],
+    [
+     200.0,
+     354.0
+    ],
+    [
+     203.0,
+     350.0
+    ],
+    [
+     203.0,
+     346.0
+    ],
+    [
+     210.0,
+     339.0
+    ],
+    [
+     211.0,
+     335.0
+    ],
+    [
+     213.0,
+     333.0
+    ],
+    [
+     214.0,
+     322.0
+    ],
+    [
+     212.0,
+     320.0
+    ],
+    [
+     212.0,
+     314.0
+    ],
+    [
+     214.0,
+     312.0
+    ],
+    [
+     215.0,
+     303.0
+    ],
+    [
+     220.0,
+     298.0
+    ],
+    [
+     224.0,
+     298.0
+    ],
+    [
+     228.0,
+     294.0
+    ],
+    [
+     228.0,
+     292.0
+    ],
+    [
+     238.0,
+     281.0
+    ],
+    [
+     237.0,
+     273.0
+    ],
+    [
+     236.0,
+     272.0
+    ],
+    [
+     237.0,
+     265.0
+    ],
+    [
+     235.0,
+     262.0
+    ],
+    [
+     240.0,
+     256.0
+    ],
+    [
+     241.0,
+     251.0
+    ],
+    [
+     244.0,
+     248.0
+    ],
+    [
+     240.0,
+     243.0
+    ],
+    [
+     240.0,
+     241.0
+    ],
+    [
+     242.0,
+     235.0
+    ],
+    [
+     244.0,
+     233.0
+    ],
+    [
+     244.0,
+     230.0
+    ],
+    [
+     247.0,
+     227.0
+    ],
+    [
+     247.0,
+     224.0
+    ],
+    [
+     245.0,
+     222.0
+    ],
+    [
+     245.0,
+     212.0
+    ],
+    [
+     241.0,
+     204.0
+    ],
+    [
+     239.0,
+     191.0
+    ],
+    [
+     234.48,
+     185.44
+    ]
+   ]
+  },
+  {
+   "desde": "salto",
+   "hasta": "belen",
+   "nombre": "Camino de la costa del Uruguay",
+   "anio": 1801,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     49.41,
+     149.2
+    ],
+    [
+     54.0,
+     146.0
+    ],
+    [
+     58.0,
+     146.0
+    ],
+    [
+     61.0,
+     144.0
+    ],
+    [
+     70.0,
+     142.0
+    ],
+    [
+     76.0,
+     136.0
+    ],
+    [
+     77.0,
+     132.0
+    ],
+    [
+     82.0,
+     127.0
+    ],
+    [
+     83.0,
+     125.0
+    ],
+    [
+     82.0,
+     121.0
+    ],
+    [
+     87.0,
+     116.0
+    ],
+    [
+     88.0,
+     105.0
+    ],
+    [
+     91.0,
+     99.0
+    ],
+    [
+     90.0,
+     97.0
+    ],
+    [
+     85.0,
+     92.0
+    ],
+    [
+     81.0,
+     91.0
+    ],
+    [
+     75.0,
+     87.0
+    ],
+    [
+     73.0,
+     87.0
+    ],
+    [
+     70.0,
+     83.0
+    ],
+    [
+     68.0,
+     82.0
+    ]
+   ]
+  },
+  {
+   "desde": "salto",
+   "hasta": "tacuarembo",
+   "nombre": "Camino de Salto a Tacuarembó",
+   "anio": 1832,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     49.41,
+     149.2
+    ],
+    [
+     54.0,
+     146.0
+    ],
+    [
+     58.0,
+     146.0
+    ],
+    [
+     61.0,
+     144.0
+    ],
+    [
+     70.0,
+     142.0
+    ],
+    [
+     74.0,
+     138.0
+    ],
+    [
+     77.0,
+     138.0
+    ],
+    [
+     82.0,
+     133.0
+    ],
+    [
+     90.0,
+     131.0
+    ],
+    [
+     97.0,
+     124.0
+    ],
+    [
+     116.0,
+     125.0
+    ],
+    [
+     121.0,
+     130.0
+    ],
+    [
+     128.0,
+     131.0
+    ],
+    [
+     131.0,
+     134.0
+    ],
+    [
+     136.0,
+     133.0
+    ],
+    [
+     151.0,
+     138.0
+    ],
+    [
+     158.0,
+     146.0
+    ],
+    [
+     160.0,
+     146.0
+    ],
+    [
+     165.0,
+     150.0
+    ],
+    [
+     170.0,
+     149.0
+    ],
+    [
+     178.0,
+     156.0
+    ],
+    [
+     179.0,
+     155.0
+    ],
+    [
+     182.0,
+     156.0
+    ],
+    [
+     186.0,
+     161.0
+    ],
+    [
+     191.0,
+     165.0
+    ],
+    [
+     193.0,
+     165.0
+    ],
+    [
+     196.0,
+     168.0
+    ],
+    [
+     205.0,
+     170.0
+    ],
+    [
+     211.0,
+     175.0
+    ],
+    [
+     217.0,
+     176.0
+    ],
+    [
+     219.0,
+     178.0
+    ],
+    [
+     223.0,
+     178.0
+    ],
+    [
+     233.0,
+     186.0
+    ],
+    [
+     234.48,
+     185.44
+    ]
+   ]
+  },
+  {
+   "desde": "melo",
+   "hasta": "treinta_y_tres",
+   "nombre": "Camino a Treinta y Tres",
+   "anio": 1853,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     405.02,
+     257.78
+    ],
+    [
+     415.0,
+     269.0
+    ],
+    [
+     419.0,
+     271.0
+    ],
+    [
+     420.0,
+     274.0
+    ],
+    [
+     428.0,
+     283.0
+    ],
+    [
+     429.0,
+     288.0
+    ],
+    [
+     434.0,
+     293.0
+    ],
+    [
+     434.0,
+     295.0
+    ],
+    [
+     440.0,
+     301.0
+    ],
+    [
+     442.0,
+     301.0
+    ],
+    [
+     442.0,
+     309.0
+    ],
+    [
+     443.0,
+     310.0
+    ],
+    [
+     444.0,
+     319.0
+    ],
+    [
+     442.0,
+     319.0
+    ],
+    [
+     440.0,
+     322.0
+    ],
+    [
+     438.0,
+     338.0
+    ],
+    [
+     436.0,
+     340.0
+    ],
+    [
+     432.0,
+     341.0
+    ],
+    [
+     425.0,
+     348.0
+    ],
+    [
+     416.0,
+     350.0
+    ],
+    [
+     410.0,
+     354.0
+    ],
+    [
+     407.0,
+     354.0
+    ],
+    [
+     404.0,
+     356.0
+    ],
+    [
+     400.0,
+     356.0
+    ],
+    [
+     398.0,
+     358.0
+    ],
+    [
+     395.0,
+     358.0
+    ],
+    [
+     392.0,
+     355.0
+    ],
+    [
+     384.54,
+     353.49
+    ]
+   ]
+  },
+  {
+   "desde": "minas",
+   "hasta": "treinta_y_tres",
+   "nombre": "Camino de Minas a Treinta y Tres",
+   "anio": 1853,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     304.22,
+     480.2
+    ],
+    [
+     303.0,
+     479.0
+    ],
+    [
+     304.0,
+     476.0
+    ],
+    [
+     307.0,
+     476.0
+    ],
+    [
+     311.0,
+     478.0
+    ],
+    [
+     314.0,
+     476.0
+    ],
+    [
+     317.0,
+     476.0
+    ],
+    [
+     320.0,
+     472.0
+    ],
+    [
+     322.0,
+     470.0
+    ],
+    [
+     324.0,
+     470.0
+    ],
+    [
+     332.0,
+     461.0
+    ],
+    [
+     332.0,
+     459.0
+    ],
+    [
+     335.0,
+     456.0
+    ],
+    [
+     336.0,
+     453.0
+    ],
+    [
+     340.0,
+     454.0
+    ],
+    [
+     344.0,
+     452.0
+    ],
+    [
+     350.0,
+     452.0
+    ],
+    [
+     352.0,
+     449.0
+    ],
+    [
+     352.0,
+     447.0
+    ],
+    [
+     354.0,
+     445.0
+    ],
+    [
+     362.0,
+     445.0
+    ],
+    [
+     364.0,
+     444.0
+    ],
+    [
+     372.0,
+     433.0
+    ],
+    [
+     375.0,
+     431.0
+    ],
+    [
+     376.0,
+     428.0
+    ],
+    [
+     376.0,
+     420.0
+    ],
+    [
+     380.0,
+     417.0
+    ],
+    [
+     381.0,
+     414.0
+    ],
+    [
+     381.0,
+     408.0
+    ],
+    [
+     379.0,
+     408.0
+    ],
+    [
+     379.0,
+     405.0
+    ],
+    [
+     381.0,
+     403.0
+    ],
+    [
+     381.0,
+     396.0
+    ],
+    [
+     384.0,
+     391.0
+    ],
+    [
+     396.0,
+     380.0
+    ],
+    [
+     395.0,
+     365.0
+    ],
+    [
+     391.0,
+     361.0
+    ],
+    [
+     391.0,
+     357.0
+    ],
+    [
+     388.0,
+     354.0
+    ],
+    [
+     384.54,
+     353.49
+    ]
+   ]
+  },
+  {
+   "desde": "bella_union",
+   "hasta": "artigas",
+   "nombre": "Camino del Cuareim",
+   "anio": 1852,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     83.82,
+     22.84
+    ],
+    [
+     86.0,
+     24.0
+    ],
+    [
+     87.0,
+     29.0
+    ],
+    [
+     90.0,
+     32.0
+    ],
+    [
+     95.0,
+     32.0
+    ],
+    [
+     102.0,
+     39.0
+    ],
+    [
+     107.0,
+     39.0
+    ],
+    [
+     112.0,
+     37.0
+    ],
+    [
+     115.0,
+     34.0
+    ],
+    [
+     122.0,
+     33.0
+    ],
+    [
+     127.0,
+     27.0
+    ],
+    [
+     130.0,
+     27.0
+    ],
+    [
+     134.0,
+     29.0
+    ],
+    [
+     142.0,
+     35.0
+    ],
+    [
+     150.0,
+     36.0
+    ],
+    [
+     152.0,
+     38.0
+    ],
+    [
+     156.0,
+     38.0
+    ],
+    [
+     161.0,
+     41.0
+    ],
+    [
+     170.0,
+     40.0
+    ],
+    [
+     177.0,
+     37.0
+    ],
+    [
+     184.0,
+     38.0
+    ],
+    [
+     186.0,
+     40.0
+    ],
+    [
+     189.0,
+     40.0
+    ],
+    [
+     190.3,
+     38.76
+    ]
+   ]
+  },
+  {
+   "desde": "mercedes",
+   "hasta": "fray_bentos",
+   "nombre": "Camino a Fray Bentos",
+   "anio": 1859,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     43.51,
+     355.41
+    ],
+    [
+     44.0,
+     354.0
+    ],
+    [
+     37.0,
+     346.0
+    ],
+    [
+     33.0,
+     346.0
+    ],
+    [
+     25.0,
+     343.0
+    ],
+    [
+     23.0,
+     344.0
+    ],
+    [
+     20.0,
+     343.0
+    ],
+    [
+     17.81,
+     340.85
+    ]
+   ]
+  },
+  {
+   "desde": "tacuarembo",
+   "hasta": "rivera",
+   "nombre": "Camino a la frontera de Rivera",
+   "anio": 1867,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     234.48,
+     185.44
+    ],
+    [
+     235.0,
+     182.0
+    ],
+    [
+     239.0,
+     179.0
+    ],
+    [
+     243.0,
+     178.0
+    ],
+    [
+     247.0,
+     175.0
+    ],
+    [
+     251.0,
+     175.0
+    ],
+    [
+     256.0,
+     171.0
+    ],
+    [
+     259.0,
+     170.0
+    ],
+    [
+     264.0,
+     164.0
+    ],
+    [
+     264.0,
+     158.0
+    ],
+    [
+     269.0,
+     154.0
+    ],
+    [
+     272.0,
+     154.0
+    ],
+    [
+     278.0,
+     146.0
+    ],
+    [
+     279.0,
+     135.0
+    ],
+    [
+     282.0,
+     132.0
+    ],
+    [
+     282.0,
+     130.0
+    ],
+    [
+     280.0,
+     127.0
+    ],
+    [
+     281.0,
+     125.0
+    ],
+    [
+     281.0,
+     120.0
+    ],
+    [
+     279.0,
+     118.0
+    ],
+    [
+     279.0,
+     114.0
+    ],
+    [
+     281.0,
+     111.0
+    ],
+    [
+     282.0,
+     104.0
+    ],
+    [
+     280.0,
+     102.0
+    ],
+    [
+     279.0,
+     98.0
+    ],
+    [
+     275.7,
+     95.7
+    ]
+   ]
+  },
+  {
+   "desde": "rocha",
+   "hasta": "castillos",
+   "nombre": "Camino a Castillos",
+   "anio": 1866,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     389.16,
+     492.09
+    ],
+    [
+     393.0,
+     495.0
+    ],
+    [
+     395.0,
+     495.0
+    ],
+    [
+     399.0,
+     492.0
+    ],
+    [
+     399.0,
+     490.0
+    ],
+    [
+     401.0,
+     488.0
+    ],
+    [
+     403.0,
+     488.0
+    ],
+    [
+     406.0,
+     485.0
+    ],
+    [
+     413.0,
+     485.0
+    ],
+    [
+     416.0,
+     483.0
+    ],
+    [
+     419.0,
+     483.0
+    ],
+    [
+     422.0,
+     480.0
+    ],
+    [
+     422.0,
+     470.0
+    ],
+    [
+     427.0,
+     465.0
+    ],
+    [
+     434.09,
+     460.82
+    ]
+   ]
+  },
+  {
+   "desde": "colonia",
+   "hasta": "carmelo",
+   "nombre": "Camino de la costa del Uruguay",
+   "anio": 1816,
+   "estado": "ESTIMADO",
+   "nota": "trazado buscado sobre el relieve real (cuchillas, pasos angostos, sin bañados)",
+   "puntos": [
+    [
+     61.76,
+     490.4
+    ],
+    [
+     63.0,
+     487.0
+    ],
+    [
+     59.0,
+     480.0
+    ],
+    [
+     59.0,
+     475.0
+    ],
+    [
+     57.0,
+     473.0
+    ],
+    [
+     57.0,
+     468.0
+    ],
+    [
+     56.0,
+     467.0
+    ],
+    [
+     57.0,
+     459.0
+    ],
+    [
+     48.0,
+     451.0
+    ],
+    [
+     37.0,
+     450.0
+    ],
+    [
+     30.0,
+     447.0
+    ],
+    [
+     22.0,
+     441.0
+    ],
+    [
+     20.0,
+     441.0
+    ],
+    [
+     20.42,
+     438.56
+    ]
+   ]
+  }
+ ],
+ "puertos": [
+  {
+   "pueblo": "montevideo",
+   "desde": 1726,
+   "tipo": "mar",
+   "estado": "DOCUMENTADO",
+   "nota": "El puerto de la bahía (escala ciudad)."
+  },
+  {
+   "pueblo": "colonia",
+   "desde": 1680,
+   "tipo": "rio",
+   "estado": "DOCUMENTADO",
+   "nota": "Puerto portugués frente a Buenos Aires hasta 1777 (contrabando)."
+  },
+  {
+   "pueblo": "maldonado",
+   "desde": 1757,
+   "tipo": "mar",
+   "estado": "ESTIMADO",
+   "nota": "Bahía de Maldonado: puerto de la comandancia."
+  },
+  {
+   "pueblo": "soriano",
+   "desde": 1830,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": "Puerto del Río Negro."
+  },
+  {
+   "pueblo": "mercedes",
+   "desde": 1830,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": "Puerto del Río Negro."
+  },
+  {
+   "pueblo": "carmelo",
+   "desde": 1830,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": ""
+  },
+  {
+   "pueblo": "nueva_palmira",
+   "desde": 1831,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": ""
+  },
+  {
+   "pueblo": "paysandu",
+   "desde": 1830,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": ""
+  },
+  {
+   "pueblo": "salto",
+   "desde": 1830,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": "Cabecera de la navegación del Río Uruguay (más arriba están los saltos)."
+  },
+  {
+   "pueblo": "fray_bentos",
+   "desde": 1859,
+   "tipo": "rio",
+   "estado": "ESTIMADO",
+   "nota": ""
+  }
+ ],
+ "estancias": [
+  {
+   "id": "huerfanas",
+   "nombre": "Estancia de las Huérfanas (jesuitas)",
+   "anio": 1741,
+   "pos": [
+    77.57,
+    465.56
+   ],
+   "estado": "ESTIMADO",
+   "nota": "Estancia de los jesuitas con su calera (Calera de las Huérfanas, Colonia). Año aproximado de la estancia."
+  },
+  {
+   "id": "del_rey",
+   "nombre": "Real Estancia del Rey",
+   "anio": 1730,
+   "pos": [
+    224.3,
+    500.0
+   ],
+   "estado": "ESTIMADO",
+   "nota": "Estancia del Rey de los primeros años de Montevideo (ubicación aproximada)."
+  },
+  {
+   "id": "medina",
+   "nombre": "Estancia de Francisco de Medina",
+   "anio": 1781,
+   "pos": [
+    98.13,
+    468.89
+   ],
+   "estado": "DOCUMENTADO",
+   "nota": "Abastece al primer saladero de la Banda Oriental (Colla, 1781; INAC, ver desarrollo-y-tecnologia.md)."
+  }
+ ],
+ "saladeros": [
+  {
+   "id": "colla",
+   "nombre": "Saladero de Medina (arroyo Colla)",
+   "anio": 1781,
+   "pos": [
+    102.8,
+    472.22
+   ],
+   "estado": "DOCUMENTADO",
+   "nota": "Primer saladero de la Banda Oriental, Francisco de Medina, 1781 (INAC)."
+  },
+  {
+   "id": "fray_bentos",
+   "nombre": "Fábrica de extracto de carne (Fray Bentos)",
+   "anio": 1863,
+   "pos": [
+    18.69,
+    342.22
+   ],
+   "estado": "DOCUMENTADO",
+   "nota": "Giebert et Compagnie, 1863 (después Liebig)."
+  },
+  {
+   "id": "paysandu",
+   "nombre": "Saladeros de Paysandú",
+   "anio": 1840,
+   "pos": [
+    40.19,
+    253.33
+   ],
+   "estado": "ESTIMADO",
+   "nota": "Saladeros del litoral (año aproximado)."
+  },
+  {
+   "id": "salto",
+   "nombre": "Saladeros de Salto",
+   "anio": 1850,
+   "pos": [
+    51.4,
+    150.0
+   ],
+   "estado": "ESTIMADO",
+   "nota": "Saladeros del litoral (año aproximado)."
+  }
+ ],
+ "departamentos": [
+  {
+   "nombre": "Artigas",
+   "creado": 1884
+  },
+  {
+   "nombre": "Canelones",
+   "creado": 1816
+  },
+  {
+   "nombre": "Cerro Largo",
+   "creado": 1828
+  },
+  {
+   "nombre": "Colonia",
+   "creado": 1816
+  },
+  {
+   "nombre": "Durazno",
+   "creado": 1828
+  },
+  {
+   "nombre": "Flores",
+   "creado": 1885
+  },
+  {
+   "nombre": "Florida",
+   "creado": 1856
+  },
+  {
+   "nombre": "Lavalleja",
+   "creado": 1837
+  },
+  {
+   "nombre": "Maldonado",
+   "creado": 1816
+  },
+  {
+   "nombre": "Montevideo",
+   "creado": 1816
+  },
+  {
+   "nombre": "Paysandú",
+   "creado": 1828
+  },
+  {
+   "nombre": "Río Negro",
+   "creado": 1868
+  },
+  {
+   "nombre": "Rivera",
+   "creado": 1884
+  },
+  {
+   "nombre": "Rocha",
+   "creado": 1880
+  },
+  {
+   "nombre": "Salto",
+   "creado": 1837
+  },
+  {
+   "nombre": "San José",
+   "creado": 1816
+  },
+  {
+   "nombre": "Soriano",
+   "creado": 1816
+  },
+  {
+   "nombre": "Tacuarembó",
+   "creado": 1837
+  },
+  {
+   "nombre": "Treinta y Tres",
+   "creado": 1884
+  }
+ ]
+}

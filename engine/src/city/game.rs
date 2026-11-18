@@ -105,6 +105,8 @@ pub struct Game {
     pub vis: Visibilidad,
     /// Aptitud de los solares vacíos para la zona elegida (zona, mes, solares → aptitud).
     aptitud_cache: Mutex<Option<((u8, u32, usize), std::collections::HashMap<u32, f32>)>>,
+    /// [mapa del país] El país alrededor de la ciudad (escala país, ver `crate::pais`).
+    pub pais: crate::pais::Pais,
 }
 
 type CapaTerreno = ((u8, i32, i32, u32, usize), Vec<OverlayVertex>);
@@ -174,6 +176,7 @@ impl Default for Game {
             message_at: Instant::now(),
             message_seq: 1,
             inspected: None,
+            pais: crate::pais::Pais::default(),
         }
     }
 }
@@ -364,7 +367,7 @@ impl Game {
     }
 
     /// Texto junto al cursor mientras se traza una calle: largo, ángulo y enganche.
-    pub fn draft_label(&self, _t: &TerrainGen) -> Option<String> {
+    pub fn draft_label(&self, t: &TerrainGen) -> Option<String> {
         let h = self.hover?;
         let (from, to) = match (self.tool, self.stage) {
             (Tool::Straight | Tool::Curve, 1) | (Tool::Grid, 1) => (self.p0, self.draft(self.p0, h)),
@@ -385,6 +388,14 @@ impl Game {
         }
         if self.free_draw {
             s.push_str(" · libre (Shift)");
+        }
+        // [arroyos] Qué arroyos cruza (y el puente) o si pisa un bañado.
+        if let Some(a) = super::cauces::aviso_trazado(t, &line(from, to.end)) {
+            s.push_str(" · ");
+            s.push_str(&a);
+            if self.tool == Tool::Grid {
+                s.push_str(" (el damero se corta en los arroyos)");
+            }
         }
         Some(s)
     }
@@ -749,11 +760,25 @@ impl Game {
                 self.inspected = None;
             }
         }
-        let news = self.city.tick(t, dt * self.speed, &mut e);
+        let mut news = self.city.tick(t, dt * self.speed, &mut e);
+        // [mapa del país] El país sigue el calendario de la ciudad y le deja su aporte (cueros,
+        // sebo, tasajo y ganado que llegan en carreta) para el mes siguiente.
+        if self.pais.mes < self.city.month {
+            let sequia = self.city.economy.climate_drought.unwrap_or(false);
+            news.extend(self.pais.mes_tick(self.city.month, self.city.population(), sequia));
+            self.city.interior = self.pais.ultimo.clone();
+        }
         for n in news {
             self.say(n);
         }
         (!e.is_empty()).then_some(e)
+    }
+
+    /// [mapa del país] Una obra del cabildo en el país (se paga con el tesoro de la ciudad).
+    pub fn accion_pais(&mut self, a: &crate::pais::Accion) {
+        match self.pais.aplicar(a, &mut self.city.money) {
+            Ok(m) | Err(m) => self.say(m),
+        }
     }
 
     pub fn status(&self) -> String {
