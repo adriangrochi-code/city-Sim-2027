@@ -295,7 +295,7 @@ impl Red {
             }
         }
         // Ferrocarril (desde la época 3): los pueblos junto a una vía ya abierta.
-        if super::nivel_epoca(super::epoca_de(anio)) >= 2 {
+        if super::nivel_epoca(p.epoca_en(anio)) >= 2 {
             for k in 0..n {
                 let junto = g.vias.iter().filter(|v| v.anio <= anio).any(|v| v.puntos.windows(2).any(|w| datos::dist_seg(pos[k], w[0], w[1]) < 4.0));
                 if junto {

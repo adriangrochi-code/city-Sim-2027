@@ -233,6 +233,9 @@ pub struct Pais {
     /// Últimas noticias del país: (mes, texto).
     pub cronica: Vec<(u32, String)>,
     pub proximo: u32,
+    /// Época de la ciudad (manda sobre el calendario cuando la ciudad ya pasó de época).
+    #[serde(default)]
+    pub epoca_ciudad: Option<Epoca>,
 }
 
 impl Default for Pais {
@@ -312,7 +315,7 @@ const NOMBRES_PUEBLO: [&str; 16] = [
 impl Pais {
     /// El país al empezar el mes `mes` (por omisión, marzo de 1726): lo que ya existía.
     pub fn nuevo(mes: u32) -> Pais {
-        let mut p = Pais { mes, pueblos: Vec::new(), estancias: Vec::new(), saladeros: Vec::new(), caminos: Vec::new(), puertos: Vec::new(), eventos: Vec::new(), azar: 0x5EED_1726, ultimo: Aporte::default(), flujos: Vec::new(), cronica: Vec::new(), proximo: 1 };
+        let mut p = Pais { mes, pueblos: Vec::new(), estancias: Vec::new(), saladeros: Vec::new(), caminos: Vec::new(), puertos: Vec::new(), eventos: Vec::new(), azar: 0x5EED_1726, ultimo: Aporte::default(), flujos: Vec::new(), cronica: Vec::new(), proximo: 1, epoca_ciudad: None };
         p.historia(true);
         p
     }
@@ -333,7 +336,13 @@ impl Pais {
     }
 
     pub fn epoca(&self) -> Epoca {
-        epoca_de(self.anio())
+        self.epoca_en(self.anio())
+    }
+
+    /// La época del país en un año: la de la ciudad si se conoce (la ciudad decide cuándo
+    /// cambia), si no la del calendario.
+    pub fn epoca_en(&self, anio: i32) -> Epoca {
+        self.epoca_ciudad.unwrap_or_else(|| epoca_de(anio))
     }
 
     fn id(&mut self) -> u32 {
@@ -442,7 +451,7 @@ impl Pais {
         let mut ap = Aporte::default();
         let mut flujos: Vec<Flujo> = Vec::new();
         let frontera = |p: [f32; 2]| rutas::km_a_la_frontera(p);
-        let colonial = nivel_epoca(epoca_de(anio)) == 0;
+        let colonial = nivel_epoca(self.epoca_en(anio)) == 0;
         // Saladeros: compran el ganado de las estancias cercanas (hasta su capacidad).
         let mut vendido = vec![0.0f32; self.estancias.len()];
         for s in self.saladeros.iter_mut() {
@@ -517,7 +526,7 @@ impl Pais {
             // Cada pueblo es su pago entero (el pueblo y la campaña de alrededor). La capacidad
             // y el crecimiento suben con cada época (inmigración, ferrocarril): ESTIMADO,
             // calibrado con el orden de los censos (interior ~85.000 en 1852, ~700.000 en 1908).
-            let ep = nivel_epoca(epoca_de(anio)) as usize;
+            let ep = nivel_epoca(self.epoca_en(anio)) as usize;
             let escala = [1.6, 4.0, 14.0, 18.0, 22.0, 24.0][ep.min(5)];
             let extra = [0.0, 0.012, 0.035, 0.01, 0.0, 0.0][ep.min(5)];
             let r = (0.012 + 0.025 * conexion + 0.01 * (est / 5.0).min(1.0) + extra) * seca;

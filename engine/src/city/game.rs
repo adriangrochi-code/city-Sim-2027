@@ -799,6 +799,7 @@ impl Game {
         let mut news = self.city.tick(t, dt * self.speed, &mut e);
         // [mapa del país] El país sigue el calendario de la ciudad y le deja su aporte (cueros,
         // sebo, tasajo y ganado que llegan en carreta) para el mes siguiente.
+        self.pais.epoca_ciudad = Some(self.city.epoca.actual);
         if self.pais.mes < self.city.month {
             let sequia = self.city.economy.climate_drought.unwrap_or(false);
             news.extend(self.pais.mes_tick(self.city.month, self.city.population(), sequia));
@@ -812,6 +813,7 @@ impl Game {
 
     /// [mapa del país] Una obra del cabildo en el país (se paga con el tesoro de la ciudad).
     pub fn accion_pais(&mut self, a: &crate::pais::Accion) {
+        self.pais.epoca_ciudad = Some(self.city.epoca.actual);
         match self.pais.aplicar(a, &mut self.city.money) {
             Ok(m) | Err(m) => self.say(m),
         }
