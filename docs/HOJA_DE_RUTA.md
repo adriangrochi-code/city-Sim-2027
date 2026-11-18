@@ -15,6 +15,7 @@
 | Mundo real en el motor | MDT de 30 m de la IDE, hidrografía oficial (arroyos, cañadas, bañados, playas, islas), curvatura, puentes, ríos con corriente, mareas y ciclo lunar, sequías e inundaciones, clima con datos del INUMET, viento |
 | Paisaje de 1726 | Monte nativo calibrado con datos y testimonios (4,2 % del mapa, galerías por clase de cauce), 9 especies de árboles con variantes, flora baja nativa por zona, suelos y afloramientos (CONEAT), costa por tramos (arena, mixta, piedra, restingas) — ver `docs/sistemas/vegetacion-historica.md` y `costa.md` |
 | Entorno amplio | 300 × 300 km de relieve real alrededor del mapa (MDT de la IDE + Copernicus para la costa argentina, monte y bañados), 11 niveles de detalle (la tierra llega al horizonte, ~90 km), sin cortes rectos entre grillas ni contra el agua — ver `docs/sistemas/mapa-real.md#entorno-amplio` |
+| Mapa del país | El Uruguay a 1 km con datos de la IDE, el MTOP, la DGF y DINAMIGE; pueblos, caminos, puertos, estancias y saladeros por fecha; carretas al puerto de Montevideo que alimentan la economía de la ciudad; modo «Mapa del país» (M) — ver `docs/sistemas/mapa-pais.md` |
 | Calidad visual | Vóxel de 0,25 m, flora en micro-vóxeles de 0,125 m, copas con racimos, nivel de detalle del monte, agua sin tapar tierra en ningún nivel, niebla con sol |
 | Personajes y animales | Modelos de detalle de micro-vóxeles de 1/16 m (biblioteca por datos con paletas y partes animadas): vecinos vestidos según su persona, oficio y época (19 atuendos), jinetes, carretas con yunta y boyero, carros; rodeos en las estancias según su rinde, caballos en los palenques de las pulperías, perros, gallinas, botes en el muelle; faroles, toneles, brocales, pozos, letreros (ver `docs/sistemas/personajes-y-animales.md`) |
 
@@ -32,7 +33,7 @@
 - [x] Mejorar calles sin demoler (empedrar con piedra de cantera, poner faroles con costo mensual)
 - [x] Mapa por defecto con la geografía real de Montevideo (24 km, ver `docs/sistemas/mapa-real.md`)
 - [x] Casas y calles a tamaño real (cuadra de 100 varas, calles de 10 y 12 varas)
-- [ ] Uruguay a escala país; las calles y solares deben esquivar los arroyos
+- [x] Uruguay a escala país; las calles y solares deben esquivar los arroyos — mapa del país en el motor (relieve de la IDE a 1 km, agua, 19 departamentos, ríos, monte, bañados, 33 pueblos con su año de fundación verificado, caminos reales, ferrocarril por año, recursos; estancias, saladeros y carretas que llevan cueros, sebo y tasajo al puerto) y solares fuera de cauces, orillas y bañados, damero cortado en los arroyos y aviso de puentes al trazar (ver [sistemas/mapa-pais.md](sistemas/mapa-pais.md))
 - [ ] Alcantarillas y saneamiento por épocas (diseñado; **en parte**: la versión colonial —letrinas y pozos negros por tipo de casa, pozos de agua que se contaminan, basurales, recolección con carretilla y basurero— ya está en el motor; faltan los colectores y el agua corriente de las épocas siguientes, que ya figuran como datos)
 - [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (diseñado; la versión colonial ya existe)
 
@@ -66,11 +67,11 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 
 - [x] Épocas 4, 5 y 6 en detalle (Art Déco y la Rambla, Modernismo, Contemporánea): borradores v0.1
 - [ ] Kits de vóxeles por época (estética de estructuras de la época 2 en adelante)
-- [ ] Mapa del país (escala país) en detalle
+- [x] Mapa del país (escala país) en detalle: datos, fuentes, simulación agregada, obras por época y su modo en el motor ([sistemas/mapa-pais.md](sistemas/mapa-pais.md)). Falta: ciudades secundarias jugables, ferrocarril del jugador, represas y rutas (épocas 3-6)
 
 ## Fase 4: época 2, Ciudad Nueva
 
-- [ ] Ensanche planificado sobre el ejido, gas, teatro, mapa del país con pueblos y caminos
+- [ ] Ensanche planificado sobre el ejido, gas, teatro, mapa del país con pueblos y caminos (**en parte**: el mapa del país ya deja fundar pueblos, trazar caminos con puentes y abrir puertos desde la Ciudad Nueva; faltan diligencias y postas)
 - [ ] Rehabilitación de casas viejas y modernización de edificios coloniales
 
 ## Más adelante

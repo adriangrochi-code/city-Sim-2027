@@ -6,6 +6,7 @@
 //!   motor --juego                      directo a una partida nueva (sin el menú principal)
 //!   motor --sandbox                    ventana con el sandbox de vóxeles (escena colonial)
 //!   motor --demo-ciudad carpeta        recorrido del juego sin pantalla (con --window, en la ventana)
+//!   motor --demo-pais carpeta          recorrido del mapa del país (capturas del país por épocas)
 //!   motor --shot salida.png [...]      una captura sin ventana (todo el mundo de una vez)
 //!   motor --auto-test carpeta          recorrido automático sin pantalla, con capturas
 //!   motor --window --auto-test carpeta el mismo recorrido, en la ventana
@@ -26,6 +27,7 @@ mod camera;
 mod lod;
 mod menu;
 mod mesher;
+mod pais;
 mod palette;
 mod raycast;
 mod render;
@@ -73,6 +75,8 @@ struct Args {
     scene_set: bool,
     /// Capturas y sandbox sobre el mapa real de Montevideo (`--mapa real`).
     real: bool,
+    /// `--demo-pais`: el recorrido del mapa del país.
+    pais: bool,
 }
 
 fn parse_args() -> Args {
@@ -98,6 +102,7 @@ fn parse_args() -> Args {
         sandbox: false,
         scene_set: false,
         real: false,
+        pais: false,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -112,6 +117,12 @@ fn parse_args() -> Args {
             "--demo-ciudad" => {
                 a.auto_test = Some(next);
                 a.juego = true;
+            }
+            // [mapa del país] Recorrido del mapa del país con capturas.
+            "--demo-pais" => {
+                a.auto_test = Some(next);
+                a.juego = true;
+                a.pais = true;
             }
             "--juego" | "--sandbox" => {
                 if argv[i] == "--juego" {
@@ -170,7 +181,7 @@ fn parse_args() -> Args {
                 continue;
             }
             "--help" | "-h" => {
-                println!("{}", include_str!("main.rs").lines().skip(3).take(13).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
+                println!("{}", include_str!("main.rs").lines().skip(3).take(14).map(|l| l.trim_start_matches("//!").trim_start_matches(' ')).collect::<Vec<_>>().join("\n"));
                 std::process::exit(0);
             }
             other => eprintln!("argumento desconocido: {other}"),
@@ -257,7 +268,7 @@ fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
     println!("Adaptador: {} · listo en {:.2?} · {} hilos de trabajo", r.adapter_name, t0.elapsed(), args.threads);
     let mut s = new_session(args);
     s.view_h = args.size.1 as f32;
-    let steps = if s.game.is_some() { tour::city_steps() } else if args.real { tour::landscape_steps() } else { tour::default_steps() };
+    let steps = if args.pais { pais::tour::pasos() } else if s.game.is_some() { tour::city_steps() } else if args.real { tour::landscape_steps() } else { tour::default_steps() };
     let mut tour = tour::Tour::with_steps(dir, args.size.0, args.size.1, steps);
     let mut first_logged = false;
     loop {

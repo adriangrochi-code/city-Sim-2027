@@ -434,8 +434,8 @@ impl Lots {
                 let u = (i as f32 / 2.0 - 0.5) * (W - 1.0);
                 let v = (j as f32 / 7.0 - 0.5) * (D - 1.0);
                 let p = c + side * u + f * v;
-                let (d, hw) = t.arroyo_query(p.x, p.y);
-                if d < hw + 2.5 || t.height(p.x, p.y) < 0.5 {
+                // [arroyos] Ni el cauce, ni su orilla, ni un bañado (ver `cauces`).
+                if super::cauces::punto_vedado(t, p) || t.height(p.x, p.y) < 0.5 {
                     return false;
                 }
             }
