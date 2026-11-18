@@ -199,6 +199,32 @@ fn pretil(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w0: i32, w1: 
     let p = es.pretil.max(1);
     ring(f, e, u0, u1, h, h + p, w0, w1, es.muro);
     let m = piedra_o_moldura(es);
+    if es.neo && es.pretil_tipo == 2 && p >= 2 {
+        // Balaustrada italianizante: pilares cada 4 vóxeles (con macetones o pináculos en las
+        // casas más ornamentadas), balaustres claros entre ellos y la albardilla.
+        f.fill(e, u0, u1, h, h + 1, w0, w0 + 1, es.muro);
+        for u in u0..u1 {
+            let pilar = (u - u0) % 4 == 0 || u == u1 - 1;
+            if pilar {
+                f.fill(e, u, u + 1, h + 1, h + p, w0, w0 + 1, es.muro);
+            } else if (u - u0) % 2 == 1 {
+                f.clear(e, u, u + 1, h + 1, h + p, w0, w0 + 1);
+                f.raw(e, u, h + 1, w0, m);
+            } else {
+                f.raw_fill(e, u, u + 1, h + 1, h + p, w0, w0 + 1, m);
+            }
+        }
+        f.fill(e, u0, u1, h + p, h + p + 1, w0, w0 + 1, m);
+        if es.ornamento >= 2 {
+            let mut u = u0;
+            while u < u1 {
+                f.raw(e, u, h + p + 1, w0, m);
+                u += 8;
+            }
+            f.raw(e, u1 - 1, h + p + 1, w0, m);
+        }
+        return;
+    }
     match es.pretil_tipo {
         1 => {
             let mut u = u0;
@@ -293,6 +319,104 @@ fn frutal(f: &Frame, e: &mut Edits, u: i32, w: i32, seed: u64) {
                     f.raw(e, u + du, y, w + dw, if (du + dw + y) % 4 == 0 { LEAF_DARK } else { LEAF });
                 }
             }
+        }
+    }
+}
+
+// --- Piezas de la fachada neoclásica (época 2) ----------------------------------------------
+
+/// Ventana alta de la Ciudad Nueva: persianas (algunas abiertas) detrás de una reja de hierro
+/// fundido, plana o volada sobre una losita de mármol, con el guardapolvo de moldura arriba y
+/// un frontoncito en las casas más ornamentadas.
+#[allow(clippy::too_many_arguments)]
+fn ventana_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1: i32) {
+    let abierta = hash(f.at(u0, y0, 0), es.seed ^ 0x9E0) < 0.45;
+    opening(f, e, u0, u1, y0, y1, 2, if abierta { WINDOW } else { es.carpinteria });
+    if abierta {
+        // Las hojas de la persiana abiertas contra el derrame.
+        f.raw_fill(e, u0, u0 + 1, y0, y1, 1, 2, es.carpinteria);
+    }
+    match es.reja {
+        Reja::Voladiza => {
+            f.raw_fill(e, u0, u1, y0, y1, -1, 0, HIERRO_FUNDIDO);
+            f.fill(e, u0 - 1, u1 + 1, y0 - 1, y0, -1, 0, if es.marmol { MARMOL } else { es.moldura });
+            f.raw_fill(e, u0, u1, y1, y1 + 1, -1, 0, HIERRO_FUNDIDO);
+        }
+        Reja::Plana => f.raw_fill(e, u0, u1, y0, y1, 1, 2, HIERRO_FUNDIDO),
+        Reja::Postigo => {}
+    }
+    // Guardapolvo (y frontón en las de más ornamento).
+    f.fill(e, u0 - 1, u1 + 1, y1, y1 + 1, -1, 0, es.moldura);
+    if es.ornamento >= 3 {
+        f.fill(e, u0, u1, y1 + 1, y1 + 2, -1, 0, es.moldura);
+    }
+    if es.reja != Reja::Voladiza {
+        f.fill(e, u0 - 1, u1 + 1, y0 - 1, y0, -1, 0, es.moldura); // alféizar
+    }
+}
+
+/// Puerta alta de la Ciudad Nueva: dos hojas con montante de hierro fundido; con zaguán, la
+/// puerta de calle abierta contra las jambas, el zaguán de mármol y el cancel de hierro y
+/// vidrio al fondo. Escalón de mármol sobre la vereda.
+#[allow(clippy::too_many_arguments)]
+fn puerta_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, zaguan: bool) {
+    if zaguan {
+        opening(f, e, u0, u1, 0, hp, 5, if es.cancel { HIERRO_FUNDIDO } else { es.carpinteria });
+        f.raw_fill(e, u0, u0 + 1, 0, hp - 1, 1, 3, es.carpinteria);
+        f.raw_fill(e, u1 - 1, u1, 0, hp - 1, 1, 3, es.carpinteria);
+        if es.marmol {
+            for w in 0..5 {
+                for u in u0..u1 {
+                    let m = if (u + w) % 2 == 0 { MARMOL } else { MARMOL_GRIS };
+                    f.raw(e, u, -1, w, m);
+                }
+            }
+        }
+    } else {
+        opening(f, e, u0, u1, 0, hp, 1, es.carpinteria);
+    }
+    if es.hierro {
+        f.raw_fill(e, u0, u1, hp - 1, hp, 1, 2, HIERRO_FUNDIDO); // montante
+    }
+    if es.marmol {
+        f.raw_fill(e, u0 - 1, u1 + 1, 0, 1, -1, 0, MARMOL);
+    }
+}
+
+/// Pilastras de la fachada: en los extremos y, con `pilastras == 2`, entre los vanos.
+fn pilastras(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, vanos: &[(i32, i32, Hueco)], y0: i32, y1: i32) {
+    if es.pilastras == 0 {
+        return;
+    }
+    let mut us = vec![u0, u1 - 1];
+    if es.pilastras >= 2 {
+        for w in vanos.windows(2) {
+            let (b, a) = (w[0].1, w[1].0);
+            if a - b >= 3 {
+                us.push((a + b) / 2);
+            }
+        }
+    }
+    for u in us {
+        f.fill(e, u, u + 1, y0, y1, -1, 0, es.moldura);
+        // Basa y capitel, un vóxel más anchos.
+        f.fill(e, u - 1, u + 2, y1 - 1, y1, -1, 0, es.moldura);
+    }
+}
+
+/// Palmera canaria (*Phoenix canariensis*), la de los jardines del XIX: tronco grueso de
+/// escamas y una corona de hojas que se arquean.
+pub fn palmera(f: &Frame, e: &mut Edits, u: i32, w: i32, alto: i32, seed: u64) {
+    f.raw_fill(e, u, u + 2, 0, alto, w, w + 2, TRUNK_GRAY);
+    f.raw_fill(e, u, u + 2, alto, alto + 1, w, w + 2, LEAF_DARK);
+    for k in 0..8 {
+        let a = k as f32 / 8.0 * std::f32::consts::TAU + hash(f.at(u, alto, w), seed) * 0.6;
+        let (du, dw) = (a.cos(), a.sin());
+        for s in 1..=6 {
+            let fu = u as f32 + 0.5 + du * s as f32 * 0.9;
+            let fw = w as f32 + 0.5 + dw * s as f32 * 0.9;
+            let y = alto + 1 + if s <= 3 { 1 } else { 2 - (s - 3) };
+            f.raw(e, fu.round() as i32, y, fw.round() as i32, if (s + k) % 3 == 0 { LEAF_DARK } else { LEAF });
         }
     }
 }
@@ -416,12 +540,26 @@ fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i3
     }
     let rico = es.clase >= 2 || es.zaguan;
     let ap = if es.tipo == Tipo::Cuartos && !es.renta { 2 } else if rico { 3 } else { 2 + i32::from(es.ornamento >= 1) };
-    let hp = if rico && techo >= 9 { 6 } else { 5 };
+    let hp = if es.neo { (techo - 2).clamp(5, 8) } else if rico && techo >= 9 { 6 } else { 5 };
     let vanos = repartir(es, u0, u1, ap);
     let alta = es.clase >= 2 && techo >= 9;
     let mut principal = true;
+    if es.neo {
+        pilastras(f, e, es, u0, u1, &vanos, es.h_zocalo, techo - 1);
+    }
     for &(a, b, k) in &vanos {
         match k {
+            Hueco::Puerta if es.neo => {
+                puerta_neo(f, e, es, a, b, hp, es.zaguan && principal);
+                if principal {
+                    portada(f, e, es, a, b, hp, techo);
+                    principal = false;
+                }
+            }
+            Hueco::Ventana if es.neo => {
+                let y0 = if es.ventana_alta { 1 } else { 2 };
+                ventana_neo(f, e, es, a, b, y0, hp);
+            }
             Hueco::Puerta => {
                 puerta(f, e, es, a, b, hp, if es.zaguan && principal { 2 } else { 1 });
                 if principal {
@@ -803,9 +941,23 @@ fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<
         for &(a, b, _) in &vanos {
             let c = (a + b) / 2;
             let (va, vb) = (c - 1, c + 1);
-            let alto = (es.alto_pa - 3).max(4);
-            opening(&g, e, va, vb, y + 1, y + 1 + alto, 1, if hash(g.at(va, y, 0), es.seed) < 0.3 { es.carpinteria } else { WINDOW });
-            if es.ornamento >= 2 {
+            let alto = if es.neo { (es.alto_pa - 2).max(5) } else { (es.alto_pa - 3).max(4) };
+            if es.neo {
+                // Puerta-ventana con persianas y montante; guardapolvo con frontón.
+                let abierta = hash(g.at(va, y, 0), es.seed) < 0.5;
+                opening(&g, e, va, vb, y + 1, y + 1 + alto, 2, if abierta { WINDOW } else { es.carpinteria });
+                if abierta {
+                    g.raw_fill(e, va, va + 1, y + 1, y + alto, 1, 2, es.carpinteria);
+                }
+                g.raw_fill(e, va, vb, y + alto, y + 1 + alto, 1, 2, HIERRO_FUNDIDO);
+                g.fill(e, va - 1, vb + 1, y + 1 + alto, y + 2 + alto, -1, 0, m);
+                if es.ornamento >= 3 {
+                    g.fill(e, va, vb, y + 2 + alto, y + 3 + alto, -1, 0, m);
+                }
+            } else {
+                opening(&g, e, va, vb, y + 1, y + 1 + alto, 1, if hash(g.at(va, y, 0), es.seed) < 0.3 { es.carpinteria } else { WINDOW });
+            }
+            if es.ornamento >= 2 && !es.neo {
                 g.fill(e, va - 1, vb + 1, y + 1 + alto, y + 2 + alto, -1, 0, m); // guardapolvo
             }
             if es.balcon == 1 {
@@ -815,6 +967,11 @@ fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<
         if es.balcon == 2 {
             balcon(&g, e, es, x0 + 1, x1 - 1, y);
         }
+    }
+    if es.neo {
+        // Pilastras de la planta alta, sobre las de abajo.
+        let h1p = h1 + 1;
+        pilastras(&g, e, es, x0, x1, &vanos, h1p, h - 1);
     }
     let mut frente = None;
     if azotea {
@@ -908,11 +1065,20 @@ fn balcon(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i32) {
         f.raw_fill(e, u1 - 1, u1, y + 3, y + 6, -2, -1, WOOD_DARK);
         f.raw_fill(e, u0, u1, y + 6, y + 7, -2, 0, TILE);
     } else {
-        let m = piedra_o_moldura(es);
+        let m = if es.neo && es.marmol { MARMOL } else { piedra_o_moldura(es) };
+        let hierro = if es.neo { HIERRO_FUNDIDO } else { REJA };
         f.fill(e, u0, u1, y, y + 1, -2, 0, m);
-        f.raw_fill(e, u0, u1, y + 1, y + 3, -2, -1, REJA);
-        f.raw_fill(e, u0, u0 + 1, y + 1, y + 3, -1, 0, REJA);
-        f.raw_fill(e, u1 - 1, u1, y + 1, y + 3, -1, 0, REJA);
+        f.raw_fill(e, u0, u1, y + 1, y + 3, -2, -1, hierro);
+        f.raw_fill(e, u0, u0 + 1, y + 1, y + 3, -1, 0, hierro);
+        f.raw_fill(e, u1 - 1, u1, y + 1, y + 3, -1, 0, hierro);
+        if es.neo {
+            // Ménsulas bajo la losa.
+            let mut u = u0;
+            while u < u1 {
+                f.raw(e, u, y - 1, -1, es.moldura);
+                u += 3;
+            }
+        }
     }
 }
 
@@ -1048,16 +1214,41 @@ fn quinta(t: &TerrainGen, e: &mut Edits, f: &Frame, es: &Estilo) -> Option<Frent
     g.foundation(t, e, x0, x1, 0, fd, ZOCALO);
     caja(&g, e, x0, x1, 0, h, 0, fd, es.muro);
     let _ = fachada_pb(&g, e, es, x0, x1, h);
-    // Galería con pilares encalados (o horcones) al frente.
-    let pm = if es_cal(es.muro) { es.muro } else { WOOD_DARK };
+    // Galería con pilares encalados (o horcones) al frente; en la quinta italianizante,
+    // columnas claras con capitel y piso de mármol en damero.
+    let pm = if es.neo { es.moldura } else if es_cal(es.muro) { es.muro } else { WOOD_DARK };
     let mut u = x0;
     while u < x1 {
         f.fill(e, u, u + 1, 0, h - 1, wg, wg + 1, pm);
+        if es.neo {
+            f.fill(e, u, u + 1, h - 2, h - 1, wg - 1, wg + 2, pm);
+        }
         u += 4;
     }
     f.fill(e, x1 - 1, x1, 0, h - 1, wg, wg + 1, pm);
-    f.surface(e, x0, x1, wg, w0, BRICK);
-    if azotea {
+    if es.neo {
+        for w in wg..w0 {
+            for u in x0..x1 {
+                f.raw(e, u, -1, w, if (u + w) % 2 == 0 { MARMOL } else { MARMOL_GRIS });
+            }
+        }
+    } else {
+        f.surface(e, x0, x1, wg, w0, BRICK);
+    }
+    if es.neo && es.pilastras > 0 {
+        pilastras(&g, e, es, x0, x1, &[], 0, h - 1);
+    }
+    if es.palmera && wg >= 6 {
+        palmera(f, e, if es.libre_izq { 3 } else { f.width - 5 }, wg / 2 - 1, 16, es.seed);
+    }
+    if azotea && es.neo {
+        f.fill(e, x0, x1, h - 1, h, wg, w0 + 1, AZOTEA);
+        losa(&g, e, x0, x1, 0, fd, h - 1);
+        ring(f, e, x0, x1, h, h + 1, wg + 1, w0 + fd, es.muro);
+        // Balaustrada sobre la galería.
+        pretil(f, e, &Estilo { pretil_tipo: 2, pretil: 2, ..*es }, x0, x1, wg, wg + 2, h - 1);
+        cornisa_estilo(f, e, es, x0, x1, h - 2);
+    } else if azotea {
         f.fill(e, x0, x1, h - 1, h, wg, w0 + 1, AZOTEA);
         losa(&g, e, x0, x1, 0, fd, h - 1);
         ring(f, e, x0, x1, h, h + 1, wg, w0 + fd, es.muro);

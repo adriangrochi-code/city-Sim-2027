@@ -9,6 +9,7 @@
 //! Los atajos de teclado se muestran en los globos de ayuda, no en los botones.
 
 pub mod desarrollo;
+pub mod epocas;
 pub mod icons;
 pub mod materiales;
 pub mod paint;
@@ -107,7 +108,7 @@ impl Category {
     /// Categoría a la que pertenece una herramienta (para resaltarla).
     pub fn of_tool(t: Tool) -> Category {
         match t {
-            Tool::Plaza | Tool::Straight | Tool::Curve | Tool::Grid => Category::Calles,
+            Tool::Plaza | Tool::Straight | Tool::Curve | Tool::Grid | Tool::Ensanche => Category::Calles,
             Tool::Zone | Tool::Dezone => Category::Zonas,
             Tool::Demolish => Category::Demoler,
             Tool::Inspect => Category::Capas,
@@ -178,6 +179,7 @@ pub fn cards(cat: Category, game: &Game, list_open: bool, budget_open: bool) -> 
             Card::tool(game, 1, Icon::Recta, per_m.clone(), "Calle recta por tramos encadenados"),
             Card::tool(game, 2, Icon::Curva, per_m.clone(), "Calle curva: inicio, control y final"),
             Card::tool(game, 3, Icon::Damero, per_m, "Damero: un lado, el otro y la extensión"),
+            epocas::card_ensanche(game),
             Card::soon(Icon::Mejorar, "Mejorar calle", "Empedrar o poner faroles sin demoler"),
             Card::tool(game, 6, Icon::Demoler, "20 pesos".into(), "Demoler un tramo de calle"),
         ],
@@ -487,6 +489,8 @@ pub enum UiAction {
     Desarrollo(desarrollo::Act),
     /// Menú de visibilidad de las capas del mapa.
     Visibilidad(Visibilidad),
+    /// Épocas: pasar de época, ensanche, reformas (ver `ui::epocas`).
+    Epoca(epocas::Act),
 }
 
 /// Estado propio de la interfaz entre cuadros.
@@ -575,6 +579,14 @@ impl GameUi {
         let mut acts = Vec::new();
         if self.list.ordinances {
             self.list = ListPanel::ordinances(&game.city.economy, game.city.money, self.list.open);
+            // Las ordenanzas de las épocas siguientes, desactivadas hasta llegar a su época.
+            for (it, o) in self.list.items.iter_mut().zip(ORDINANCES) {
+                let ep = crate::city::epocas::epoca_de_ordenanza(o.id);
+                if !game.city.en_epoca(ep) {
+                    it.enabled = false;
+                    it.blocked = format!("Llega con la época «{}»", ep.nombre());
+                }
+            }
         }
         self.top_bar(ctx, game, hour, extra_status, &mut acts);
         self.category_bar(ctx, game);
@@ -605,7 +617,11 @@ impl GameUi {
                 });
         }
         if let Some(info) = game.inspect_info_en(terrain) {
-            inspect_panel(ctx, &info, &mut acts);
+            inspect_panel(ctx, &info, game, &mut acts);
+        }
+        // Al terminar una época, su resumen se abre una vez.
+        if game.city.epoca.mostrar_resumen && !matches!(self.detail, Some(Detail::Epoca(_))) {
+            self.detail = Some(Detail::Epoca(1));
         }
         // Paneles pedidos desde la ficha (los vecinos de una casa).
         acts.retain(|a| match a {
@@ -619,7 +635,11 @@ impl GameUi {
         self.gazette(ctx);
         if let Some(d) = self.detail {
             let reserved = 8.0 + self.bar_h + if self.drawer_h > 0.0 { self.drawer_h + 6.0 } else { 0.0 } + 10.0;
-            if let Detail::Desarrollo(tab) = d {
+            if let Detail::Epoca(tab) = d {
+                if let Some(nav) = epocas::panel(ctx, game, tab, reserved, &mut acts) {
+                    self.detail = nav;
+                }
+            } else if let Detail::Desarrollo(tab) = d {
                 if let Some(nav) = desarrollo::panel(ctx, game, tab, reserved, &mut acts) {
                     self.detail = nav;
                 }
@@ -652,6 +672,7 @@ impl GameUi {
             ui.horizontal_centered(|ui| {
                 ui.label(RichText::new(&game.city_name).size(theme::BODY * 1.15).strong()).on_hover_text(format!("Etapa: {}", st.stage));
                 ui.label(RichText::new(&st.date).color(theme::INK_SOFT));
+                epocas::chip(ui, game, acts);
                 ui.label(RichText::new(&st.hour).color(theme::INK_SOFT)).on_hover_text("Hora del día · atajos: , y .");
                 for (v, label, tip) in SPEEDS {
                     if ui.selectable_label(game.speed == v, label).on_hover_text(tip).clicked() {
@@ -932,7 +953,7 @@ fn chip(ui: &mut egui::Ui, icon: Icon, value: &str, selected: bool) -> egui::Res
 }
 
 /// Ficha de información a la derecha: cabecera, secciones y botones de acción.
-fn inspect_panel(ctx: &egui::Context, info: &Inspect, acts: &mut Vec<UiAction>) {
+fn inspect_panel(ctx: &egui::Context, info: &Inspect, game: &Game, acts: &mut Vec<UiAction>) {
     egui::Area::new("ficha".into()).anchor(Align2::RIGHT_TOP, vec2(-10.0, 52.0)).show(ctx, |ui| {
         theme::paper_frame().inner_margin(egui::Margin::same(0.0)).show(ui, |ui| {
             ui.set_width(310.0);
@@ -1004,12 +1025,25 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, acts: &mut Vec<UiAction>) 
                         }
                     }
                 });
+                // Época 2: modernizar la casa vieja (lo paga la ciudad).
+                if let (InspectKind::Lot, Some(l)) = (info.kind, info.lot) {
+                    let bs = epocas::botones_reforma(game, l);
+                    if !bs.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, tip, act) in bs {
+                                if ui.button(RichText::new(label).small()).on_hover_text(tip).clicked() {
+                                    acts.push(act);
+                                }
+                            }
+                        });
+                    }
+                }
             });
         });
     });
 }
 
-fn section(ui: &mut egui::Ui, title: &str) {
+pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
     ui.label(RichText::new(title.to_uppercase()).small().color(theme::INK_SOFT));
     let r = ui.available_rect_before_wrap();
     ui.painter().hline(r.x_range(), r.top() - 2.0, egui::Stroke::new(1.0_f32, theme::BORDER.gamma_multiply(0.5)));
@@ -1034,6 +1068,8 @@ pub enum Detail {
     Desarrollo(u8),
     /// Materiales de construcción: existencias, puerto, demanda y sustituciones.
     Materiales,
+    /// La época: requisitos, decisión de la muralla (0) y resumen de la terminada (1).
+    Epoca(u8),
 }
 
 /// A qué panel lleva cada ficha de `chips()` (mismo orden).
@@ -1071,7 +1107,7 @@ fn bars(ui: &mut egui::Ui, values: &[f32], marks: Option<&[f32]>, color: Color32
 }
 
 /// Una fila "nombre: valor" en una grilla de dos columnas.
-fn kv(ui: &mut egui::Ui, k: &str, v: String, col: Color32) {
+pub(crate) fn kv(ui: &mut egui::Ui, k: &str, v: String, col: Color32) {
     ui.label(RichText::new(k).small());
     ui.label(RichText::new(v).small().color(col));
     ui.end_row();
@@ -1095,6 +1131,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                 Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) => (Icon::Familia, "Población".to_string()),
                 Detail::Desarrollo(_) => (Icon::Desarrollo, "Desarrollo".to_string()),
                 Detail::Materiales => (Icon::Materiales, "Materiales de construcción".to_string()),
+                Detail::Epoca(_) => (Icon::Valor, "La época".to_string()),
             };
             ui.horizontal(|ui| {
                 icons::show(ui, icon, 22.0, theme::INK);
@@ -1199,7 +1236,7 @@ fn detail_panel(ctx: &egui::Context, game: &Game, d: Detail, reserved_bottom: f3
                     });
                     ui.label(RichText::new("Si los viajes en carreta o a caballo tardan mucho más de lo previsto, los vecinos se quejan. Inspeccioná una calle para ver su tránsito.").small().color(theme::INK_SOFT));
                 }
-                Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) | Detail::Desarrollo(_) => {}
+                Detail::Poblacion(_) | Detail::Hogares(_) | Detail::Persona(_) | Detail::Desarrollo(_) | Detail::Epoca(_) => {}
                 Detail::Materiales => materiales::panel(ui, game),
                 Detail::Clima => {
                     let m = (c.month % 12) as usize;
@@ -1392,6 +1429,7 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             UiAction::ToggleBudget | UiAction::Abrir(_) => {}
             UiAction::Servicio(a) => services::apply(*a, game),
             UiAction::Desarrollo(a) => desarrollo::apply(*a, game),
+            UiAction::Epoca(a) => epocas::apply(*a, game),
             UiAction::Tax(i, d) => {
                 if let Some(t) = Tax::ALL.get(*i) {
                     let e = &mut game.city.economy;
@@ -1402,6 +1440,11 @@ pub fn apply(acts: &[UiAction], game: &mut Game, list: &mut ListPanel) -> f32 {
             UiAction::ToggleItem(i) if list.ordinances => {
                 if let Some(o) = ORDINANCES.get(*i) {
                     let c = &mut game.city;
+                    let ep = crate::city::epocas::epoca_de_ordenanza(o.id);
+                    if !c.en_epoca(ep) {
+                        game.say(format!("«{}» llega con la época «{}»", o.name, ep.nombre()));
+                        continue;
+                    }
                     match c.economy.toggle(o.id, &mut c.money) {
                         Ok(m) | Err(m) => game.say(m),
                     }
@@ -1463,7 +1506,8 @@ mod tests {
         let calles = cards(Category::Calles, &g, false, false);
         assert!(calles[0].disabled.is_none());
         assert_eq!(calles[1].disabled.as_deref(), Some("Falta la plaza"));
-        assert_eq!(calles[4].disabled.as_deref(), Some(SOON), "lo que falta en el motor sale como próximamente");
+        assert_eq!(calles[4].disabled.as_deref(), Some("Época 2"), "el ensanche llega con la época 2");
+        assert_eq!(calles[5].disabled.as_deref(), Some(SOON), "lo que falta en el motor sale como próximamente");
         g.city.plaza = Some((Vec2::ZERO, 0.0));
         let calles = cards(Category::Calles, &g, false, false);
         assert_eq!(calles[0].disabled.as_deref(), Some("Ya fundada"));

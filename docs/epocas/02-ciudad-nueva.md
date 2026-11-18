@@ -1,8 +1,9 @@
 # Época 2: Ciudad Nueva (≈1830–1870)
 
 > Documento de detalle de la segunda época. Complementa al [GDD](../GDD.md).
-> Estado: **borrador v0.1**. Nombres de lugares, naciones y acontecimientos ficticios,
-> inspirados en la historia rioplatense sin copiarla.
+> Estado: **borrador v0.1**, **jugable en el motor desde la v0.10.0** (ver §14). Nombres de
+> lugares, naciones y acontecimientos ficticios, inspirados en la historia rioplatense sin
+> copiarla.
 
 ---
 
@@ -186,6 +187,65 @@ línea, papel crema.
 Duración objetivo: entre 4 y 6 horas.
 
 ---
+
+## 14. Qué está en el motor (v0.10.0)
+
+Código: `engine/src/city/epocas/` (estado, transición, ensanche, redes, rehabilitación),
+`structures/estilo.rs` + `casas.rs` (fachada neoclásica), `structures/epoca2.rs` (edificios),
+`render/shaders/voxel.wgsl` (luz de los faroles), `ui/epocas.rs`. Fuentes y marcas [F]/[E]:
+[../sistemas/arquitectura-epoca2.md](../sistemas/arquitectura-epoca2.md).
+
+**La época en la ciudad.** `City::epoca` (`EstadoEpoca`, se guarda; las partidas viejas son
+coloniales) es la que manda: la población ya no cambia de época sola con el calendario, la
+ciudad le fija la suya (tablas de llegadas `CIUDAD_NUEVA`: canarios, gallegos, vascos,
+franceses, italianos, porteños), y las tecnologías de la época 2 (lana merina, molino a
+vapor) se habilitan con ella.
+
+**Paso de época.** Requisitos: 1.500 habitantes, iglesia matriz terminada, muelle y aduana, y
+el acontecimiento del **nuevo orden** (modo fiel: entre 1828 y 1830, seguro en 1830; historia
+alternativa: con iglesia terminada y 1.200 habitantes, 1/36 por mes). La gaceta avisa; en el
+panel de la época (ficha "Época" de la barra superior) se elige qué hacer con la muralla:
+derribarla (la piedra vuelve al depósito y se generan solares en su huella), conservar un
+tramo como monumento o conservarla entera. Al pasar se abre la **pantalla de resumen** de la
+época terminada (habitantes, casas por tipo, calles, iglesia, tecnologías, tesoro) y se anota
+en la crónica.
+
+**Ensanche** (tarjeta en Calles): dos clics y la extensión, como el damero, a más de 380 m de la
+plaza mayor; cuadras de 100 varas, un **bulevar** de dos calzadas con su alameda en el medio y
+una **plaza** cada tres manzanas (palmeras, canteros, bancos, faroles y la columna). Las
+manzanas del ensanche cuentan como ciudad (no extramuros); se zonifican con el pincel.
+
+**Casas de la época 2.** Lo que se levanta después del paso usa el kit neoclásico e
+italianizante: casa neoclásica de patio, casa de altos con balcón corrido de hierro fundido,
+quinta italianizante con galería de columnas y palmera, almacén de esquina con ochava.
+Familias italianas y francesas con sus rasgos (`RASGOS`, desde 1830).
+
+**Rehabilitación.** Las casas coloniales se modernizan en el lugar (misma planta y huella,
+fachada nueva), cambian la paja por teja o suman un piso: los dueños ricos solos, de a poco
+y si hay cal; la **ordenanza de fachadas** lo acelera en el centro; el jugador puede pagarlo
+desde la ficha de la casa. En la misma calle conviven casas de las dos épocas.
+
+**Gas.** Usina de gas (Seguridad): faroles de gas cada 25 m en las calles de su red hasta
+1,5 km, que reemplazan a los de sebo; más luz (de noche, charcos ámbar al pie de cada farol,
+con una grilla de luces cerca de la cámara en el shader), menos delito, carbón importado cada
+mes en el presupuesto.
+
+**Agua corriente y colectores.** Usina de agua corriente (Agua): agua buena por la red de
+calles hasta 3 km. Colector y desagüe (Saneamiento, junto a la costa): los solares de su red
+dejan de tener pozo negro; baja la insalubridad y los pozos de agua dejan de ensuciarse.
+
+**Teatro** (Iglesia y obras): uno por ciudad, sube el valor del suelo alrededor y atrae
+pobladores.
+
+**Antes de la transición** no hay nada de esto: las tarjetas dicen "Época 2", la ordenanza de
+fachadas está bloqueada y los servicios responden "Llega con la época «Ciudad Nueva»".
+
+**Falta** (de este documento): mapa del país, pueblos, caminos y postas (lo hace otra línea de
+trabajo), quintas residenciales como zona aparte, calle comercial, industria temprana con
+vapor, mercado central, cementerio nuevo, hospital, escuelas municipales, bolsa y bancos,
+estación de diligencias, muelle de vapores, el teatro por fases con función de estreno,
+acontecimientos de la época (bloqueo, fiebre amarilla, empréstitos…), faroleros como agentes
+y la transición a la época 3.
 
 ## 13. Preguntas abiertas de la época
 

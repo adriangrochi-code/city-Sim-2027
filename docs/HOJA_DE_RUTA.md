@@ -1,6 +1,6 @@
 # Hoja de ruta
 
-> Estado al 17 de noviembre de 2026. Se actualiza con cada avance.
+> Estado al 18 de noviembre de 2026. Se actualiza con cada avance.
 > Dos líneas de trabajo: el **prototipo de Godot** (para diseñar y probar la jugabilidad) y el
 > **motor de vóxeles en Rust** (donde va a vivir el juego final).
 
@@ -32,8 +32,8 @@
 - [x] Mapa por defecto con la geografía real de Montevideo (24 km, ver `docs/sistemas/mapa-real.md`)
 - [x] Casas y calles a tamaño real (cuadra de 100 varas, calles de 10 y 12 varas)
 - [ ] Uruguay a escala país; las calles y solares deben esquivar los arroyos
-- [ ] Alcantarillas y saneamiento por épocas (diseñado; **en parte**: la versión colonial —letrinas y pozos negros por tipo de casa, pozos de agua que se contaminan, basurales, recolección con carretilla y basurero— ya está en el motor; faltan los colectores y el agua corriente de las épocas siguientes, que ya figuran como datos)
-- [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (diseñado; la versión colonial ya existe)
+- [ ] Alcantarillas y saneamiento por épocas (diseñado; **en parte**: la versión colonial —letrinas y pozos negros por tipo de casa, pozos de agua que se contaminan, basurales, recolección con carretilla y basurero— y la de la época 2 —colectores por la red de calles (Arteaga, 1856) y agua corriente (1871), ver `epocas::redes`— ya están en el motor; faltan las de las épocas 3 a 6, que figuran como datos)
+- [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (**en parte**: sebo de los serenos y gas de la época 2 —usina, faroles cada 25 m por la red, luz de noche en el shader, menos delito, carbón importado— en el motor; eléctrico, sodio y LED como datos)
 
 ## Fase 2: el juego sobre el motor de vóxeles
 
@@ -64,13 +64,13 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 ## Fase 3: diseño de todas las épocas
 
 - [x] Épocas 4, 5 y 6 en detalle (Art Déco y la Rambla, Modernismo, Contemporánea): borradores v0.1
-- [ ] Kits de vóxeles por época (estética de estructuras de la época 2 en adelante)
+- [ ] Kits de vóxeles por época (estética de estructuras de la época 2 en adelante) — **hecho el de la época 2** (v0.10.0): casa neoclásica de patio, casa de altos con balcón corrido de hierro fundido, quinta italianizante, almacén de esquina, usina de gas, teatro, agua corriente, colector, plazas y alamedas del ensanche; 9 materiales nuevos (ver [sistemas/arquitectura-epoca2.md](sistemas/arquitectura-epoca2.md)). Faltan las épocas 3 a 6
 - [ ] Mapa del país (escala país) en detalle
 
 ## Fase 4: época 2, Ciudad Nueva
 
-- [ ] Ensanche planificado sobre el ejido, gas, teatro, mapa del país con pueblos y caminos
-- [ ] Rehabilitación de casas viejas y modernización de edificios coloniales
+- [ ] Ensanche planificado sobre el ejido, gas, teatro, mapa del país con pueblos y caminos — **hecho en el motor** (v0.10.0): época explícita en la ciudad con requisitos, nuevo orden (fiel u alternativo), decisión de la muralla y pantalla de resumen; ensanche con bulevar y plazas; gas; teatro; agua corriente y colectores; llegadas y tecnologías de la época 2 activas después del paso (ver [epocas/02-ciudad-nueva.md](epocas/02-ciudad-nueva.md) §14). Falta el mapa del país (otra línea de trabajo) y el resto de los edificios de la época
+- [x] Rehabilitación de casas viejas y modernización de edificios coloniales (fachada nueva en el lugar con la misma huella, techo de teja, un piso más; los dueños solos, la ordenanza de fachadas o el jugador desde la ficha)
 
 ## Más adelante
 

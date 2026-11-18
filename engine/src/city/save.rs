@@ -157,6 +157,10 @@ pub struct CityData {
     /// cada servicio (las partidas viejas empiezan con lo de la fundación).
     #[serde(default)]
     pub materiales: Option<super::materiales::ciudad::Materiales>,
+    /// La época de la ciudad, el ensanche, los faroles de gas y las casas modernizadas (las
+    /// partidas viejas son de la época colonial).
+    #[serde(default)]
+    pub epoca: Option<super::epocas::EstadoEpoca>,
 }
 
 impl CityData {
@@ -209,6 +213,7 @@ impl CityData {
                 v
             }),
             materiales: Some(c.materiales.clone()),
+            epoca: Some(c.epoca.clone()),
         }
     }
 
@@ -267,6 +272,7 @@ impl CityData {
             llegados_barco: 0,
             desarrollo: self.desarrollo.clone().unwrap_or_default(),
             materiales: self.materiales.clone().unwrap_or_default(),
+            epoca: self.epoca.clone().unwrap_or_default(),
         };
         // Partidas de antes de los materiales: cada casa queda con los de su tipo.
         city.inferir_obras();
@@ -283,6 +289,9 @@ impl CityData {
             city.poblacion.conocer_lotes(&city.lotes_info());
             city.poblacion.stats = city.poblacion.estadisticas();
         }
+        // La época de la población la fija la ciudad (las partidas viejas, colonial).
+        city.poblacion.epoca = city.epoca.actual;
+        city.poblacion.epoca_fija = true;
         Ok(city)
     }
 }

@@ -298,6 +298,9 @@ pub struct Poblacion {
     /// sigue al calendario. Si no, depende del jugador.
     pub fiel_historia: bool,
     pub epoca: Epoca,
+    /// La época la fija la ciudad (`city::epocas`): no avanza sola con el calendario.
+    #[serde(default)]
+    pub epoca_fija: bool,
     /// Crónica de la población (mes, texto), las últimas entradas.
     pub cronica: VecDeque<(i32, String)>,
     /// Fotos mensuales (últimos 24 meses) y anuales (todas).
@@ -834,7 +837,7 @@ impl Poblacion {
             self.reconstruir();
         }
         self.mes = ent.mes;
-        if self.fiel_historia {
+        if self.fiel_historia && !self.epoca_fija {
             self.epoca = self.epoca.max(Epoca::del_año(año_de(ent.mes)));
         }
         let mut rng = Rng::from_state(self.azar);

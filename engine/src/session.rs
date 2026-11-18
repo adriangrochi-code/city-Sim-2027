@@ -206,6 +206,10 @@ impl Session {
             }
             None => r.set_agents(&[]),
         }
+        // Luces de los faroles cerca de la vista (gas y sebo; ver `render::luces`).
+        let centro = Vec2::new(self.cam.target.x, self.cam.target.z);
+        let luces = self.game.as_ref().map_or(Vec::new(), |g| g.city.luces_cerca(centro, 300.0, crate::render::luces::MAX));
+        r.set_lights(centro, &luces);
         let ops = self.streamer.poll(vertex_budget);
         let n = ops.len();
         r.maintain();

@@ -148,7 +148,7 @@ pub struct Futuro {
 }
 
 pub const FUTUROS: &[Futuro] = &[
-    Futuro { grupo: Grupo::Agua, nombre: "Agua corriente", desde: Epoca::Inmigracion, efecto: "Toma en el río Santa Lucía y cañerías: agua buena en las casas de la red.", fecha: Some("1871") },
+    Futuro { grupo: Grupo::Agua, nombre: "Agua corriente", desde: Epoca::CiudadNueva, efecto: "Toma en el río Santa Lucía y cañerías: agua buena en las casas de la red.", fecha: Some("1871") },
     Futuro { grupo: Grupo::Educacion, nombre: "Universidad", desde: Epoca::CiudadNueva, efecto: "Abogados, médicos e ingenieros: oficios letrados y prestigio de la ciudad.", fecha: Some("1849") },
     Futuro { grupo: Grupo::Educacion, nombre: "Escuela pública", desde: Epoca::Inmigracion, efecto: "Gratuita y obligatoria: lectura casi universal de los niños de su barrio.", fecha: Some("1877") },
     Futuro { grupo: Grupo::Educacion, nombre: "Liceo", desde: Epoca::Inmigracion, efecto: "Enseñanza secundaria: empleados, maestros y comercio.", fecha: None },
@@ -349,13 +349,16 @@ impl City {
         let lejos = self.economy.is_on(Ordinance::PozosNegrosLejos);
         let limpieza = self.economy.is_on(Ordinance::Limpieza);
         let focos = Grilla::new(40.0, built.iter().map(|l| (l.id, l.c)));
+        // Los solares con colector ya no tienen pozo negro (época 2, ver `epocas::redes`).
+        let cloaca = &self.epoca.cloaca;
+        let foco_de = |id: &u32| if cloaca.contains(id) { 0.0 } else { foco(&lots[id]) };
         let basurales = Grilla::new(60.0, s.barrio.basurales.iter().filter_map(|id| lots.get(id).map(|l| (*id, l.c))));
         let basureros: Vec<Vec2> = s.of_kind(Kind::Basurero).map(|b| b.c).collect();
         let mut insalubre = BTreeMap::new();
         for l in &built {
             let w = s.water_of(l.id);
             let agua = if l.kind() == Some(ZoneKind::Industrial) { 0.1 } else if w <= 0.0 { 0.3 } else { (1.0 - w) * 0.6 };
-            let pozos: f32 = focos.cerca(l.c, 30.0).iter().map(|(id, _)| foco(&lots[id])).sum::<f32>() * if lejos { 0.03 } else { 0.06 };
+            let pozos: f32 = focos.cerca(l.c, 30.0).iter().map(|(id, _)| foco_de(id)).sum::<f32>() * if lejos { 0.03 } else { 0.06 };
             let basura = if basurales.hay(l.c, RADIO_BASURAL) { 0.35 } else if basurales.hay(l.c, RADIO_BASURAL * 2.0) { 0.15 } else { 0.0 };
             let vertedero = if basureros.iter().any(|b| b.distance(l.c) < RADIO_BASURERO) { 0.2 } else { 0.0 };
             let v = (agua + pozos.min(0.35) + basura + vertedero) * if limpieza { 0.85 } else { 1.0 };
@@ -371,6 +374,8 @@ impl City {
             None => 0.0,
         };
         let faroles = Grilla::new(40.0, s.lamps.iter().enumerate().map(|(i, &(v, _))| (i as u32, (v.as_vec2() + 0.5) * DESIGN_VOXEL)));
+        // Faroles de gas (época 2): alumbran más lejos y los faroleros rondan.
+        let gas = Grilla::new(40.0, self.faroles_gas_m().enumerate().map(|(i, p)| (i as u32, p)));
         let vacios = Grilla::new(60.0, s.ruins.iter().chain(&s.barrio.basurales).filter_map(|id| lots.get(id).map(|l| (*id, l.c))));
         let muelle = s.port.pier.as_ref().map(|p| p.land);
         let mut vigilancia = BTreeMap::new();
@@ -399,7 +404,8 @@ impl City {
             let ricos = if v.hogares > 0.0 { v.ricos / v.hogares } else { 0.0 };
             let paro = if v.hombres > 0.0 { v.parados / v.hombres } else { 0.0 };
             let densidad = (cerca.iter().filter(|x| x.1.distance(l.c) < 60.0).count() as f32 / 14.0).min(1.0);
-            let oscuro = if faroles.hay(l.c, RADIO_FAROL) { 0.0 } else { 1.0 };
+            let con_gas = gas.hay(l.c, super::super::epocas::redes::RADIO_FAROL_GAS);
+            let oscuro = if con_gas { -0.3 } else if faroles.hay(l.c, RADIO_FAROL) { 0.0 } else { 1.0 };
             let baldios = (vacios.cerca(l.c, 60.0).len() as f32 / 3.0).min(1.0);
             let puerto = muelle.map_or(0.0, |m| (1.0 - m.distance(l.c) / RADIO_PUERTO).max(0.0));
             let tienda = if l.kind() == Some(ZoneKind::Comercial) { 0.05 } else { 0.0 };
@@ -439,7 +445,7 @@ impl City {
         let mut sucio = 0;
         for id in ids {
             let b = &self.services.buildings[&id];
-            let pozos: f32 = built.cerca(b.c, RADIO_POZO_NEGRO).iter().map(|(l, _)| foco(&lots[l])).sum::<f32>() * if lejos { 0.035 } else { 0.1 };
+            let pozos: f32 = built.cerca(b.c, RADIO_POZO_NEGRO).iter().map(|(l, _)| if self.epoca.cloaca.contains(l) { 0.0 } else { foco(&lots[l]) }).sum::<f32>() * if lejos { 0.035 } else { 0.1 };
             let basura = basurales.iter().filter(|p| p.distance(b.c) < RADIO_BASURAL).count() as f32 * 0.3;
             let vertedero = if basureros.iter().any(|p| p.distance(b.c) < RADIO_BASURERO) { 0.5 } else { 0.0 };
             let objetivo = (pozos + basura + vertedero).clamp(0.0, 1.0) * if b.kind == Kind::Aljibe { 0.5 } else { 1.0 };

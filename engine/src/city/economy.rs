@@ -174,6 +174,8 @@ pub enum Ordinance {
     HospitalCaridad,
     EscuelasPrimerasLetras,
     PrestamosCabildo,
+    // --- Época 2, Ciudad Nueva (ver `epocas`) ---
+    Fachadas,
 }
 
 pub struct OrdInfo {
@@ -205,6 +207,8 @@ pub const ORDINANCES: &[OrdInfo] = &[
     OrdInfo { id: Ordinance::HospitalCaridad, name: "Hospital de caridad y asistencia a pobres", desc: "El cabildo paga la cama, el médico y la botica de pobres y modestos: con hospital, médico o botica cerca, se atienden como los demás. 20 pesos más 30 por cada 1.000 habitantes.", opinion: [6, 0, 0], monthly: 20 },
     OrdInfo { id: Ordinance::EscuelasPrimerasLetras, name: "Escuelas de primeras letras", desc: "El cabildo paga al maestro y los niños pobres van gratis a la escuela de su barrio: más lectura, oficios letrados y movilidad. Hacen falta escuelas. 15 pesos más un cuarto por niño.", opinion: [5, 2, 0], monthly: 15 },
     OrdInfo { id: Ordinance::PrestamosCabildo, name: "Préstamos del cabildo", desc: "El cabildo presta barato a pobres y modestos en los meses malos; pierde parte de lo prestado.", opinion: [6, -4, 0], monthly: 10 },
+    // Época 2: los dueños del centro tienen que modernizar las fachadas (ver `epocas::rehabilitar`).
+    OrdInfo { id: Ordinance::Fachadas, name: "Ordenanza de fachadas", desc: "Época 2. Los dueños de las casas viejas del centro las revocan y modernizan: cuatro veces más fachadas nuevas cerca de la plaza. Molesta a los dueños; 20 pesos por mes de inspección.", opinion: [-3, 3, -2], monthly: 20 },
 ];
 
 pub fn ord_info(o: Ordinance) -> &'static OrdInfo {
