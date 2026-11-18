@@ -219,11 +219,13 @@ pub struct Mesh {
     pub hi: [u16; 3],
     /// Flora baja en micro-vóxeles (solo en el nivel más fino), dibujada aparte.
     pub detail: Vec<crate::trees::Micro>,
+    /// [agua en vóxeles] Caras del agua (ver `agua::mallar`), dibujadas en el pase del agua.
+    pub water: Vec<Quad>,
 }
 
 impl Default for Mesh {
     fn default() -> Self {
-        Mesh { quads: Default::default(), origin: Vec3::ZERO, voxel: 1.0, lo: [u16::MAX; 3], hi: [0; 3], detail: Vec::new() }
+        Mesh { quads: Default::default(), origin: Vec3::ZERO, voxel: 1.0, lo: [u16::MAX; 3], hi: [0; 3], detail: Vec::new(), water: Vec::new() }
     }
 }
 
@@ -232,7 +234,7 @@ impl Mesh {
         Mesh { origin, voxel, ..Default::default() }
     }
     pub fn quad_count(&self) -> usize {
-        self.quads.iter().map(|g| g.len()).sum()
+        self.quads.iter().map(|g| g.len()).sum::<usize>() + self.water.len()
     }
     pub fn triangles(&self) -> usize {
         self.quad_count() * 2

@@ -332,6 +332,7 @@ impl App {
             Outcome::Settings => {
                 if let Some(gpu) = self.gpu.as_mut() {
                     gpu.renderer.set_shadow_quality(self.menu.settings.shadow_quality());
+                    gpu.renderer.voxel_terrain = self.menu.settings.terreno_voxeles;
                     let mode = if self.menu.settings.sincronizacion_vertical { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
                     if gpu.config.present_mode != mode {
                         gpu.config.present_mode = mode;
@@ -445,6 +446,7 @@ impl ApplicationHandler for App {
                 // En la ventana, a lo sumo 2 cascadas de sombra por cuadro (las lejanas esperan).
                 renderer.shadow_budget = crate::render::SHADOW_BUDGET_WINDOW;
                 renderer.set_shadow_quality(self.menu.settings.shadow_quality());
+                renderer.voxel_terrain = self.menu.settings.terreno_voxeles;
                 if !self.menu.settings.sincronizacion_vertical {
                     config.present_mode = wgpu::PresentMode::AutoNoVsync;
                     renderer.configure(&surface, &config);

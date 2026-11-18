@@ -39,6 +39,7 @@ mod trees;
 mod tour;
 mod ui;
 mod world;
+mod agua;
 
 use camera::OrbitCamera;
 use glam::{IVec3, Vec2, Vec3};
@@ -253,6 +254,8 @@ fn run_headless_tour(args: &Args, dir: &str) -> Result<(), String> {
     let t0 = std::time::Instant::now();
     let mut r = render::Renderer::new()?;
     r.smooth_terrain = args.smooth;
+    // [agua en vóxeles] `MOTOR_TERRENO=suave` para las capturas con el aspecto suave.
+    r.voxel_terrain = std::env::var("MOTOR_TERRENO").map_or(true, |v| v != "suave");
     println!("Adaptador: {} · listo en {:.2?} · {} hilos de trabajo", r.adapter_name, t0.elapsed(), args.threads);
     let mut s = new_session(args);
     s.view_h = args.size.1 as f32;
@@ -368,6 +371,7 @@ fn main() {
         };
         println!("Adaptador: {}", renderer.adapter_name);
         renderer.smooth_terrain = args.smooth;
+        renderer.voxel_terrain = std::env::var("MOTOR_TERRENO").map_or(true, |v| v != "suave");
         renderer.upload(&meshes);
         let ground = world.terrain.height(focus.x, focus.y).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(focus.x, ground, focus.y), yaw: args.cam[3], pitch: args.cam[4], distance: args.cam[2], fov_y: 50.0 };

@@ -115,7 +115,8 @@ const CARRO: [Pieza; 6] = [
 /// `voxelize::road_edits`) o el tablero de los puentes, donde cruza agua.
 pub fn perfil(t: &TerrainGen, e: &Edge) -> Vec<f32> {
     let spans = water_spans(t, &e.pts);
-    let decks: Vec<f32> = spans.iter().map(|&sp| (deck_top(t, e, sp) + 1) as f32 * BASE_VOXEL).collect();
+    let deck_idx: Vec<i32> = spans.iter().map(|&sp| deck_top(t, e, sp)).collect();
+    let decks: Vec<f32> = deck_idx.iter().map(|&d| (d + 1) as f32 * BASE_VOXEL).collect();
     let n = (e.len() / MUESTRA).ceil() as usize + 1;
     (0..n)
         .map(|i| {
@@ -125,7 +126,9 @@ pub fn perfil(t: &TerrainGen, e: &Edge) -> Vec<f32> {
             }
             let (p, _) = e.point(s);
             // Índice del vóxel de arriba de la calzada (como `voxelize::top_index`) + 1.
-            ((road_height(t, p) / BASE_VOXEL - 0.5).floor() + 1.0) * BASE_VOXEL
+            // [agua en vóxeles] Con las rampas de los puentes (`voxelize::rampa`).
+            let k = ((road_height(t, p) / BASE_VOXEL - 0.5).floor() as i32).max(crate::city::voxelize::rampa(&spans, &deck_idx, s));
+            (k + 1) as f32 * BASE_VOXEL
         })
         .collect()
 }

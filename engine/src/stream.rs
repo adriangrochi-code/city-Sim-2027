@@ -120,9 +120,12 @@ impl Streamer {
         let shared = Arc::new(Shared { queue: Mutex::new(BinaryHeap::new()), cv: Condvar::new(), quit: AtomicBool::new(false), in_flight: AtomicUsize::new(0) });
         let (tx, rx) = sync_channel(MAX_READY);
         let mut workers = Vec::new();
+        // [agua en vóxeles] Niveles del agua de los arroyos (una vez por mapa).
+        let arroyos = Arc::new(crate::agua::Arroyos::new(&terrain));
         for _ in 0..threads.max(1) {
             let (sh, tx, t, s, specs): (Arc<Shared>, SyncSender<ColumnResult>, Arc<TerrainGen>, Arc<RwLock<EditStore>>, Vec<LevelSpec>) = (shared.clone(), tx.clone(), terrain.clone(), store.clone(), specs.clone());
-            workers.push(std::thread::spawn(move || worker(sh, tx, t, s, specs)));
+            let a = arroyos.clone();
+            workers.push(std::thread::spawn(move || worker(sh, tx, t, a, s, specs)));
         }
         Streamer {
             store,
@@ -440,7 +443,7 @@ impl Drop for Streamer {
     }
 }
 
-fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, specs: Vec<LevelSpec>) {
+fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen>, arroyos: Arc<crate::agua::Arroyos>, store: Arc<RwLock<EditStore>>, specs: Vec<LevelSpec>) {
     loop {
         let job = {
             let mut q = sh.queue.lock().unwrap();
@@ -457,7 +460,7 @@ fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen
         };
         let mesh = {
             let s = store.read().unwrap();
-            build_column(&terrain, &s, specs[job.key.0 as usize], job.key.1, &job.ring)
+            build_column(&terrain, &arroyos, &s, specs[job.key.0 as usize], job.key.1, &job.ring)
         };
         let _ = tx.send(ColumnResult { key: job.key, version: job.version, prio: job.prio, mesh });
         sh.in_flight.fetch_sub(1, AtOrd::SeqCst);
@@ -840,17 +843,17 @@ fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
 }
 
 /// Genera y malla una columna de chunks completa de un nivel.
-pub fn build_column(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>) -> Mesh {
+pub fn build_column(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>) -> Mesh {
     let t_start = std::time::Instant::now();
     let mut mesh_ns = 0u64;
-    let out = build_column_inner(t, store, spec, col, ring, &mut mesh_ns);
+    let out = build_column_inner(t, arroyos, store, spec, col, ring, &mut mesh_ns);
     let total = t_start.elapsed().as_nanos() as u64;
     GEN_NS.fetch_add(total.saturating_sub(mesh_ns), AtOrd::Relaxed);
     MESH_NS.fetch_add(mesh_ns, AtOrd::Relaxed);
     out
 }
 
-fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>, mesh_ns: &mut u64) -> Mesh {
+fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>, mesh_ns: &mut u64) -> Mesh {
     let vs = spec.voxel();
     // Niveles gruesos (entorno amplio): la malla baja `drop` metros (ver `lod::far_drop`).
     let drop = crate::lod::far_drop(spec.lod);
@@ -915,6 +918,33 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
             grad[k + 1] = (hi(0, 1) - hi(0, -1)) / (2.0 * vs);
         }
     }
+    // [agua en vóxeles] Agua de cada columna de la copia con borde: el río (nivel variable, lo
+    // pone el shader) donde el suelo queda bajo su nivel más alto y cerca de él; los arroyos
+    // (nivel fijo de su tramo) donde el suelo queda bajo el agua del cauce.
+    let mut agua = vec![crate::agua::ColumnaAgua::default(); (Q * Q) as usize];
+    for j in 0..Q {
+        for i in 0..Q {
+            let k = (i + j * Q) as usize;
+            if top[k] == i32::MIN {
+                continue;
+            }
+            let (x, z) = (((base.x + i - 1) as f32 + 0.5) * vs, ((base.y + j - 1) as f32 + 0.5) * vs);
+            let h = hs[((i + 1) + (j + 1) * p) as usize];
+            if drop == 0.0 {
+                if let Some((nivel, corriente)) = arroyos.en(x, z) {
+                    let tope = (nivel / vs).round() as i32 - 1;
+                    if tope > top[k] {
+                        agua[k] = crate::agua::ColumnaAgua { tipo: crate::agua::AGUA_ARROYO, tope, corriente };
+                        continue;
+                    }
+                }
+            }
+            let cara = (top[k] + 1) as f32 * vs - drop;
+            if crate::agua::al_alcance_del_rio(t, x, z, h, cara) {
+                agua[k].tipo = crate::agua::AGUA_RIO;
+            }
+        }
+    }
     SURF_NS.fetch_add(tsf.elapsed().as_nanos() as u64, AtOrd::Relaxed);
     let soil = ((2.0 / vs).ceil() as i32).max(1);
     let edit_top = ls.max_y.get(&col).copied().unwrap_or(i32::MIN);
@@ -932,7 +962,7 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         for j in 1..=N {
             for i in 1..=N {
                 let k = (i + j * Q) as usize;
-                if !natural[k] || top[k] == i32::MIN || (top[k] as f32 + 1.0) * vs < 0.4 {
+                if !natural[k] || top[k] == i32::MIN || (top[k] as f32 + 1.0) * vs < 0.4 || agua[k].tipo == crate::agua::AGUA_ARROYO {
                     continue;
                 }
                 let (gx, gz) = (base.x + i - 1, base.y + j - 1);
@@ -1036,6 +1066,8 @@ fn build_column_inner(t: &TerrainGen, store: &EditStore, spec: LevelSpec, col: I
         *mesh_ns += tm.elapsed().as_nanos() as u64;
     }
     out.detail = detail;
+    // [agua en vóxeles]
+    crate::agua::mallar(&top, &agua, Q, y0 * N, vs, drop, &mut out);
     out
 }
 

@@ -113,12 +113,41 @@ pub fn landscape_steps() -> Vec<Act> {
     let mut out = vec![Hour(hora)];
     // `MOTOR_VISTAS=vegetacion` saca solo las vistas cuyo nombre contiene ese texto.
     let filtro = std::env::var("MOTOR_VISTAS").unwrap_or_default();
-    for (name, cam) in views.into_iter().filter(|(n, _)| n.contains(filtro.as_str())) {
+    // [agua en vóxeles] Varios filtros separados por coma (`MOTOR_VISTAS=costa,agua`).
+    let pasa = |n: &str| filtro.split(',').any(|f| n.contains(f));
+    for (name, cam) in views.into_iter().filter(|(n, _)| pasa(n)) {
+        out.push(Cam(cam));
+        out.push(WaitIdle(name));
+        out.push(Shot(name));
+    }
+    // [agua en vóxeles] Agua y terreno en vóxeles: arroyo de cerca (con su cascada), bahía,
+    // playa, ladera y caminos.
+    let agua: [(&'static str, fn(&Session) -> Option<[f32; 5]>); 2] = [("agua-arroyo-cerca", |s| cam_arroyo(s, 12752.5, 5055.0, 30.0)), ("agua-arroyo-medio", |s| cam_arroyo(s, 10900.0, 8200.0, 90.0))];
+    for (name, f) in agua.into_iter().filter(|(n, _)| pasa(n)) {
+        out.push(CamFn(f));
+        out.push(WaitIdle(name));
+        out.push(Shot(name));
+    }
+    let vistas_agua: [(&'static str, [f32; 5]); 4] = [
+        ("agua-bahia", [9300.0, 13000.0, 900.0, 160.0, 24.0]),
+        ("agua-playa-cerca", [16180.0, 15330.0, 45.0, 200.0, 22.0]),
+        ("agua-costa-piedra-cerca", [15190.0, 17380.0, 40.0, 200.0, 24.0]),
+        ("agua-ladera-cerca", [9000.0, 9000.0, 40.0, 200.0, 26.0]),
+    ];
+    for (name, cam) in vistas_agua.into_iter().filter(|(n, _)| pasa(n)) {
         out.push(Cam(cam));
         out.push(WaitIdle(name));
         out.push(Shot(name));
     }
     out
+}
+
+/// [agua en vóxeles] Cámara sobre el arroyo más cercano a (x, z), mirando aguas abajo.
+fn cam_arroyo(s: &Session, x: f32, z: f32, dist: f32) -> Option<[f32; 5]> {
+    let p = Vec2::new(x, z);
+    let m = s.terrain.stream_water().into_iter().flatten().filter(|m| m.alcance > 4.0).min_by(|a, b| a.p.distance(p).total_cmp(&b.p.distance(p)))?;
+    let yaw = m.corriente.y.atan2(m.corriente.x).to_degrees();
+    Some([m.p.x, m.p.y, dist, yaw, 26.0])
 }
 
 /// Recorrido del modo juego: funda la plaza, traza un damero y una calle curva, zonifica,

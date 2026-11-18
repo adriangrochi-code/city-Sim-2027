@@ -174,13 +174,6 @@ impl Session {
 
     /// Sube a la GPU lo que terminaron los hilos de trabajo (con un presupuesto por cuadro).
     pub fn apply_ops(&mut self, r: &mut Renderer, vertex_budget: usize) -> usize {
-        // Agua de los arroyos del mapa real (se arma una sola vez por renderizador).
-        if self.terrain.is_real() && !r.has_streams() {
-            let v = self.terrain.stream_ribbons();
-            r.set_streams(&v);
-        } else if !self.terrain.is_real() && r.has_streams() {
-            r.set_streams(&[]);
-        }
         // [entorno amplio] Hasta dónde llega el terreno: más allá, niebla (ver `Renderer::reach`).
         let (c, reach) = self.streamer.reach();
         r.reach = [c.x, c.y, reach];
@@ -192,7 +185,8 @@ impl Session {
                 r.wind = (g.city.water.wind_dir, g.city.water.wind_speed);
             }
             _ => {
-                r.water_level = 0.0;
+                // [agua en vóxeles] `MOTOR_MAREA=1.2` fija el nivel del río sin partida (capturas).
+                r.water_level = std::env::var("MOTOR_MAREA").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 r.moon = 0.5;
                 r.wind = (70.0, 4.0);
             }

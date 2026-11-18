@@ -328,6 +328,14 @@ pub struct Settings {
     /// Se aplican enseguida.
     pub sombras_cascadas: u32,
     pub sombras_resolucion: u32,
+    /// [agua en vóxeles] Aspecto del terreno: vóxeles (escalones a la vista de cerca, con luz
+    /// por cara) o suave (laderas con la luz de la pendiente). Se aplica enseguida.
+    #[serde(default = "si")]
+    pub terreno_voxeles: bool,
+}
+
+fn si() -> bool {
+    true
 }
 
 fn voxel_cm_viejo() -> u32 {
@@ -345,7 +353,7 @@ fn voxel_cm() -> u32 {
 impl Default for Settings {
     fn default() -> Self {
         let q = crate::render::ShadowQuality::DEFAULT;
-        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm(), niveles_max: crate::lod::LEVELS, sombras_cascadas: q.cascades, sombras_resolucion: q.resolution }
+        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm(), niveles_max: crate::lod::LEVELS, sombras_cascadas: q.cascades, sombras_resolucion: q.resolution, terreno_voxeles: true }
     }
 }
 
