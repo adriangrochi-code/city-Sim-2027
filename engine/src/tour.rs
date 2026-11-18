@@ -129,6 +129,9 @@ pub fn city_steps() -> Vec<Act> {
     if std::env::var("MOTOR_SOLO_ARQ").is_ok() {
         return pasos_solo_arquitectura();
     }
+    if std::env::var("MOTOR_SOLO_PERSONAJES").is_ok() {
+        return pasos_solo_personajes(); // [personajes]
+    }
     let c = d::PLAZA;
     let mut pasos = vec![
         Cam([c.x, c.y, 700.0, 200.0, 45.0]),
@@ -516,6 +519,82 @@ fn pasos_solo_arquitectura() -> Vec<Act> {
     v.extend(pasos_arquitectura());
     v
 }
+
+// [personajes]
+/// Recorrido corto para mirar los personajes, los animales y los detalles de cerca
+/// (`MOTOR_SOLO_PERSONAJES=1`): funda, traza, crece, larga la mañana de un día hábil y saca
+/// las vistas de cerca; mide el dibujo y guarda y carga la ciudad.
+fn pasos_solo_personajes() -> Vec<Act> {
+    use crate::city::agentes::Tipo;
+    use crate::city::game_demo as d;
+    use Act::*;
+    let c = d::PLAZA;
+    vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.0),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("crecer 60 meses", d::grow),
+        Game("unir los pedazos del damero", d::unir_calles),
+        Game("vecinos y vehículos", d::vecinos),
+        Game("carreta, carro y jinete de paseo", d::traer_vehiculos),
+        Game("muestra de modelos de detalle", d::muestra_detalles),
+        Hour(9.0),
+        Hour(9.5),
+        CamFn(|s| d::calle_concurrida(s, 38.0, 30.0)),
+        WaitIdle("personajes en la calle"),
+        Shot("personajes-calle"),
+        Hour(9.5),
+        CamFn(|s| d::view_grupo(s, 9.0)),
+        WaitIdle("gente de cerca"),
+        Shot("personajes-gente-cerca"),
+        Hour(9.5),
+        CamFn(|s| d::view_agente(s, Tipo::Carreta, 13.0, 60.0, 16.0)),
+        WaitIdle("carreta de bueyes"),
+        Shot("personajes-carreta"),
+        Hour(9.5),
+        CamFn(|s| d::view_agente(s, Tipo::Jinete, 8.5, 70.0, 9.0)),
+        WaitIdle("jinete"),
+        Shot("personajes-jinete"),
+        Hour(9.5),
+        CamFn(|s| d::view_agente(s, Tipo::Carro, 9.0, 60.0, 16.0)),
+        WaitIdle("carro"),
+        Shot("personajes-carro"),
+        Hour(9.5),
+        CamFn(d::view_pulperia),
+        WaitIdle("pulpería"),
+        Shot("personajes-pulperia"),
+        Hour(9.5),
+        CamFn(|s| d::view_muestra(s, 0.5, 26.0, 195.0)),
+        WaitIdle("muestra de detalles"),
+        Shot("personajes-muestra"),
+        Hour(9.5),
+        CamFn(|s| d::view_muestra(s, 0.2, 9.0, 190.0)),
+        WaitIdle("muestra de cerca"),
+        Shot("personajes-muestra-cerca"),
+        Hour(9.5),
+        CamFn(|s| d::view_of(s, crate::city::services::Kind::Estancia, 70.0)),
+        WaitIdle("estancia"),
+        Shot("personajes-estancia"),
+        Hour(9.5),
+        CamFn(|s| d::view_pastura(s, 24.0)),
+        WaitIdle("rodeo"),
+        Shot("personajes-rodeo"),
+        Hour(9.5),
+        CamFn(d::view_pier),
+        WaitIdle("muelle"),
+        Shot("personajes-muelle"),
+        Hour(9.5),
+        CamFn(|s| d::calle_concurrida(s, 110.0, 38.0)),
+        WaitIdle("vecinos en las calles"),
+        MedirVecinos("dibujo con y sin vecinos"),
+        SaveLoad("guardar y cargar la ciudad"),
+    ]
+}
+// [/personajes]
 
 
 /// Menú de pausa sobre la partida (con la interfaz del juego detrás).

@@ -20,6 +20,7 @@ mod app;
 mod bench;
 mod buildings;
 mod city;
+mod detalle; // [personajes]
 mod fxhash;
 mod camera;
 mod lod;

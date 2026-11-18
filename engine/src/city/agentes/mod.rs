@@ -18,6 +18,7 @@
 //! foco de la cámara (que elige qué agentes se simulan con detalle).
 
 pub mod dibujo;
+pub mod fauna; // [personajes]
 pub mod idm;
 pub mod ruta;
 
@@ -341,6 +342,14 @@ pub struct Agentes {
     firma_solares: (usize, i32),
     /// Centro de la vista: cerca se simula con detalle, lejos de a saltos.
     pub foco: Option<Vec2>,
+    // [personajes]
+    /// Detalles fijos que pone cualquier sistema (no se guardan; ver `detalle::Detalles`).
+    pub detalles: crate::detalle::Detalles,
+    /// Animales y detalles derivados de la ciudad, con la firma con que se armaron.
+    escena: std::sync::Mutex<Option<(u64, std::sync::Arc<fauna::Escena>)>>,
+    /// Muestra de detalles para las capturas: comienzo, dirección y largo de la fila.
+    muestra: Option<(Vec2, Vec2, f32)>,
+    // [/personajes]
 }
 
 impl Default for Agentes {
@@ -400,7 +409,7 @@ pub fn frente(l: &super::lots::Lot) -> Vec2 {
 
 impl Agentes {
     pub fn from_estado(e: Estado) -> Agentes {
-        Agentes { e, router: Router::default(), red: None, perfiles: HashMap::default(), lugares: Lugares::default(), firma_solares: (usize::MAX, -1), foco: None }
+        Agentes { e, router: Router::default(), red: None, perfiles: HashMap::default(), lugares: Lugares::default(), firma_solares: (usize::MAX, -1), foco: None, detalles: Default::default(), escena: Default::default(), muestra: None }
     }
 
     fn rng(&mut self) -> Rng {
