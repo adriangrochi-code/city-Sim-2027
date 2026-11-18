@@ -26,6 +26,18 @@ Cómo numerar (mientras el juego esté en desarrollo, 0.x):
   calles; teatro.
 - 9 materiales nuevos en la paleta (91 de 96). Recorrido `MOTOR_EPOCA2=1 motor --demo-ciudad`.
 
+**Mapa del país** (tecla M): todo el Uruguay a ~1 km por celda con relieve, ríos, bañados,
+monte y departamentos reales; pueblos, caminos reales, represas y ferrocarril en su año;
+carretas que llevan cueros, sebo, tasajo y ganado a Montevideo; obras del cabildo por época.
+Sigue la época de la ciudad. En la ciudad, los solares y el damero esquivan cauces y bañados.
+
+**Agua, suelo y caminos en vóxeles**: agua de la bahía, el río y los arroyos como vóxeles
+(la marea sube en pasos de 0,25 m sin rearmar mallas, nunca sobre tierra seca); suelo con
+aspecto de vóxel de cerca (Opciones → Aspecto del terreno); calles de piedra con vereda,
+cordón y cuneta, caminos de tierra con huellas de carreta; rampas en los puentes.
+
+Personajes y animales en micro-vóxeles quedan para la v0.10.1.
+
 ## v0.9.0 (2026-11-18)
 Primera versión numerada. Juego en el motor de vóxeles sobre la geografía real de Montevideo:
 - Mundo: relieve, arroyos, bañados, costa por tramos, monte de 1726, clima, mareas y viento;
