@@ -10,6 +10,26 @@ Cómo numerar (mientras el juego esté en desarrollo, 0.x):
 - **0.X.Y**: arreglos y ajustes sobre la anterior (subir Y).
 - Cada versión que se manda a probar se anota acá y lleva una etiqueta de git `vX.Y.Z`.
 
+## v0.11.0 (2026-11-23)
+**Atlas ecológico histórico del Uruguay** (`docs/sistemas/atlas-ecologico.md`):
+- Capa «Ecosistemas» en el mapa del país (tecla M): los 18 códigos del atlas más 3 propios
+  (PL01 plantación, UR01 urbano, TR01 transformado sin dato), por período (1750–1800 base,
+  1860–1900, desde 1900 plantación de Canelones, desde 1950, desde 1985 observado).
+- Cada celda con evidencia (documentada / inferida / desconocida), confianza y fuente;
+  mosaico secundario como punto, lo desconocido rayado; ficha con MapBiomas del departamento.
+- Palmares de butiá (Rocha) y yatay (Quebracho, Guichón), monte de quebrada, serrano, parque,
+  pastizal ralo y denso, chircales; alrededor de la ciudad, terreno según la capa base.
+- Límite: las palmeras no llegan al terreno 3D (el entorno no alcanza Castillos ni Paysandú).
+
+**Técnicas del mod LOD, fases 0, 1, 2 y 5** (`docs/sistemas/tecnicas-minecraft-lod.md`):
+- Calidad Mínimo a Ultra en Opciones, con la recomendada (★) según el equipo; la primera vez
+  se aplica sola. Auto-ajuste según el límite (CPU o GPU), consciente del vsync.
+- Caché de columnas en RAM con límite de bytes: acercar y alejar ya no regenera nada.
+- Lo tapado por el relieve se genera al final (−15 a −22 % de columnas a nivel de calle).
+- Prioridad a lo que se ve y subida a la GPU con tope por cuadro.
+- Pendiente: el vuelo rápido tiene picos peores (hasta 24 ms en render por CPU) en la
+  subida/quitado de columnas del renderer; todo calibrado sin GPU real.
+
 ## v0.10.1 (2026-11-18)
 **Personajes y animales en micro-vóxeles de 1/16 m** (unas 27 alturas por persona):
 - 19 atuendos por época, sexo, edad, oficio y riqueza (paisano con poncho y chiripá, vecino
