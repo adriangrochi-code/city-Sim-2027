@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn cada_columna_tiene_su_superficie_guardada() {
         let t = TerrainGen::new(1726);
-        let levels = [LevelSpec { lod: 0 }, LevelSpec { lod: 1 }];
+        let levels = [LevelSpec::new(0), LevelSpec::new(1)]; // [lod]
         let w = World::generate(t, &Edits::default(), &levels, Vec2::new(13500.0, 16300.0));
         for level in &w.levels {
             for (c, col) in &level.columns {

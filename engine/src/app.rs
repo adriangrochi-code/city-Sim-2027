@@ -85,6 +85,12 @@ struct App {
     /// Acciones del menú de este cuadro, y la pesada que espera un cuadro (aviso «Cargando…»).
     menu_acts: Vec<MenuAction>,
     pending: Option<MenuAction>,
+    /// [lod] Auto-ajuste de las perillas (ver `autoajuste.rs`), cuándo se dibujó el último
+    /// cuadro, si hubo cuadros sin dibujar desde entonces, y el intervalo del vsync (ms).
+    tuner: crate::autoajuste::Autoajuste,
+    last_drawn: Option<Instant>,
+    skipped_since: bool,
+    tope_ms: f64,
 }
 
 /// Con la escena quieta solo se redibuja para animar el agua, a este intervalo.
@@ -95,6 +101,7 @@ pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
     event_loop.set_control_flow(ControlFlow::Poll);
     let steps = || if session.game.is_some() { crate::tour::city_steps() } else { crate::tour::default_steps() };
     let tour = opts.tour_dir.as_ref().map(|d| Tour::with_steps(d, opts.size.0, opts.size.1, steps()));
+    let techo = menu.settings.techo(session.streamer.threads());
     let mut app = App {
         opts,
         session,
@@ -122,10 +129,15 @@ pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
         ui: GameUi::default(),
         ui_repaint: true,
         ui_ms: Vec::new(),
+        tuner: crate::autoajuste::Autoajuste::new(techo, menu.settings.fps_objetivo as f64),
         menu,
         menu_acts: Vec::new(),
         pending: None,
+        last_drawn: None,
+        skipped_since: false,
+        tope_ms: 0.0,
     };
+    app.tuner.activo = app.menu.settings.autoajuste;
     event_loop.run_app(&mut app).map_err(|e| format!("error en el bucle de eventos: {e}"))?;
     if let Some(e) = app.error {
         return Err(e);
@@ -189,7 +201,7 @@ impl App {
         s.view_h = gpu.config.height as f32;
         let t0 = Instant::now();
         // Tope de vértices subidos por cuadro: repartir la carga entre cuadros evita tirones.
-        s.apply_ops(&mut gpu.renderer, 160_000);
+        s.apply_ops(&mut gpu.renderer, crate::session::WINDOW_VERTEX_BUDGET);
         let ms_upload = t0.elapsed().as_secs_f32() * 1000.0;
         let t0 = Instant::now();
         gpu.renderer.time += dt;
@@ -213,7 +225,11 @@ impl App {
         self.idle = same;
         if same && self.last_draw.elapsed() < IDLE_REDRAW {
             self.skipped += 1;
+            self.skipped_since = true;
             return;
+        }
+        if same {
+            self.skipped_since = true;
         }
         self.last_key = Some(key);
         self.last_draw = Instant::now();
@@ -271,6 +287,25 @@ impl App {
         let ms_render = t0.elapsed().as_secs_f32() * 1000.0 - cpu_ui as f32;
         // Perfil: el cuadro más lento del medio segundo y dónde se fue el tiempo.
         let total = t_frame.elapsed().as_secs_f32() * 1000.0;
+        // [lod] Auto-ajuste: un cuadro dibujado seguido del anterior (sin reposo entre medio).
+        let drawn = Instant::now();
+        let interval = self.last_drawn.map(|t| (drawn - t).as_secs_f64() * 1000.0);
+        let muestra = crate::autoajuste::Muestra {
+            cuadro_ms: interval.unwrap_or(0.0),
+            trabajo_ms: (total as f64 - renderer.last_wait_ms).max(0.0),
+            gpu_ms: renderer.last_gpu_ms,
+            tope_ms: self.tope_ms,
+            dibujado: interval.is_some() && !self.skipped_since,
+            menu: menu_open || self.tour.is_some(),
+        };
+        self.last_drawn = Some(drawn);
+        self.skipped_since = false;
+        if let Some(c) = self.tuner.muestra(muestra) {
+            if self.perfil {
+                println!("Auto-ajuste: {} {} ({})", c.perilla.nombre(), if c.sube { "↑" } else { "↓" }, c.motivo);
+            }
+        }
+        apply_knobs(&self.tuner.actual, &mut s.streamer, renderer, self.menu.settings.cache_mb);
         let parts = [("simulación", ms_sim), ("subir mallas", ms_upload), ("selección", ms_pick), ("interfaz", cpu_ui as f32), ("dibujo", ms_render)];
         let (who, _) = parts.iter().cloned().fold(("", 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
         if frame_gap > self.worst.0 {
@@ -294,6 +329,9 @@ impl App {
             self.fps = self.fps_frames as f32 / self.fps_time.elapsed().as_secs_f32();
             self.fps_samples.push(self.fps);
             self.menu.frame_worst = std::mem::take(&mut self.worst);
+            self.menu.autoajuste = self.tuner.estado();
+            // [lod] Intervalo del vsync (el objetivo nunca puede ser menor).
+            self.tope_ms = if self.menu.settings.sincronizacion_vertical { gpu.window.current_monitor().and_then(|m| m.refresh_rate_millihertz()).map_or(1000.0 / 60.0, |mhz| 1.0e6 / mhz as f64) } else { 0.0 };
             self.fps_frames = 0;
             self.fps_time = Instant::now();
             let title = if s.game.is_none() && self.menu.is_open() { format!("City Sim 2027 · {:.0} FPS", self.fps) } else { s.title(self.fps, &gpu.renderer) };
@@ -332,6 +370,16 @@ impl App {
         match self.menu.perform(a, &mut self.session, renderer, &mut self.ui) {
             Outcome::Quit => el.exit(),
             Outcome::Settings => {
+                // [lod] "Valores por omisión" deja la calidad sin elegir: se vuelve a recomendar.
+                if self.menu.settings.calidad.is_none() {
+                    if let Some(c) = self.menu.recomendada {
+                        self.menu.settings.aplicar_calidad(c, crate::autoajuste::nucleos());
+                        let _ = self.menu.settings.store(&self.menu.base);
+                        self.menu.draft = self.menu.settings.clone();
+                    }
+                }
+                self.tuner.set_techo(self.menu.settings.techo(self.session.streamer.threads()), self.menu.settings.fps_objetivo as f64);
+                self.tuner.activo = self.menu.settings.autoajuste;
                 if let Some(gpu) = self.gpu.as_mut() {
                     gpu.renderer.set_shadow_quality(self.menu.settings.shadow_quality());
                     gpu.renderer.voxel_terrain = self.menu.settings.terreno_voxeles;
@@ -461,6 +509,19 @@ impl ApplicationHandler for App {
         let msaa = if self.opts.msaa == 0 { self.menu.settings.msaa } else { self.opts.msaa };
         match Renderer::for_window(window.clone(), msaa) {
             Ok((mut renderer, surface, mut config)) => {
+                // [lod] Calidad recomendada para este equipo; la primera vez se aplica y se avisa.
+                let hw = crate::autoajuste::Hardware { adaptador: crate::autoajuste::Adaptador::de_wgpu(renderer.device_type), nucleos: crate::autoajuste::nucleos(), ram_gb: crate::autoajuste::ram_total_gb() };
+                let rec = crate::autoajuste::recomendar(&hw);
+                self.menu.recomendada = Some(rec);
+                if self.menu.settings.calidad.is_none() {
+                    self.menu.settings.aplicar_calidad(rec, hw.nucleos);
+                    let _ = self.menu.settings.store(&self.menu.base);
+                    self.menu.draft = self.menu.settings.clone();
+                    self.menu.status = Some((format!("Calidad «{}», recomendada para este equipo (se cambia en Opciones)", rec.nombre()), false));
+                    println!("Calidad recomendada para este equipo ({:?}, {} núcleos): {}", hw.adaptador, hw.nucleos, rec.nombre());
+                }
+                self.tuner.set_techo(self.menu.settings.techo(self.session.streamer.threads()), self.menu.settings.fps_objetivo as f64);
+                self.tuner.activo = self.menu.settings.autoajuste;
                 // En la ventana, a lo sumo 2 cascadas de sombra por cuadro (las lejanas esperan).
                 renderer.shadow_budget = crate::render::SHADOW_BUDGET_WINDOW;
                 renderer.set_shadow_quality(self.menu.settings.shadow_quality());
@@ -616,5 +677,25 @@ impl ApplicationHandler for App {
             el.set_control_flow(ControlFlow::Poll);
             gpu.window.request_redraw();
         }
+    }
+}
+
+/// [lod] Lleva las perillas del auto-ajuste (o las de las opciones, con el auto-ajuste apagado)
+/// al streamer y al renderer, solo si cambiaron: sirve también cuando se crea otra partida.
+pub fn apply_knobs(k: &crate::autoajuste::Perillas, streamer: &mut crate::stream::Streamer, r: &mut Renderer, cache_mb: u32) {
+    let (c, res) = k.sombras();
+    let q = crate::render::ShadowQuality { cascades: c, resolution: res };
+    if r.shadow_quality() != q {
+        r.set_shadow_quality(q);
+    }
+    streamer.set_ring(k.anillo());
+    streamer.set_active_levels(k.niveles);
+    if streamer.concurrency() != k.hilos.min(streamer.threads()).max(1) {
+        streamer.set_concurrency(k.hilos);
+    }
+    streamer.ritmo.ms = k.subida_ms() as f64;
+    let bytes = (cache_mb as usize) << 20;
+    if streamer.cache.presupuesto != bytes {
+        streamer.cache.set_presupuesto(bytes);
     }
 }

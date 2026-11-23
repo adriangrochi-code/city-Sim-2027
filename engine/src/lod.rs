@@ -43,13 +43,28 @@ pub const DESIGN_VOXEL: f32 = BASE_VOXEL * DESIGN_SCALE as f32;
 const _: () = assert!(DESIGN_SHIFT <= 1);
 /// Lado de cada anillo, en chunks (par y con mitad par para alinear con el nivel siguiente).
 pub const RING_CHUNKS: i32 = 24;
+/// [lod] Lados de anillo posibles (perilla de los presets y del auto-ajuste, ver
+/// `docs/sistemas/tecnicas-minecraft-lod.md` §2.4): múltiplos de 4 para que el borde de adentro
+/// caiga en chunks enteros del nivel siguiente. Con 16 el último anillo llega a ~57 km; con 32,
+/// a ~114 km (vóxeles de 3–6 px a 720p con 16; de 1,5–3 px con 32).
+pub const RINGS: [i32; 5] = [16, 20, 24, 28, 32];
 
 #[derive(Clone, Copy, Debug)]
 pub struct LevelSpec {
     pub lod: u32,
+    /// [lod] Lado del anillo en chunks (uno de [`RINGS`]).
+    pub ring: i32,
 }
 
 impl LevelSpec {
+    /// [lod] Nivel con el anillo por omisión.
+    pub fn new(lod: u32) -> LevelSpec {
+        LevelSpec { lod, ring: RING_CHUNKS }
+    }
+    /// [lod] Lado del anillo válido más cercano (16 a 32, múltiplo de 4).
+    pub fn ring_valid(ring: i32) -> i32 {
+        RINGS.iter().copied().min_by_key(|r| (r - ring).abs()).unwrap()
+    }
     pub fn voxel(&self) -> f32 {
         BASE_VOXEL * (1u32 << self.lod) as f32
     }
@@ -60,8 +75,8 @@ impl LevelSpec {
     pub fn region(&self, center: Vec2) -> (IVec2, IVec2) {
         let c2 = self.chunk_m() * 2.0;
         let snapped = IVec2::new((center.x / c2).round() as i32 * 2, (center.y / c2).round() as i32 * 2);
-        let min = snapped - IVec2::splat(RING_CHUNKS / 2);
-        (min, min + IVec2::splat(RING_CHUNKS))
+        let min = snapped - IVec2::splat(self.ring / 2);
+        (min, min + IVec2::splat(self.ring))
     }
 }
 
@@ -151,7 +166,7 @@ mod tests {
         // Desde cualquier punto del mapa (la cámara no sale de él), el anillo más grueso llega a
         // por lo menos 85 km en todas las direcciones, y no pasa del borde de la grilla amplia
         // (150 km alrededor del centro del mapa), así no se estira el borde de los datos.
-        let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod }).collect();
+        let levels: Vec<LevelSpec> = (0..LEVELS).map(LevelSpec::new).collect();
         let last = levels[LEVELS as usize - 1];
         for (cx, cz) in [(0.0, 0.0), (24000.0, 0.0), (0.0, 24000.0), (24000.0, 24000.0), (12000.0, 12000.0), (3100.0, 20500.0)] {
             let c = Vec2::new(cx, cz);
@@ -191,7 +206,7 @@ mod tests {
 
     #[test]
     fn empezando_en_otro_nivel_se_cubre_todo_igual() {
-        let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod }).collect();
+        let levels: Vec<LevelSpec> = (0..LEVELS).map(LevelSpec::new).collect();
         let center = Vec2::new(13500.0, 16300.0);
         let cols = level_columns_from(&levels, center, 3);
         assert!(cols[0].is_empty() && cols[1].is_empty() && cols[2].is_empty());
@@ -209,8 +224,32 @@ mod tests {
     }
 
     #[test]
+    fn con_cualquier_anillo_cada_punto_esta_en_un_nivel_y_el_alcance_crece_con_el_anillo() {
+        let mut alcance_previo = 0.0;
+        for ring in RINGS {
+            let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod, ring }).collect();
+            for (center, first) in [(Vec2::new(13500.0, 16300.0), 0), (Vec2::new(3100.0, 20500.0), 3)] {
+                let cols = level_columns_from(&levels, center, first);
+                for k in 0..300 {
+                    let a = k as f32 * 0.7;
+                    let r = 30.0 + k as f32 * 150.0;
+                    let p = center + Vec2::new(a.cos(), a.sin()) * r;
+                    let hits = levels.iter().enumerate().filter(|(i, spec)| cols[*i].contains(&IVec2::new((p.x / spec.chunk_m()).floor() as i32, (p.y / spec.chunk_m()).floor() as i32))).count();
+                    assert_eq!(hits, 1, "anillo {ring}: el punto {p:?} está en {hits} niveles");
+                }
+            }
+            let last = levels[LEVELS as usize - 1];
+            let alcance = (ring / 2 - 1) as f32 * last.chunk_m();
+            assert!(alcance > alcance_previo);
+            alcance_previo = alcance;
+        }
+        assert_eq!(LevelSpec::ring_valid(23), 24);
+        assert_eq!(LevelSpec::ring_valid(100), 32);
+    }
+
+    #[test]
     fn los_anillos_no_se_superponen_y_cubren_el_mapa() {
-        let levels: Vec<LevelSpec> = (0..LEVELS).map(|lod| LevelSpec { lod }).collect();
+        let levels: Vec<LevelSpec> = (0..LEVELS).map(LevelSpec::new).collect();
         let center = Vec2::new(13500.0, 16300.0);
         let cols = level_columns(&levels, center);
         // Cada punto de una grilla de prueba debe pertenecer a exactamente un nivel.

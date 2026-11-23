@@ -374,6 +374,13 @@ pub struct Renderer {
     pub draw_mode: DrawMode,
     pub can_indirect: bool,
     timestamps: Option<(wgpu::QuerySet, wgpu::Buffer, wgpu::Buffer, f32)>,
+    /// [lod] Lectura asíncrona de las marcas de tiempo en la ventana (0 libre, 1 esperando el
+    /// mapeo, 2 lista para leer) y el último tiempo de GPU del pase principal medido así.
+    gpu_read: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub last_gpu_ms: Option<f64>,
+    /// [lod] Espera de la superficie en el último cuadro de la ventana (tomar la imagen y
+    /// presentarla: ahí se espera el vsync), en ms. El trabajo del cuadro es el resto.
+    pub last_wait_ms: f64,
     /// Bytes de caras subidos (acumulado; el título y el banco de pruebas muestran la diferencia).
     pub uploaded_bytes: u64,
     /// Sube con cada cambio de geometría o de resaltado (parte de la clave del cuadro).
@@ -397,6 +404,8 @@ pub struct Renderer {
     /// Pases de sombra (cascadas) dibujados en total (para el banco de pruebas).
     pub shadow_redraws: std::cell::Cell<u32>,
     pub adapter_name: String,
+    /// [lod] Tipo de adaptador (CPU, integrada, dedicada): para recomendar la calidad.
+    pub device_type: wgpu::DeviceType,
     /// Suaviza el sombreado de los escalones del terreno (evita las líneas oscuras de lejos).
     pub smooth_terrain: bool,
     /// [agua en vóxeles] Aspecto del terreno en vóxeles: de cerca, luz por cara, bordes y
@@ -1175,6 +1184,9 @@ impl Renderer {
             draw_mode,
             can_indirect,
             timestamps,
+            gpu_read: Default::default(),
+            last_gpu_ms: None,
+            last_wait_ms: 0.0,
             uploaded_bytes: 0,
             scene_version: 0,
             overlay_key: 0,
@@ -1192,6 +1204,7 @@ impl Renderer {
             bench_out: None,
             shadow_redraws: std::cell::Cell::new(0),
             adapter_name,
+            device_type: adapter.get_info().device_type,
             smooth_terrain: true,
             voxel_terrain: true,
             water_level: 0.0,
@@ -1482,6 +1495,14 @@ impl Renderer {
                 view_formats: &[],
             });
             self.bench_out = Some((width, height, tex.create_view(&Default::default())));
+        }
+        // [lod] Si la ventana dejó una lectura de tiempos en vuelo, se termina antes de reusar el búfer.
+        if self.gpu_read.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+            self.device.poll(wgpu::Maintain::Wait);
+            if let Some((_, _, read, _)) = self.timestamps.as_ref().filter(|_| self.gpu_read.load(std::sync::atomic::Ordering::SeqCst) == 2) {
+                read.unmap();
+            }
+            self.gpu_read.store(0, std::sync::atomic::Ordering::SeqCst);
         }
         let t0 = std::time::Instant::now();
         let view = self.write_globals(cam, hour, width as f32 / height as f32, self.shadow_budget);
@@ -2062,6 +2083,18 @@ impl Renderer {
 
     /// Dibuja un cuadro en la ventana; `ui` pinta la interfaz encima de la escena.
     pub fn render_surface(&mut self, surface: &wgpu::Surface<'static>, config: &wgpu::SurfaceConfiguration, cam: &OrbitCamera, hour: f32, ui: Option<UiHook>) -> Result<(), String> {
+        use std::sync::atomic::Ordering as AO;
+        // [lod] Tiempo de GPU del pase principal, leído uno o dos cuadros tarde (sin esperar).
+        if let Some((_, _, read, period)) = &self.timestamps {
+            self.device.poll(wgpu::Maintain::Poll);
+            if self.gpu_read.load(AO::SeqCst) == 2 {
+                let v: Vec<u64> = bytemuck::cast_slice(&read.slice(..).get_mapped_range()).to_vec();
+                read.unmap();
+                self.last_gpu_ms = (v[1] > v[0]).then(|| (v[1] - v[0]) as f64 * *period as f64 / 1e6);
+                self.gpu_read.store(0, AO::SeqCst);
+            }
+        }
+        let t_wait = std::time::Instant::now();
         let frame = match surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
@@ -2070,6 +2103,7 @@ impl Renderer {
             }
             Err(e) => return Err(format!("superficie: {e}")),
         };
+        let mut wait = t_wait.elapsed();
         let (w, h) = (frame.texture.width(), frame.texture.height());
         if self.targets.as_ref().map(|t| (t.width, t.height)) != Some((w, h)) {
             self.targets = Some(self.make_targets(w, h));
@@ -2077,7 +2111,14 @@ impl Renderer {
         let v = self.write_globals(cam, hour, w as f32 / h as f32, self.shadow_budget);
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let st = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, None);
+        let measure = self.timestamps.is_some() && self.gpu_read.load(AO::SeqCst) == 0;
+        let ts = if measure { self.timestamps.as_ref().map(|t| &t.0) } else { None };
+        let st = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, ts);
+        if measure {
+            let (set, resolve, read, _) = self.timestamps.as_ref().unwrap();
+            enc.resolve_query_set(set, 0..2, resolve, 0);
+            enc.copy_buffer_to_buffer(resolve, 0, read, 0, 16);
+        }
         if let Some(ui) = ui {
             ui(&self.device, &self.queue, &mut enc, &view, (w, h));
         }
@@ -2086,7 +2127,15 @@ impl Renderer {
         self.upload_frame = self.uploaded_bytes - self.upload_mark;
         self.upload_mark = self.uploaded_bytes;
         self.queue.submit([enc.finish()]);
+        if measure {
+            self.gpu_read.store(1, AO::SeqCst);
+            let st = self.gpu_read.clone();
+            self.timestamps.as_ref().unwrap().2.slice(..).map_async(wgpu::MapMode::Read, move |r| st.store(if r.is_ok() { 2 } else { 0 }, AO::SeqCst));
+        }
+        let t_present = std::time::Instant::now();
         frame.present();
+        wait += t_present.elapsed();
+        self.last_wait_ms = wait.as_secs_f64() * 1000.0;
         self.frame += 1;
         self.alloc.collect(self.frame, FRAMES_IN_FLIGHT);
         Ok(())

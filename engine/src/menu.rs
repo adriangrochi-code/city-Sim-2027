@@ -107,6 +107,10 @@ pub fn fingerprint(g: &Game) -> u64 {
 pub struct Menu {
     /// Peor cuadro del último medio segundo (ms) y en qué se fue: para el contador de FPS.
     pub frame_worst: (f32, String),
+    /// [lod] Estado del auto-ajuste para el diagnóstico (debajo del contador de FPS) y la
+    /// calidad recomendada para este equipo (la llena la ventana al conocer el adaptador).
+    pub autoajuste: String,
+    pub recomendada: Option<crate::autoajuste::Calidad>,
     /// Pila de pantallas; vacía = jugando (menú cerrado).
     pub stack: Vec<Screen>,
     /// Carpeta de datos (opciones) y de partidas.
@@ -142,6 +146,8 @@ impl Menu {
         let saves_dir = save::saves_dir(&base);
         let mut m = Menu {
             frame_worst: (0.0, String::new()),
+            autoajuste: String::new(),
+            recomendada: None,
             stack: Vec::new(),
             base,
             saves_dir,
@@ -471,6 +477,10 @@ impl Menu {
                     let (worst, why) = &self.frame_worst;
                     let txt = if *worst > 0.0 { format!("{fps:.0} FPS · peor cuadro {worst:.0} ms{}", if why.is_empty() { String::new() } else { format!(" ({why})") }) } else { format!("{fps:.0} FPS") };
                     ui.label(RichText::new(txt).small());
+                    // [lod] Qué hace el auto-ajuste (qué manda, en el tope, qué perilla movió).
+                    if !self.autoajuste.is_empty() {
+                        ui.label(RichText::new(&self.autoajuste).small());
+                    }
                 });
             });
         }
@@ -788,11 +798,46 @@ impl Menu {
         let mut back = false;
         let status = self.status.clone();
         let d = &mut self.draft;
+        let recomendada = self.recomendada;
         panel(ctx, "menu-opciones", 520.0, |ui| {
             ui.label(RichText::new("Opciones").size(theme::BODY * 1.5));
             ornament(ui, 496.0, theme::BORDER);
             ui.spacing_mut().slider_width = 200.0;
             egui::Grid::new("opciones").num_columns(2).spacing(vec2(18.0, 10.0)).show(ui, |ui| {
+                // [lod] Calidad de una sola perilla (fija distancia, anillo, sombras, suavizado,
+                // hilos y subida); tocar una de esas opciones a mano la pasa a Personalizado.
+                ui.label("Calidad");
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    use crate::autoajuste::{Calidad, CALIDADES};
+                    for c in CALIDADES {
+                        let tip = match c.preset() {
+                            Some(p) => format!("{} niveles · anillo de {} chunks · sombras {}×{}² · objetivo {} FPS{}", p.niveles, p.anillo, p.sombras.0, p.sombras.1, p.fps_objetivo, if Some(c) == recomendada { " · recomendada para este equipo" } else { "" }),
+                            None => String::new(),
+                        };
+                        let name = if Some(c) == recomendada { format!("{} ★", c.nombre()) } else { c.nombre().to_string() };
+                        if ui.selectable_label(d.calidad == Some(c), name).on_hover_text(tip).clicked() {
+                            d.aplicar_calidad(c, crate::autoajuste::nucleos());
+                        }
+                    }
+                    // Personalizado: lo elegido a mano en las opciones de abajo.
+                    let _ = ui.selectable_label(d.calidad == Some(Calidad::Personalizado), "A mano").on_hover_text("Personalizado: lo elegido a mano en las opciones de abajo");
+                });
+                ui.end_row();
+                ui.label("Auto-ajuste");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut d.autoajuste, "Bajar y recuperar detalle según el equipo").on_hover_text("Mira si el cuello de botella es la tarjeta o el procesador y mueve sombras, anillo, niveles, hilos y subida, de a uno; con sincronización vertical no baja nada mientras el cuadro llegue al refresco");
+                });
+                ui.end_row();
+                ui.label("FPS objetivo");
+                ui.horizontal(|ui| {
+                    for v in [30u32, 45, 60, 90, 120] {
+                        if ui.selectable_label(d.fps_objetivo == v, v.to_string()).clicked() {
+                            d.fps_objetivo = v;
+                        }
+                    }
+                });
+                ui.end_row();
                 ui.label("Tamaño de la interfaz");
                 ui.add(egui::Slider::new(&mut d.escala_interfaz, 0.75..=1.5).step_by(0.05).custom_formatter(|v, _| format!("{} %", (v * 100.0).round() as i32)));
                 ui.end_row();
@@ -856,6 +901,12 @@ impl Menu {
                 });
                 ui.end_row();
             });
+            // [lod] Si lo elegido a mano ya no es el preset, la calidad pasa a Personalizado.
+            if let Some(p) = d.calidad.and_then(|c| c.preset()) {
+                if (p.niveles, p.sombras, p.msaa) != (d.niveles, (d.sombras_cascadas, d.sombras_resolucion), d.msaa) {
+                    d.calidad = Some(crate::autoajuste::Calidad::Personalizado);
+                }
+            }
             ui.add_space(4.0);
             ui.label(RichText::new("La distancia de dibujo se aplica al empezar o cargar una partida; el suavizado, al volver a abrir el juego.").small().color(theme::INK_SOFT));
             ui.add_space(6.0);

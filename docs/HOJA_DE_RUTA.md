@@ -1,6 +1,6 @@
 # Hoja de ruta
 
-> Estado al 18 de noviembre de 2026. Se actualiza con cada avance.
+> Estado al 23 de noviembre de 2026. Se actualiza con cada avance.
 > Dos líneas de trabajo: el **prototipo de Godot** (para diseñar y probar la jugabilidad) y el
 > **motor de vóxeles en Rust** (donde va a vivir el juego final).
 
@@ -63,6 +63,7 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 9. [x] Hojas sueltas de 0,125 m en la superficie de las copas (tiemblan con el viento)
 10. [ ] Ramas colgantes del sauce en micro-vóxeles, curva tonal
 11. [x] Todo en vóxeles: el río, la bahía y los arroyos son vóxeles de agua (la marea sube y baja la cara de arriba en el shader, sin rehacer mallas; nunca tapa tierra seca en ningún nivel), terreno con aspecto de vóxeles de cerca y suave de lejos (opción en Opciones), calles con diseño de época en vóxeles (empedrado en tresbolillo con vereda, cordón y cuneta; camino de tierra con huellas, pasto y charcos; esquinas sin dientes) y rampas de los puentes (ver [sistemas/motor-voxel.md](sistemas/motor-voxel.md) §18). Falta: crecientes de los arroyos en el agua dibujada
+12. [ ] Técnicas del mod LOD de Minecraft en el motor (ver [sistemas/tecnicas-minecraft-lod.md](sistemas/tecnicas-minecraft-lod.md)) — **hechas las fases 0, 1, 2 y 5**: banco con vuelo, percentiles, zoom de ida y vuelta, teletransporte y salto al recentrar (`bench.json`); caché de columnas en RAM con límite real de bytes (un zoom de ida y vuelta ya no regenera nada), prioridad por lo que se ve, subida por bytes y tiempo, hilos de generación debajo del principal; oclusión por relieve y horizonte antes de generar (conservadora, en un hilo aparte: −15 % de columnas a nivel de la calle, −22 % en el Miguelete, imagen idéntica); presets Mínimo…Ultra con recomendación por adaptador, núcleos y RAM, anillo como perilla y auto-ajuste por cuello de botella CPU/GPU consciente del vsync, con su línea en el contador de FPS. Faltan: fases 3 (reducción con prefiltrado, relleno y cobertura), 4 (fundido entre niveles y niebla de lo que falta) y 6 (SSAO lejano, escalado), "Medir y ajustar" en Opciones y medir todo en placas reales
 
 ## Fase 3: diseño de todas las épocas
 
