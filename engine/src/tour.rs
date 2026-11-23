@@ -56,7 +56,7 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 44] = [
+    let views: [(&'static str, [f32; 5]); 47] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
         // Hidrografía oficial (IDE): la playa de Pocitos y los bañados del Carrasco y el Pantanoso.
         ("paisaje-playa-pocitos", [16500.0, 15000.0, 700.0, 200.0, 28.0]),
@@ -115,6 +115,11 @@ pub fn landscape_steps() -> Vec<Act> {
         ("atlas-serrano-cerca", [147000.0, -30500.0, 90.0, 200.0, 16.0]),
         ("atlas-serrano-lejos", [147000.0, -30500.0, 2500.0, 200.0, 20.0]),
         ("atlas-parque-colonia", [-70000.0, -72000.0, 140.0, 200.0, 16.0]),
+        // [ciudad] Islas con su contorno real (islas.json): la de Flores en el entorno y la
+        // Gorriti y la de Lobos en el entorno amplio (fuera del alcance de la cámara del juego).
+        ("islas-flores", [36474.0, 18194.0, 650.0, 200.0, 24.0]),
+        ("islas-gorriti", [123592.0, 19747.0, 1100.0, 200.0, 22.0]),
+        ("islas-lobos", [131728.0, 27624.0, 800.0, 200.0, 22.0]),
     ];
     // `MOTOR_HORA=17.3` saca las vistas a esa hora (para revisar la luz baja).
     let hora = std::env::var("MOTOR_HORA").ok().and_then(|h| h.parse().ok()).unwrap_or(10.5);
@@ -130,7 +135,13 @@ pub fn landscape_steps() -> Vec<Act> {
     }
     // [agua en vóxeles] Agua y terreno en vóxeles: arroyo de cerca (con su cascada), bahía,
     // playa, ladera y caminos.
-    let agua: [(&'static str, fn(&Session) -> Option<[f32; 5]>); 2] = [("agua-arroyo-cerca", |s| cam_arroyo(s, 12752.5, 5055.0, 30.0)), ("agua-arroyo-medio", |s| cam_arroyo(s, 10900.0, 8200.0, 90.0))];
+    // [ciudad] Agua quieta: una laguneta del bañado del Pantanoso y una laguna del entorno.
+    let agua: [(&'static str, fn(&Session) -> Option<[f32; 5]>); 4] = [
+        ("agua-arroyo-cerca", |s| cam_arroyo(s, 12752.5, 5055.0, 30.0)),
+        ("agua-arroyo-medio", |s| cam_arroyo(s, 10900.0, 8200.0, 90.0)),
+        ("agua-laguneta-banado", |s| cam_quieta(s, 6500.0, 8800.0, 0.4, 70.0)),
+        ("agua-laguna", |s| cam_quieta(s, -12230.0, -13229.0, 1.0, 220.0)),
+    ];
     for (name, f) in agua.into_iter().filter(|(n, _)| pasa(n)) {
         out.push(CamFn(f));
         out.push(WaitIdle(name));
@@ -156,6 +167,23 @@ fn cam_arroyo(s: &Session, x: f32, z: f32, dist: f32) -> Option<[f32; 5]> {
     let m = s.terrain.stream_water().into_iter().flatten().filter(|m| m.alcance > 4.0).min_by(|a, b| a.p.distance(p).total_cmp(&b.p.distance(p)))?;
     let yaw = m.corriente.y.atan2(m.corriente.x).to_degrees();
     Some([m.p.x, m.p.y, dist, yaw, 26.0])
+}
+
+/// [ciudad] Cámara sobre el agua quieta (laguna o laguneta de bañado) más cercana a (x, z) con
+/// al menos `prof` m de agua.
+fn cam_quieta(s: &Session, x: f32, z: f32, prof: f32, dist: f32) -> Option<[f32; 5]> {
+    for r in 0..60 {
+        let r = r as f32 * 40.0;
+        let n = ((r / 20.0) as i32).max(1);
+        for k in 0..n {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU;
+            let p = Vec2::new(x, z) + Vec2::from_angle(a) * r;
+            if s.terrain.agua_quieta(p.x, p.y).is_some_and(|(_, h)| h >= prof) {
+                return Some([p.x, p.y, dist, 200.0, 30.0]);
+            }
+        }
+    }
+    None
 }
 
 /// Recorrido del modo juego: funda la plaza, traza un damero y una calle curva, zonifica,
@@ -519,6 +547,11 @@ fn pasos_arquitectura() -> Vec<Act> {
         CamFn(|_| d::view_arquitectura(3, 21.0, 40.0, 50.0, 28.0)),
         WaitIdle("casas de azotea de 1805"),
         Shot("motor-arq-azotea-1805"),
+        // [ciudad] De cerca: rejas, faroles de fachada y llamadores (modelos de detalle).
+        Hour(10.0),
+        CamFn(|_| d::view_arquitectura(3, 18.0, 13.0, 38.0, 9.0)),
+        WaitIdle("rejas y faroles de 1805 de cerca"),
+        Shot("motor-arq-fachadas-detalle"),
         Hour(10.0),
         CamFn(|_| d::view_arquitectura(3, 0.0, 75.0, -35.0, 50.0)),
         WaitIdle("azoteas y patios de 1805 desde arriba"),
@@ -594,6 +627,11 @@ fn pasos_epoca2() -> Vec<Act> {
         CamFn(|_| d2::view_muestra(1, 21.0, 46.0, 50.0, 26.0)),
         WaitIdle("casas de altos"),
         Shot("epoca2-05-casas-de-altos"),
+        // [ciudad] De cerca: balcones con macetas, faroles de gas de fachada y llamadores.
+        Hour(10.0),
+        CamFn(|_| d2::view_muestra(1, 18.0, 15.0, 35.0, 14.0)),
+        WaitIdle("fachadas de la época 2 de cerca"),
+        Shot("epoca2-05b-fachadas-detalle"),
         Hour(10.0),
         CamFn(|_| d2::view_muestra(2, 21.0, 42.0, 50.0, 26.0)),
         WaitIdle("almacenes"),

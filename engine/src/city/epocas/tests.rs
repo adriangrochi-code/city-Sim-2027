@@ -173,6 +173,11 @@ fn ensanche_con_bulevar_plazas_y_solares() {
             assert!(l.c.distance(Vec2::from(*c)) > 30.0, "solar sobre una plaza");
         }
     }
+    // El ensanche se empalma solo con la red vieja: una sola red de calles.
+    assert!(tr.empalmes >= 1, "sin calles de empalme");
+    let comp = super::super::services::components(&city.net);
+    let redes: std::collections::BTreeSet<u32> = comp.values().copied().collect();
+    assert_eq!(redes.len(), 1, "el ensanche quedó suelto de la ciudad vieja");
     // Las manzanas del ensanche cuentan como ciudad (no extramuros).
     assert_eq!(city.lugar_de(nuevos[0].c), 1);
     // Zonificadas, crecen con casas de la época 2.
@@ -282,7 +287,11 @@ fn agua_corriente_y_colectores_cubren_su_red() {
     assert!(city.epoca.agua_red.len() * 10 > casas * 9, "agua corriente: {} de {casas}", city.epoca.agua_red.len());
     // El colector va junto a la costa; en el mapa de prueba se lo pone a mano.
     let id = 9999;
-    city.services.buildings.insert(id, super::super::services::Building { id, kind: Kind::Colector, c: C + s * 60.0, f, served: 0, contaminacion: 0.0, rinde: 1.0, voxels: Vec::new() });
+    let boca = C + s * 60.0;
+    city.services.buildings.insert(id, super::super::services::Building { id, kind: Kind::Colector, c: boca, f, served: 0, contaminacion: 0.0, rinde: 1.0, voxels: Vec::new() });
+    // Un camino suelto (como el del muelle) pegado a la boca: el colector igual se empalma con
+    // las calles de la ciudad que pasan cerca.
+    city.net.add_road(&super::super::roads::line(boca + Vec2::new(-20.0, 4.0), boca + Vec2::new(20.0, 4.0)), RoadKind::Dirt);
     city.refresh_redes();
     assert!(city.epoca.cloaca.len() * 10 > casas * 9, "colector: {} de {casas}", city.epoca.cloaca.len());
     city.refresh_barrio();

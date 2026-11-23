@@ -225,6 +225,21 @@ impl RoadNetwork {
         (-r..=r).flat_map(move |dy| (-r..=r).map(move |dx| c + IVec2::new(dx, dy))).filter_map(|k| self.hash.get(&k)).flatten().copied()
     }
 
+    /// Tramos que pasan a menos de `maxd` m del punto (sin repetir, en orden).
+    pub fn edges_near(&self, p: Vec2, maxd: f32) -> Vec<u32> {
+        let mut v: Vec<u32> = self
+            .segments_near(p, maxd)
+            .filter(|&(eid, si)| {
+                let pts = &self.edges[&eid].pts;
+                p.distance(closest_on_segment(p, pts[si], pts[si + 1])) < maxd
+            })
+            .map(|x| x.0)
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
     pub fn nearest_edge(&self, p: Vec2, maxd: f32) -> Option<Nearest> {
         let mut best: Option<Nearest> = None;
         for (eid, si) in self.segments_near(p, maxd) {

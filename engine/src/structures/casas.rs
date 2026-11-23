@@ -110,14 +110,20 @@ fn ventana(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1:
         Reja::Voladiza => {
             // Jaula que vuela 0,5 m, con base y remate.
             opening(f, e, u0, u1, y0, y1, 1, WINDOW);
-            f.raw_fill(e, u0, u1, y0, y1, -1, 0, REJA);
+            // [ciudad] En la ciudad, la reja es un modelo de detalle (barrotes de verdad);
+            // si no, el vóxel de reja de siempre.
+            if !reja_detalle(f, e, es, u0, u1, y0, y1, 0.0, true) {
+                f.raw_fill(e, u0, u1, y0, y1, -1, 0, REJA);
+            }
             f.fill(e, u0 - 1, u1 + 1, y0 - 1, y0, -1, 0, ms);
             f.fill(e, u0 - 1, u1 + 1, y1, y1 + 1, -1, 0, ms);
         }
         Reja::Plana => {
             // Barrotes embutidos en el vano, con el postigo atrás.
             opening(f, e, u0, u1, y0, y1, 2, WINDOW);
-            f.raw_fill(e, u0, u1, y0, y1, 1, 2, REJA);
+            if !reja_detalle(f, e, es, u0, u1, y0, y1, 1.5, false) {
+                f.raw_fill(e, u0, u1, y0, y1, 1, 2, REJA);
+            }
             if es.ornamento >= 1 {
                 f.fill(e, u0, u1, y0 - 1, y0, -1, 0, ms); // alféizar o poyo
             }
@@ -132,6 +138,39 @@ fn ventana(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1:
                 f.fill(e, u0 - 1, u1 + 1, y1, y1 + 1, 0, 1, marco(es));
             }
         }
+    }
+}
+
+/// [ciudad] Reja de ventana como modelo de detalle (1 m de ancho, 2 o 2,5 m de alto), en el
+/// plano `w`. Devuelve `false` si no corresponde (otro tamaño, o quien construye no dibuja
+/// detalles): entonces va la reja de vóxeles.
+#[allow(clippy::too_many_arguments)]
+fn reja_detalle(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1: i32, w: f32, volada: bool) -> bool {
+    use crate::detalle::Id;
+    if u1 - u0 != 2 || !Frame::con_detalles(e) {
+        return false;
+    }
+    let id = match (y1 - y0, volada) {
+        (4, false) => Id::RejaPlana,
+        (5, false) => Id::RejaPlanaAlta,
+        (4, true) => Id::RejaVolada,
+        (5, true) => Id::RejaVoladaAlta,
+        _ => return false,
+    };
+    // Todas las rejas de una casa son del mismo herrero (la semilla de la casa).
+    f.detalle(e, id, (u0 + u1) as f32 * 0.5, y0 as f32, w, 0.0, es.seed as u32)
+}
+
+/// [ciudad] Riqueza de la casa para los detalles de la fachada: 0 pobre … 3 rica.
+fn riqueza(es: &Estilo) -> u8 {
+    es.clase.min(3).max(u8::from(es.ornamento >= 2))
+}
+
+/// [ciudad] Aldaba o llamador en la puerta principal (casas con hierro de clase media para
+/// arriba) [E]: en el plano de la hoja (`w`), a 1,5 m del suelo.
+fn llamador(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w: i32) {
+    if es.hierro && riqueza(es) >= 1 {
+        f.detalle(e, crate::detalle::Id::Llamador, (u0 + u1) as f32 * 0.5, 2.6, w as f32, 0.0, es.seed as u32 ^ 0x11A);
     }
 }
 
@@ -421,10 +460,21 @@ pub fn palmera(f: &Frame, e: &mut Edits, u: i32, w: i32, alto: i32, seed: u64) {
     }
 }
 
-/// Farol de hierro con brazo, colgado de la fachada.
-fn farol_fachada(f: &Frame, e: &mut Edits, u: i32) {
-    f.raw(e, u, 8, -1, IRON);
-    f.raw(e, u, 7, -1, WINDOW);
+/// Farol de hierro con brazo, colgado de la fachada. [ciudad] En la ciudad es el modelo de
+/// detalle (de aceite; de gas en la Ciudad Nueva desde 1853, cuando se enciende la usina de los
+/// Ísola [F, ver `docs/sistemas/arquitectura-epoca2.md`]); si no, dos vóxeles.
+fn farol_fachada(f: &Frame, e: &mut Edits, es: &Estilo, u: i32) {
+    let id = if es.neo && es.anio >= 1853 { crate::detalle::Id::FarolGasBrazo } else { crate::detalle::Id::FarolBrazo };
+    if !f.detalle(e, id, u as f32 + 0.5, 6.0, 0.0, 0.0, es.seed as u32 ^ 0xFA0) {
+        f.raw(e, u, 8, -1, IRON);
+        f.raw(e, u, 7, -1, WINDOW);
+    }
+}
+
+/// [ciudad] ¿Farol de fachada en una casa nueva de la Ciudad Nueva? Las ricas y los comercios
+/// de esquina, si hay hierro [E] (en la colonia lo decide `Estilo::farol`).
+fn farol_neo(es: &Estilo) -> bool {
+    es.neo && es.hierro && (riqueza(es) >= 2 || es.esquina > 0 && es.uso == Uso::Comercio) && hash(IVec3::new(es.seed as i32, 7, 0), es.seed ^ 0xFA1) < 0.45
 }
 
 // --- Fachada ------------------------------------------------------------------------------
@@ -553,6 +603,9 @@ fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i3
                 puerta_neo(f, e, es, a, b, hp, es.zaguan && principal);
                 if principal {
                     portada(f, e, es, a, b, hp, techo);
+                    if !es.zaguan {
+                        llamador(f, e, es, a, b, 2);
+                    }
                     principal = false;
                 }
             }
@@ -561,9 +614,11 @@ fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i3
                 ventana_neo(f, e, es, a, b, y0, hp);
             }
             Hueco::Puerta => {
-                puerta(f, e, es, a, b, hp, if es.zaguan && principal { 2 } else { 1 });
+                let rec = if es.zaguan && principal { 2 } else { 1 };
+                puerta(f, e, es, a, b, hp, rec);
                 if principal {
                     portada(f, e, es, a, b, hp, techo);
+                    llamador(f, e, es, a, b, rec);
                     principal = false;
                 }
             }
@@ -709,9 +764,9 @@ fn casa_un_piso(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Optio
         let (a, b) = if x0 > 0 { (0, x0) } else { (x1, f.width) };
         tapia(&g, e, es, a, b, fd + 10);
     }
-    if es.farol {
+    if es.farol || farol_neo(es) {
         let u = if es.esquina > 0 { 1 } else { vanos.iter().find(|v| v.2 == Hueco::Puerta).map_or(x0 + 2, |v| v.0 - 1) };
-        farol_fachada(&g, e, u.max(x0));
+        farol_fachada(&g, e, es, u.max(x0));
     }
     // Altillo o mirador sobre la azotea.
     if azotea && es.altillo {
@@ -1000,8 +1055,8 @@ fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<
         }
         cornisa_estilo(&side, e, es, 0, fd, h - 1);
     }
-    if es.farol {
-        farol_fachada(&g, e, if es.esquina > 0 { 1 } else { x0 + 1 });
+    if es.farol || farol_neo(es) {
+        farol_fachada(&g, e, es, if es.esquina > 0 { 1 } else { x0 + 1 });
     }
     // Ala de dos plantas alrededor del patio (de renta: con galería de madera).
     let izq = es.esquina > 0 || r.f() < 0.5;
@@ -1077,6 +1132,19 @@ fn balcon(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i32) {
             while u < u1 {
                 f.raw(e, u, y - 1, -1, es.moldura);
                 u += 3;
+            }
+        }
+        // [ciudad] Macetas con geranios en los balcones de las casas de clase media para
+        // arriba (más en la Ciudad Nueva) [E].
+        if riqueza(es) >= 1 {
+            let p = if es.neo { 0.55 } else { 0.35 };
+            let mut u = u0 + 1;
+            while u < u1 - 1 {
+                if hash(f.at(u, y, -1), es.seed ^ 0xAC37) < p {
+                    let giro = hash(f.at(u, y, -2), es.seed) * std::f32::consts::TAU;
+                    f.detalle(e, crate::detalle::Id::Maceta, u as f32 + 0.5, (y + 1) as f32, -0.55, giro, es.seed as u32 ^ u as u32);
+                }
+                u += 2;
             }
         }
     }

@@ -448,6 +448,19 @@ fn pier_site(s: &mut Session) -> Option<Vec2> {
                 continue;
             }
             spurs += 1;
+            // [ciudad] Primero, un camino desde la esquina más cercana de la ciudad: así el
+            // muelle (y lo que se arrime a su camino, como el colector) queda en la red de
+            // calles y no en un camino suelto.
+            let cerca = s.game.as_ref().unwrap().city.net.nodes.values().copied().filter(|n| (25.0..240.0).contains(&n.distance(p))).min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)));
+            if let Some(n) = cerca {
+                let g = s.game.as_mut().unwrap();
+                if let Ok(e) = g.city.build_road(&t, &roads::line(p + (n - p).normalize() * 8.0, n), RoadKind::Dirt) {
+                    s.apply_edits(&e);
+                    if s.game.as_ref().unwrap().city.pier_problem(&t, p).is_none() {
+                        return Some(p);
+                    }
+                }
+            }
             for len in [50.0, 90.0] {
                 for turn in [0.0f32, 0.4, -0.4, 0.8, -0.8] {
                     let back = -sea.rotate(Vec2::from_angle(turn));
@@ -1088,8 +1101,10 @@ pub fn arquitectura(s: &mut Session) -> String {
     let esquinas = lista.iter().flat_map(|m| m.3.iter()).filter(|id| c.lots.lots[id].obra.is_some_and(|o| o.contexto.esquina > 0)).count();
     *MUESTRAS_ARQ.lock().unwrap() = lista;
     let tipos = nombres.iter().map(|(k, v)| format!("{k} ×{v}")).collect::<Vec<_>>().join(", ");
+    // [ciudad] Modelos de detalle de las fachadas (rejas, faroles, macetas, llamadores).
+    let det = c.fachadas.cuenta(&c.lots).iter().map(|(k, v)| format!("{k:?} {v}")).collect::<Vec<_>>().join(", ");
     let r = apply(s, Ok(e));
-    format!("tipos: {tipos} · {esquinas} esquinas · {r}")
+    format!("tipos: {tipos} · {esquinas} esquinas · detalles de fachada: {det} · {r}")
 }
 
 /// Cámara sobre la esquina de la calle de comercio (la pulpería), en diagonal a las dos calles.

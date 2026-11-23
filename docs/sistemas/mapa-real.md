@@ -77,6 +77,8 @@ la República)**, por sus servicios OGC en `mapas.ide.uy`:
 | `assets/mapas/montevideo/amplio.bin` | Entorno amplio: 300 × 300 km alrededor del mapa, cada 500 m (601 × 601, 0,7 MB; `metros = valor / 100 − 50`). Ver [Entorno amplio](#entorno-amplio) |
 | `assets/mapas/montevideo/amplio_cobertura.bin` | Bañado y monte nativo del entorno amplio: 2 bytes por muestra (0..255), misma grilla (0,7 MB) |
 | `tools/mapa_real/construir_entorno_amplio.py` | Constructor del entorno amplio (aparte: no hace falta rehacer el mapa) |
+| `assets/mapas/montevideo/islas.json` | Islas con su contorno real (Flores, Gorriti, Lobos; y las Ratas y las de Colonia para el mapa del país). Ver [Islas](#islas) |
+| `tools/mapa_real/construir_islas.py` | Constructor de `islas.json` (aparte) |
 | `assets/mapas/montevideo/biomas.bin` | Biomas oficiales en la grilla del mapa (1201 × 1201, `uint8`) |
 | `assets/mapas/montevideo/biomas_contexto.bin` | Biomas oficiales en la grilla del entorno (741 × 741) |
 | `assets/mapas/montevideo/bosque.bin`, `bosque_contexto.bin` | Monte nativo reconstruido para 1726: cobertura de copas `uint8` (valor / 255) en las dos grillas. Ver [vegetacion-historica.md](vegetacion-historica.md) |
@@ -261,6 +263,54 @@ La costa argentina está a unos 100 km de Montevideo: con el radio de dibujo act
 bruma no se llega a ver, como en la realidad (desde Montevideo, la otra orilla queda bajo el
 horizonte). Sirve para que, al alejarse, el río tenga otra orilla y no un borde.
 
+## Islas
+
+Las grillas del relieve no alcanzan para las islas chicas: en la del entorno amplio (500 m)
+la de Lobos o la Gorriti no ocupan ni una celda (o salen como una mancha de 25 ha donde caen),
+y en la del entorno (100 m) la de Flores quedó engrosada una celda para que no desapareciera.
+`islas.json` guarda el **contorno oficial** de cada isla y su **altura**, y el motor la levanta
+siguiendo ese contorno en cualquier grilla (`engine/src/islas.rs`).
+
+| Isla | Partes | Área (contorno) | Alto (Copernicus) | En el terreno |
+|---|---|---|---|---|
+| Isla de Flores | 2 | 21,0 ha | 10,0 m | sí (grilla del entorno, recortada a su contorno) |
+| Isla Gorriti | 1 | 74,1 ha | 27,7 m | sí (entorno amplio, recortada) |
+| Isla de Lobos (con su islote) | 2 | 38,4 ha | 23,6 m | sí (entorno amplio, recortada) |
+| Isla de las Ratas | 1 | 3,2 ha | 2,4 m | no: ya está en la grilla del mapa (20 m) |
+| Isla San Gabriel | 1 | 32,1 ha | 10,2 m | no: fuera de la grilla amplia (x ≈ −143 km) |
+| Isla Farallón (con dos islotes) | 3 | 3,0 ha | sin dato (menor que un píxel) | no: fuera de la grilla amplia |
+
+**Fuentes.** Contornos: IDE Uruguay, WFS `hidrografia:isla_a` (hidrografía nacional 1:50.000),
+pedida por recuadros chicos (la IDE no contesta un recuadro de todo el Río de la Plata); la capa
+no trae nombres: cada isla se elige por cercanía a su posición conocida y el nombre va a mano.
+Alturas: Copernicus DEM GLO-90 (el MDT de la IDE no tiene datos sobre las islas): el píxel más
+alto con centro dentro del contorno. Es un modelo **de superficie**: en la Gorriti incluye el
+pinar (plantado en el siglo XX), así que su altura queda alta para 1726. Coordenadas, con la
+misma proyección local que el resto del mapa (válida a 150 km con errores de decenas de metros).
+
+**En el motor.** Cada isla guarda la distancia con signo a su contorno en una grilla propia de
+5 m (con 400 m de margen). Adentro, un domo que sube desde 0,3 m en la orilla hasta su altura
+(a un 60 % del camino al centro), con relieve fino; afuera, el fondo baja 8 cm por metro. Las
+marcadas `recortar` (Flores, Gorriti, Lobos) además devuelven al agua lo que la grilla gruesa
+había engrosado fuera del contorno, apagando el recorte antes del borde de la caja (sin
+escalón). Orilla de piedra y pasto arriba (ninguna tenía monte en 1726). En el **mapa del país**
+las seis se dibujan con su contorno sobre el relieve de 1 km (no ocupan ni una celda), con su
+nombre al acercarse. Test: `islas::tests::las_islas_salen_del_agua_con_su_contorno` (área seca
+dentro del 60–160 % del contorno, altura, agua alrededor y nombre).
+
+La cámara del juego no sale del mapa jugable: la Gorriti y Lobos (a más de 110 km) solo se ven
+en el recorrido de paisajes (`MOTOR_VISTAS=islas motor --mapa real --auto-test carpeta`); la de
+Flores, desde el borde este del mapa. Las de Colonia quedan para cuando la grilla amplia llegue
+hasta allá.
+
+![Isla de Lobos con su contorno oficial](../capturas/islas-lobos.jpg)
+![Isla Gorriti frente a Punta del Este](../capturas/islas-gorriti.jpg)
+![Isla de Flores recortada a su contorno](../capturas/islas-flores-contorno.jpg)
+
+```
+python3 tools/mapa_real/construir_islas.py --cache /ruta/a/una/carpeta
+```
+
 ## Cómo regenerar
 
 ```
@@ -336,6 +386,10 @@ Sin cambios para el resto del código: `height`, `is_land`, `arroyo_distance`, `
 - Los arroyos del relieve que rellenan la ciudad actual pueden quedar a unos metros del cauce
   histórico (son D8 sobre un MDT de 30 m).
 - La Isla de Flores (fuera del mapa jugable) se ve solo de lejos: la cámara no sale del mapa.
+  Desde la v0.11.x tiene su contorno real (ver [Islas](#islas)).
+- Lagunas y bañados: el nivel de cada laguna es la mediana del MDT en sus celdas y la
+  profundidad, una estimación (no hay batimetría); los claros de agua de los bañados son
+  aleatorios (ruido), no un relevamiento.
 - Entorno amplio: la costa a 500 m es escalonada de cerca (solo se ve a decenas de km); el monte
   de Maldonado es el de hoy (DGF 2021 × 1,5), sin la reconstrucción de 1726 del mapa; la capa
   `area_humeda_a` de la IDE no bajó (el servidor cortaba las conexiones) y los bañados salen de

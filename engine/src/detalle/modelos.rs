@@ -94,10 +94,22 @@ pub fn paleta(id: Id, semilla: u32) -> Paleta {
             set(r::CAPA, LETREROS[(s % LETREROS.len() as u64) as usize]);
             set(r::ACENTO, [226, 212, 170]);
         }
-        Id::FarolAceite | Id::FarolGas => {
+        Id::FarolAceite | Id::FarolGas | Id::FarolBrazo | Id::FarolGasBrazo => {
             set(r::CLARO, [236, 220, 170]);
-            set(r::HIERRO, if id == Id::FarolGas { [36, 46, 40] } else { [40, 36, 34] });
+            set(r::HIERRO, if matches!(id, Id::FarolGas | Id::FarolGasBrazo) { [36, 46, 40] } else { [40, 36, 34] });
         }
+        // [ciudad] Hierro forjado: negro, o pintado de verde oscuro o de rojo óxido [E].
+        Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta => {
+            set(r::HIERRO, [[36, 34, 33], [34, 44, 38], [62, 40, 32], [30, 30, 32]][(s % 4) as usize]);
+        }
+        Id::Maceta => {
+            // Barro cocido; geranios rojos, rosados o blancos y la hoja verde [E].
+            set(r::ACENTO, [[166, 86, 54], [150, 78, 52], [182, 104, 70]][(s % 3) as usize]);
+            set(r::CAPA, [[64, 104, 52], [52, 92, 46], [76, 110, 58]][((s >> 3) % 3) as usize]);
+            set(r::CLARO, [[204, 40, 40], [222, 110, 150], [236, 232, 220], [190, 30, 60]][((s >> 6) % 4) as usize]);
+        }
+        // Aldaba de hierro o llamador de bronce.
+        Id::Llamador => set(r::HIERRO, if s % 3 == 0 { [40, 36, 34] } else { [156, 118, 58] }),
         Id::BrocalAljibe | Id::Cruz => {
             set(r::CAPA, [206, 202, 194]);
             set(r::HIERRO, [36, 34, 34]);
@@ -123,7 +135,8 @@ pub fn paleta(id: Id, semilla: u32) -> Paleta {
 
 /// ¿Lleva sombra de contacto en el suelo? (los animales y lo que tiene huella).
 pub fn con_sombra(id: Id) -> bool {
-    !matches!(id, Id::Bote | Id::Veleta)
+    // Lo que cuelga de una fachada no toca el suelo.
+    !matches!(id, Id::Bote | Id::Veleta | Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta | Id::FarolBrazo | Id::FarolGasBrazo | Id::Maceta | Id::Llamador)
 }
 
 /// Arma un modelo de la biblioteca.
@@ -152,6 +165,14 @@ pub fn armar(id: Id) -> Modelo {
         Id::Veleta => veleta(),
         Id::Letrero => letrero(),
         Id::Palenque => palenque(),
+        Id::RejaPlana => reja_plana(32),
+        Id::RejaPlanaAlta => reja_plana(40),
+        Id::RejaVolada => reja_volada(32),
+        Id::RejaVoladaAlta => reja_volada(40),
+        Id::FarolBrazo => farol_brazo(),
+        Id::FarolGasBrazo => farol_gas_brazo(),
+        Id::Maceta => maceta(),
+        Id::Llamador => llamador(),
     }
 }
 
@@ -594,6 +615,114 @@ fn letrero() -> Modelo {
     l.caja(Fijo, r::ACENTO, [0, 26, 8], [1, 30, 10]);
     l.caja(Fijo, r::ACENTO, [0, 28, 7], [1, 30, 11]);
     l.armar("letrero de pulpería")
+}
+
+// --- [ciudad] Detalles de las fachadas -------------------------------------------------------
+//
+// Se cuelgan de la fachada: el origen es la cara del muro (z = 0, +z hacia la calle) en el
+// borde de abajo del vano. Medidas [E] (rejas de 1 m de ancho con barrotes cada 12 cm).
+
+/// Barrotes, marco y planchuelas de una reja de 1 m de ancho y `h` micro-vóxeles de alto, en
+/// el plano z = `z`.
+fn barrotes_reja(l: &mut Lienzo, h: i32, z: i32) {
+    l.caja(Fijo, r::HIERRO, [-8, 0, z], [8, 1, z + 1]);
+    l.caja(Fijo, r::HIERRO, [-8, h - 1, z], [8, h, z + 1]);
+    for y in [h / 3, 2 * h / 3] {
+        l.caja(Fijo, r::HIERRO, [-8, y, z], [8, y + 1, z + 1]);
+    }
+    for x in [-8, -5, -2, 1, 4, 7] {
+        l.caja(Fijo, r::HIERRO, [x, 0, z], [x + 1, h, z + 1]);
+    }
+}
+
+/// Reja embutida en el vano: barrotes y dos planchuelas, con los extremos de las planchuelas
+/// metidos en el muro.
+fn reja_plana(h: i32) -> Modelo {
+    let mut l = Lienzo::new([-9, 0, 0], [9, h, 1]);
+    barrotes_reja(&mut l, h, 0);
+    for y in [h / 3, 2 * h / 3] {
+        l.caja(Fijo, r::HIERRO, [-9, y, 0], [9, y + 1, 1]);
+    }
+    l.armar(if h > 32 { "reja plana alta" } else { "reja plana" })
+}
+
+/// Reja volada: jaula que sale medio metro (frente y costados de barrotes), con base y techo
+/// de planchuela y una voluta en cada esquina de abajo.
+fn reja_volada(h: i32) -> Modelo {
+    let mut l = Lienzo::new([-9, -2, 0], [9, h, 9]);
+    barrotes_reja(&mut l, h, 7);
+    for x in [-8, 7] {
+        for z in [0, 3, 5] {
+            l.caja(Fijo, r::HIERRO, [x, 0, z], [x + 1, h, z + 1]);
+        }
+        l.caja(Fijo, r::HIERRO, [x, 0, 0], [x + 1, 1, 8]);
+        l.caja(Fijo, r::HIERRO, [x, h - 1, 0], [x + 1, h, 8]);
+        l.caja(Fijo, r::HIERRO, [x, h / 2, 0], [x + 1, h / 2 + 1, 8]);
+        // Voluta: una ménsula de hierro que apoya la jaula en el muro.
+        l.caja(Fijo, r::HIERRO, [x, -1, 1], [x + 1, 0, 6]);
+        l.caja(Fijo, r::HIERRO, [x, -2, 0], [x + 1, -1, 2]);
+    }
+    l.armar(if h > 32 { "reja volada alta" } else { "reja volada" })
+}
+
+/// Farol de aceite de fachada: placa en el muro, brazo con tornapunta y el farol colgado.
+fn farol_brazo() -> Modelo {
+    let mut l = Lienzo::new([-5, 0, 0], [5, 20, 14]);
+    l.centrada(Fijo, r::HIERRO, 1, [9, 19], [0, 1]);
+    l.centrada(Fijo, r::HIERRO, 1, [16, 17], [1, 11]);
+    for k in 0..5 {
+        l.centrada(Fijo, r::HIERRO, 1, [11 + k, 12 + k], [1 + k * 2, 3 + k * 2]);
+    }
+    l.centrada(Fijo, r::HIERRO, 1, [12, 16], [9, 10]);
+    farol(&mut l, 9, 1);
+    l.armar("farol de brazo")
+}
+
+/// Farol de gas de fachada: brazo con voluta y farol más alto, de cuatro vidrios con el
+/// sombrerete en punta.
+fn farol_gas_brazo() -> Modelo {
+    let mut l = Lienzo::new([-6, 0, 0], [6, 26, 18]);
+    l.centrada(Fijo, r::HIERRO, 2, [12, 24], [0, 1]);
+    l.centrada(Fijo, r::HIERRO, 1, [21, 22], [1, 13]);
+    // Voluta bajo el brazo.
+    for (y, z0, z1) in [(20, 2, 4), (19, 3, 5), (18, 4, 6), (17, 5, 8), (18, 8, 9), (19, 8, 10), (20, 9, 10)] {
+        l.centrada(Fijo, r::HIERRO, 1, [y, y + 1], [z0, z1]);
+    }
+    l.centrada(Fijo, r::HIERRO, 1, [16, 21], [11, 12]);
+    let zc = 11;
+    l.caja(Fijo, r::CLARO, [-3, 3, zc - 3], [3, 12, zc + 3]);
+    l.caja(Fijo, r::HIERRO, [-4, 2, zc - 4], [4, 3, zc + 4]);
+    l.caja(Fijo, r::HIERRO, [-2, 0, zc - 2], [2, 2, zc + 2]);
+    for (x, z) in [(-4, zc - 4), (3, zc - 4), (-4, zc + 3), (3, zc + 3)] {
+        l.caja(Fijo, r::HIERRO, [x, 3, z], [x + 1, 12, z + 1]);
+    }
+    for (k, y) in (12..16).enumerate() {
+        let k = 4 - k as i32;
+        l.caja(Fijo, r::HIERRO, [-k, y, zc - k], [k.max(1), y + 1, zc + k.max(1)]);
+    }
+    l.armar("farol de gas de brazo")
+}
+
+/// Maceta de barro con un geranio.
+fn maceta() -> Modelo {
+    let mut l = Lienzo::new([-5, 0, -5], [5, 11, 5]);
+    l.cilindro_y(Fijo, r::ACENTO, [0, 0], 2.4, [0, 3]);
+    l.cilindro_y(Fijo, r::ACENTO, [0, 0], 3.0, [3, 5]);
+    l.cilindro_y(Fijo, r::CAPA, [0, 0], 3.6, [5, 8]);
+    l.cilindro_y(Fijo, r::CAPA, [0, 0], 2.4, [8, 9]);
+    for (x, y, z) in [(-2, 8, 1), (1, 9, -1), (2, 7, 2), (-1, 9, -2), (0, 10, 0), (-3, 7, -1)] {
+        l.punto(Fijo, r::CLARO, x, y, z);
+    }
+    l.armar("maceta")
+}
+
+/// Aldaba de la puerta de calle: placa y anillo (o la mano del llamador).
+fn llamador() -> Modelo {
+    let mut l = Lienzo::new([-2, 0, 0], [2, 6, 2]);
+    l.caja(Fijo, r::HIERRO, [-1, 4, 0], [1, 6, 1]);
+    l.caja(Fijo, r::HIERRO, [-2, 0, 1], [2, 4, 2]);
+    l.borrar([-1, 1, 1], [1, 3, 2]);
+    l.armar("llamador")
 }
 
 /// Palenque: dos postes y el travesaño para atar los caballos.

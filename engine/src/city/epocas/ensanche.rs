@@ -46,6 +46,9 @@ pub struct Trazado {
     pub nv: u32,
     /// Índice de la línea (a lo largo de `v`) que es bulevar.
     pub bulevar: u32,
+    /// Calles de empalme con la red que ya había (ver `empalmar`).
+    #[serde(default)]
+    pub empalmes: u32,
 }
 
 impl Trazado {
@@ -142,7 +145,57 @@ pub fn plan(a: Vec2, b: Vec2, cursor: Vec2) -> Option<Plan> {
         }
         s += PASO_ARBOLES;
     }
-    Some(Plan { trazado: Trazado { a: a.into(), u: u.into(), v: v.into(), nu, nv, bulevar: ib }, lineas, plazas, arboles })
+    Some(Plan { trazado: Trazado { a: a.into(), u: u.into(), v: v.into(), nu, nv, bulevar: ib, empalmes: 0 }, lineas, plazas, arboles })
+}
+
+/// Hasta cuántas calles de empalme une el ensanche con la red vieja, y a qué distancia máxima
+/// (m) busca una esquina vieja para cada esquina del borde del trazado [E]. El ensanche no es
+/// una ciudad aparte: sus calles siguen hasta las de la ciudad vieja.
+pub const EMPALMES_MAX: usize = 6;
+pub const EMPALME_LARGO_MAX: f32 = 260.0;
+/// Entre dos empalmes, al menos esto (m): una calle de unión por cuadra, no un abanico.
+pub const EMPALME_SEPARACION: f32 = BLOCK * 0.9;
+
+/// Candidatos a calle de empalme: (puntaje, esquina del ensanche, esquina vieja), del mejor al
+/// peor. Se prefieren las uniones cortas que prolongan una calle del ensanche (alineadas con
+/// `u` o `v`): así la calle nueva sigue derecho hasta la red vieja en vez de cruzar en diagonal.
+pub fn candidatos_empalme(tr: &Trazado, nodos: &[(u32, Vec2)], dentro: impl Fn(Vec2) -> bool) -> Vec<(f32, Vec2, Vec2)> {
+    let (a, u, v) = tr.ejes();
+    let (lu, lv) = (BLOCK * tr.nu as f32, BLOCK * tr.nv as f32);
+    let borde = |p: Vec2| {
+        let q = p - a;
+        let (x, y) = (q.dot(u), q.dot(v));
+        x < 12.0 || y < 12.0 || x > lu - 12.0 || y > lv - 12.0
+    };
+    let nuevos: Vec<Vec2> = nodos.iter().map(|x| x.1).filter(|p| tr.contiene(*p) && borde(*p)).collect();
+    let viejos: Vec<Vec2> = nodos.iter().map(|x| x.1).filter(|p| !dentro(*p)).collect();
+    let centro = a + u * lu * 0.5 + v * lv * 0.5;
+    let mut out = Vec::new();
+    for &n in &nuevos {
+        // Hacia afuera del trazado: la unión no cruza las manzanas nuevas.
+        let afuera = (n - centro).normalize_or_zero();
+        let mut mejor: Option<(f32, Vec2)> = None;
+        for &o in &viejos {
+            let d = o.distance(n);
+            if !(8.0..EMPALME_LARGO_MAX).contains(&d) {
+                continue;
+            }
+            let dir = (o - n) / d;
+            if dir.dot(afuera) < 0.2 {
+                continue;
+            }
+            let alineada = dir.dot(u).abs().max(dir.dot(v).abs());
+            let puntaje = d * (2.2 - alineada * 1.2);
+            if mejor.is_none_or(|m| puntaje < m.0) {
+                mejor = Some((puntaje, o));
+            }
+        }
+        if let Some((p, o)) = mejor {
+            out.push((p, n, o));
+        }
+    }
+    out.sort_by(|x, y| x.0.total_cmp(&y.0));
+    out
 }
 
 /// Árbol de la alameda (paraíso o plátano: los de los paseos del XIX [E]): tronco y copa.
@@ -236,11 +289,41 @@ impl City {
         for q in &p.arboles {
             arbol(t, &mut e, *q, SEMILLA_ARBOL);
         }
+        let mut trazado = p.trazado;
+        trazado.empalmes = self.empalmar(t, &trazado, &mut e);
         let en = &mut self.epoca.ensanche;
-        en.trazados.push(p.trazado);
+        en.trazados.push(trazado);
         en.plazas.extend(p.plazas.iter().map(|&(c, f)| (c.into(), f.into())));
         en.arboles.extend(p.arboles.iter().map(|&q| <[f32; 2]>::from(q)));
         Ok(e)
+    }
+
+    /// Une las calles del ensanche con la red que ya había: calles empedradas desde las esquinas
+    /// del borde del trazado hasta las esquinas viejas más cercanas (hasta `EMPALMES_MAX`, una
+    /// por cuadra). Sin empalme las redes de gas, agua y colectores (que siguen la calle) no
+    /// llegaban al ensanche. Devuelve cuántas se hicieron (se pagan aparte, si alcanza).
+    fn empalmar(&mut self, t: &TerrainGen, tr: &Trazado, e: &mut Edits) -> u32 {
+        let nodos: Vec<(u32, Vec2)> = self.net.nodes.iter().map(|(&k, &p)| (k, p)).collect();
+        let otros = self.epoca.ensanche.trazados.clone();
+        let cand = candidatos_empalme(tr, &nodos, |p| tr.contiene(p) || otros.iter().any(|o| o.contiene(p)));
+        let mut hechos: Vec<Vec2> = Vec::new();
+        for (_, n, o) in cand {
+            if hechos.len() >= EMPALMES_MAX {
+                break;
+            }
+            if hechos.iter().any(|h| h.distance(n) < EMPALME_SEPARACION) {
+                continue;
+            }
+            let pts = roads::line(n, o);
+            if self.road_problem(t, &pts, RoadKind::Stone).is_some() {
+                continue;
+            }
+            if let Ok(ed) = self.build_road(t, &pts, RoadKind::Stone) {
+                e.extend(ed);
+                hechos.push(n);
+            }
+        }
+        hechos.len() as u32
     }
 
     /// Vóxeles de las plazas y alamedas del ensanche (al cargar la partida).

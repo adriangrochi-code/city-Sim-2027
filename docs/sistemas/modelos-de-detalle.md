@@ -68,9 +68,10 @@ x (piernas, patas, la cabeza que baja a pastar, las ruedas).
 | Brocal de aljibe | 22 | mármol, arco de hierro forjado, roldana y balde |
 | Pozo con roldana | 42 | brocal de piedra, horcones, travesaño, roldana, soga y balde |
 | Letrero de pulpería | 20 | tabla pintada colgada de un brazo |
+| Rejas, faroles de fachada, macetas, llamadores | 5 – 44 | los piden las casas (ver abajo) |
 | Personas (19 atuendos × de pie / montado) | 13 – 66 | ver `personajes-y-animales.md` |
 
-Toda la biblioteca: **2217 cajas, 43 KB**, armada una vez al primer uso (`detalle::biblioteca()`).
+Toda la biblioteca: **2432 cajas, 47 KB** (con los detalles de las fachadas), armada una vez al primer uso (`detalle::biblioteca()`).
 
 ## Dibujo
 
@@ -108,24 +109,50 @@ sola en `agentes::fauna` y se rehace cuando cambia su firma (solares, servicios,
 `detalle/tests.rs` revisan todos los modelos (cajas no vacías, ranuras válidas, pivotes adentro,
 tamaños razonables).
 
-## Gancho para los constructores de edificios (pendiente)
+## Detalles de las fachadas: los constructores de edificios piden modelos
 
 Los edificios se arman con vóxeles de 0,5 m (`structures/`); lo fino de las fachadas queda tosco
-a esa escala: **rejas** de ventana, **postigos** y tableros, **macetas** en los balcones,
-**faroles de fachada** (de brazo), el **cancel** de hierro del zaguán, aldabas y llamadores,
-bancos de piedra junto a la puerta. La idea, sin tocar los constructores todavía:
+a esa escala. Desde la v0.11.x las casas de los solares de la ciudad piden **modelos de
+detalle** para las rejas, los faroles de fachada, las macetas de los balcones y los llamadores:
 
-1. El constructor, además de sus `Edits`, devuelve una lista de pedidos de detalle en las
-   coordenadas de su `Frame` (u, y, w en módulos de 0,5 m + giro relativo al frente):
-   `Vec<(detalle::Id, IVec3, f32 /* giro */, u32 /* semilla */)>`, por ejemplo una reja por
-   cada vano de ventana o un farol de brazo junto a la puerta de las casas de nivel 3.
-2. Al construir o mejorar el solar (`build_lot`), la ciudad pasa esos pedidos a mundo con el
-   mismo `Frame` y los pone en un `Detalles` del solar (`Detalles::poner`); al demolerlo,
-   `Detalles::quitar` los de ese solar. Como los edificios, se regeneran al cargar.
-3. Los modelos nuevos (`Reja`, `Postigo`, `Maceta`, `FarolBrazo`, `Cancel`) se pintan como los
-   de la biblioteca; la reja de hierro forjado de una ventana colonial son ~15 cajas.
-4. Para no repetir la geometría ya hecha en vóxeles de 0,5 m, el vano queda vacío (o con el
-   vidrio) y el detalle lo llena.
+1. **El pedido.** `Edits` lleva `detalles: Option<Vec<PedidoDetalle>>`. El constructor llama a
+   `Frame::detalle(e, Id, u, y, w, giro, semilla)` con la posición en el marco del solar
+   (vóxeles de diseño con fracción; w = 0 es la cara de la fachada, el modelo mira a la calle).
+   Si quien construye no dibuja detalles (`detalles = None`: catálogo, sandbox, escenas), el
+   pedido no hace nada y el constructor usa sus vóxeles de siempre (la reja de vóxeles con el
+   dibujo de los barrotes en el shader, el farol de dos vóxeles). Así nada cambia fuera de la
+   ciudad.
+2. **El giro con el solar.** `voxelize::build_rotated_det` (los solares de la ciudad, en
+   `city::build_lot`) arma la casa en el marco alineado y pasa cada pedido a metros del mundo
+   con la misma transformación que el re-muestreo de los vóxeles (continua), girando también
+   su rumbo: las casas giradas a cualquier ángulo llevan sus rejas en su lugar.
+3. **La ciudad los guarda por solar** (`City::fachadas`, `DetallesFachadas`): con la cantidad
+   de vóxeles que tenía el edificio al pedirlos. No se guardan con la partida (salen de
+   voxelizar el solar al cargar, como los edificios). Si el solar se demolió, se quemó, se hizo
+   basural o se rehízo por otro camino, su lista de vóxeles cambió y sus detalles dejan de
+   dibujarse: no hace falta tocar cada camino de demolición. Lo que se dibuja (`vigentes`) se
+   arma de nuevo solo cuando cambia la firma de los solares, y va con los vecinos y los
+   animales en el mismo búfer (`session.rs`, a menos de 140 m de la cámara).
+4. **Sin geometría repetida.** Donde va el modelo, el constructor no pone el vóxel de reja ni
+   el del farol: la ventana queda con su vidrio (y en la reja volada, con el alféizar y el
+   sombrerete de piedra o de cal, que siguen en vóxeles).
 
-El punto de enganche ya existe (`Detalles` + `Id` + biblioteca); falta que `structures/` emita
-los pedidos (lo está tocando la época 2).
+| Modelo | Cajas | Dónde y cuándo |
+|---|---|---|
+| Reja plana (2 m y 2,5 m) | 26 | Ventanas de la planta baja de las casas con reja plana (`Estilo::reja`): barrotes cada 12 cm, marco y dos planchuelas metidas en el muro [E] |
+| Reja volada (2 m y 2,5 m) | 44 | Las de reja volada: jaula de medio metro con frente y costados de barrotes, base, techo y ménsulas de hierro [E]. Como antes, nunca antes de 1780 |
+| Farol de brazo | 20 | El farol de fachada de la colonia (`Estilo::farol`: hierro, más en las esquinas y desde 1780) |
+| Farol de gas de brazo | 22 | En la Ciudad Nueva desde 1853 (la usina de los Ísola, ver `arquitectura-epoca2.md`): casas ricas y almacenes de esquina, con hierro, ~45 % [E] |
+| Maceta | 23 | Barro cocido con un geranio (rojo, rosado o blanco) en los balcones de las casas de clase media para arriba: 35 % de los lugares en la colonia, 55 % en la Ciudad Nueva [E] |
+| Llamador | 5 | Aldaba de hierro o llamador de bronce en la puerta principal de las casas con hierro, de clase media para arriba [E] (en la Ciudad Nueva, solo si la puerta no queda abierta al zaguán) |
+
+Las rejas de la fachada neoclásica (hierro fundido, de alto variable) siguen en vóxeles. En la
+demostración colonial (`motor --demo-ciudad`), las calles de muestra piden 77 rejas planas, 29
+planas altas, 9 voladas, 3 faroles de brazo, 17 macetas y 56 llamadores; en la de la época 2,
+la ciudad crecida tiene ~110 rejas, 60 faroles, 212 macetas y 111 llamadores.
+
+![Rejas planas y llamadores en una calle de 1805](../capturas/fachadas-rejas-1805.jpg)
+![Farol de gas de brazo y llamador en la Ciudad Nueva](../capturas/fachadas-farol-gas-1862.jpg)
+
+Pendiente: postigos, cancel de hierro del zaguán y bancos de piedra junto a la puerta como
+modelos; las rejas de hierro fundido de la Ciudad Nueva (de alto variable) como modelos.

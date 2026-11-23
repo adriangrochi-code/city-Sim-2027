@@ -215,6 +215,24 @@ impl Frame {
             }
         }
     }
+    /// [ciudad] ¿El que construye dibuja modelos de detalle? (Si no, cada pieza fina va en
+    /// vóxeles, como siempre.)
+    pub fn con_detalles(e: &Edits) -> bool {
+        e.detalles.is_some()
+    }
+    /// [ciudad] Pide un modelo de detalle con su base en (u, y, w) del marco (vóxeles de
+    /// diseño, con fracción; w = 0 es la cara de la fachada sobre la calle) mirando a la calle
+    /// girado `giro` rad. No hace nada si el que construye no dibuja detalles.
+    #[allow(clippy::too_many_arguments)]
+    pub fn detalle(&self, e: &mut Edits, id: crate::detalle::Id, u: f32, y: f32, w: f32, giro: f32, semilla: u32) -> bool {
+        let Some(d) = e.detalles.as_mut() else { return false };
+        let p = self.origin.as_vec2() + self.du.as_vec2() * u + self.dw.as_vec2() * w;
+        // La calle está hacia −w; el modelo mira a +z en su marco.
+        let calle = -self.dw.as_vec2();
+        let dir = glam::Vec2::from_angle(-giro).rotate(calle);
+        d.push(crate::buildings::PedidoDetalle { id, pos: glam::Vec3::new(p.x, self.base as f32 + y, p.y), giro: dir.x.atan2(dir.y), semilla });
+        true
+    }
     /// Marco hijo con la misma orientación, desplazado dentro de este.
     pub fn sub(&self, u: i32, w: i32, width: i32, depth: i32, salt: u64) -> Frame {
         let p = self.origin + self.du * u + self.dw * w;

@@ -92,6 +92,9 @@ pub struct City {
     pub epoca: epocas::EstadoEpoca,
     /// [mapa del país] Lo que el interior trajo en carreta el último mes (ver `crate::pais`).
     pub interior: crate::pais::Aporte,
+    /// [ciudad] Rejas, faroles de fachada, macetas y llamadores de cada solar (modelos de
+    /// detalle; no se guardan: salen de voxelizar el edificio).
+    pub fachadas: DetallesFachadas,
     /// Mejoras de casas que pidieron sus dueños este mes (se aplican en el mismo `tick`).
     mejoras: Vec<(u32, u8)>,
     rng: Rng,
@@ -105,7 +108,70 @@ impl Default for City {
         let mut poblacion = poblacion::Poblacion::nueva(1726);
         // La época la decide la ciudad (ver `epocas`), no el calendario de la población.
         poblacion.epoca_fija = true;
-        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion, suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), epoca: Default::default(), interior: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+        City { net: RoadNetwork::default(), lots: Lots::default(), money: 20000, pool: 0, month: 2, plaza: None, economy: economy::Economy::default(), climate: climate::Climate::default(), water: water::WaterLevel::default(), agentes: agentes::Agentes::default(), services: services::Services::default(), poblacion, suelo: Default::default(), desarrollo: desarrollo::Desarrollo::default(), materiales: Default::default(), epoca: Default::default(), interior: Default::default(), fachadas: Default::default(), mejoras: Vec::new(), llegados_barco: 0, rng: Rng::new(1726), pending_flood: None, month_acc: 0.0, growth_acc: 0.0 }
+    }
+}
+
+/// [ciudad] Modelos de detalle de las fachadas (ver `docs/sistemas/modelos-de-detalle.md`):
+/// los pide el constructor de cada casa (`Frame::detalle`) y la ciudad los guarda por solar,
+/// con la cantidad de vóxeles que tenía el edificio al pedirlos. Si el solar se demolió, se
+/// quemó o se rehízo por otro camino (su lista de vóxeles cambió), sus detalles no se dibujan.
+#[derive(Default)]
+pub struct DetallesFachadas {
+    por_solar: std::collections::HashMap<u32, (usize, Vec<crate::buildings::PedidoDetalle>)>,
+    /// Lo que se dibuja, armado de nuevo cuando cambia la firma de los solares.
+    cache: std::sync::Mutex<Option<(u64, std::sync::Arc<crate::detalle::Detalles>)>>,
+}
+
+impl DetallesFachadas {
+    pub fn poner(&mut self, lot: u32, voxeles: usize, d: Vec<crate::buildings::PedidoDetalle>) {
+        if d.is_empty() {
+            self.por_solar.remove(&lot);
+        } else {
+            self.por_solar.insert(lot, (voxeles, d));
+        }
+    }
+
+    /// Los detalles de los solares que siguen en pie como cuando se pidieron.
+    pub fn vigentes(&self, lots: &Lots) -> std::sync::Arc<crate::detalle::Detalles> {
+        let mut firma = self.por_solar.len() as u64;
+        let mut ids: Vec<u32> = self.por_solar.keys().copied().collect();
+        ids.sort_unstable();
+        for id in &ids {
+            let n = lots.lots.get(id).map_or(0, |l| l.voxels.len());
+            firma = firma.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((*id as u64) << 32 | n as u64) ^ self.por_solar[id].0 as u64;
+        }
+        let mut g = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((f, d)) = g.as_ref() {
+            if *f == firma {
+                return d.clone();
+            }
+        }
+        let mut d = crate::detalle::Detalles::default();
+        for id in ids {
+            let (n, v) = &self.por_solar[&id];
+            if lots.lots.get(&id).is_some_and(|l| l.voxels.len() == *n && *n > 0) {
+                for p in v {
+                    d.poner(p.id, p.pos, p.giro, p.semilla);
+                }
+            }
+        }
+        let d = std::sync::Arc::new(d);
+        *g = Some((firma, d.clone()));
+        d
+    }
+
+    /// Cuántos detalles hay de cada modelo (para las pruebas y el resumen de la demostración).
+    pub fn cuenta(&self, lots: &Lots) -> std::collections::BTreeMap<crate::detalle::Id, usize> {
+        let mut m = std::collections::BTreeMap::new();
+        for (id, (n, v)) in &self.por_solar {
+            if lots.lots.get(id).is_some_and(|l| l.voxels.len() == *n) {
+                for p in v {
+                    *m.entry(p.id).or_default() += 1;
+                }
+            }
+        }
+        m
     }
 }
 
@@ -168,7 +234,7 @@ fn build_lot(t: &TerrainGen, c: Vec2, f: Vec2, seed: u64, kind: ZoneKind, densit
         // Casas con estilo propio: tipología, fachada, color y desgaste de su época, su
         // familia y sus materiales (ver `arquitectura`).
         Some(o) => match arquitectura::estilo_de(kind, density, level, seed, &o) {
-            Some(es) => build_rotated(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
+            Some(es) => voxelize::build_rotated_det(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
                 crate::structures::casas::construir(t, e, fr, &es);
             }),
             None => {
@@ -253,7 +319,8 @@ impl City {
         for l in self.lots.lots.values_mut() {
             l.voxels.clear();
         }
-        for (id, b) in built {
+        for (id, mut b) in built {
+            self.fachadas.poner(id, b.voxels.len(), b.edits.detalles.take().unwrap_or_default());
             e.extend(b.edits);
             self.lots.lots.get_mut(&id).unwrap().voxels = b.voxels;
         }
@@ -621,7 +688,8 @@ impl City {
         if lot.level == 0 {
             return;
         }
-        let b = build_lot(t, lot.c, lot.f, lot.seed, kind, density, lot.level, lot.obra);
+        let mut b = build_lot(t, lot.c, lot.f, lot.seed, kind, density, lot.level, lot.obra);
+        self.fachadas.poner(id, b.voxels.len(), b.edits.detalles.take().unwrap_or_default());
         let new: std::collections::HashSet<glam::IVec3> = b.voxels.iter().copied().collect();
         for &v in &lot.voxels {
             if !new.contains(&v) {

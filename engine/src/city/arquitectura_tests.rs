@@ -293,3 +293,51 @@ fn las_casas_huecas_ahorran_voxeles() {
     assert!(total / 20 < antes * 12 / 10, "{} contra {antes}", total / 20);
     let _ = IVec3::ZERO;
 }
+
+/// [ciudad] Las casas de la ciudad piden sus detalles de fachada (rejas, faroles, macetas,
+/// llamadores) como modelos de micro-vóxeles; fuera de la ciudad (sin detalles) la reja sigue
+/// en vóxeles.
+#[test]
+fn las_fachadas_piden_rejas_y_faroles_como_detalles() {
+    use crate::detalle::Id;
+    let t = TerrainGen::new(1726);
+    let c = glam::Vec2::new(13600.0, 16100.0);
+    let mut ids = std::collections::BTreeMap::<Id, usize>::new();
+    for k in 0..60u64 {
+        let ang = k as f32 * 0.37;
+        let f = glam::Vec2::new(ang.cos(), ang.sin());
+        let (anio, ep) = if k % 2 == 0 { (1805, 0) } else { (1860, 1) };
+        let mut cx = ctx(anio, (k % 4) as u8);
+        cx.epoca = ep;
+        let o = obra(Pared::Ladrillo, Techo::Azotea, true, true, cx);
+        let nivel = 2 + (k % 2) as u8;
+        let b = super::build_lot(&t, c, f, 1000 + k, ZoneKind::Residencial, Density::Media, nivel, Some(o));
+        let d = b.edits.detalles.as_ref().expect("los solares piden detalles");
+        let suelo = t.height(c.x, c.y);
+        for p in d {
+            *ids.entry(p.id).or_default() += 1;
+            // Dentro del solar (12 × 38 m, con la vereda) y a la altura de la fachada.
+            let q = glam::Vec2::new(p.pos.x, p.pos.z) - c;
+            assert!(q.length() < 24.0, "{:?} fuera del solar: {q}", p.id);
+            assert!(p.pos.y > suelo - 3.0 && p.pos.y < suelo + 16.0, "{:?} a {} m (suelo {suelo})", p.id, p.pos.y);
+            // Los de la fachada miran a la calle (salvo las macetas, que giran al azar).
+            if p.id != Id::Maceta {
+                let mira = glam::Vec2::new(p.giro.sin(), p.giro.cos());
+                assert!(mira.dot(f) > 0.99, "{:?} no mira a la calle", p.id);
+                assert!(q.dot(f) > 14.0, "{:?} lejos de la fachada: {}", p.id, q.dot(f));
+            }
+        }
+    }
+    let rejas = ids.iter().filter(|(k, _)| matches!(k, Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta)).map(|x| x.1).sum::<usize>();
+    assert!(rejas > 20, "rejas: {ids:?}");
+    assert!(ids.contains_key(&Id::Llamador) && ids.contains_key(&Id::Maceta), "{ids:?}");
+    assert!(ids.contains_key(&Id::FarolBrazo) || ids.contains_key(&Id::FarolGasBrazo), "{ids:?}");
+    // Sin detalles (catálogo, sandbox): la reja sigue en vóxeles.
+    let o = obra(Pared::Ladrillo, Techo::Azotea, true, true, ctx(1805, 2));
+    let mut con_reja = 0;
+    for seed in 0..12 {
+        let v = dibujar(&t, &est(&o, Uso::Vivienda, 2, seed), seed);
+        con_reja += usize::from(v.iter().any(|(_, m)| *m == REJA));
+    }
+    assert!(con_reja > 0);
+}

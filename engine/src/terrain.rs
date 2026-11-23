@@ -440,6 +440,10 @@ struct RealMap {
     coast_l_ctx: Grid,
     /// Islotes de piedra (centro, radio, alto).
     islotes: Vec<(Vec2, f32, f32)>,
+    /// [ciudad] Lagunas y lagunetas de los bañados (agua quieta en vóxeles; ver `agua`).
+    quietas: std::sync::Arc<crate::agua::AguasQuietas>,
+    /// [ciudad] Islas con su contorno real (Flores, Gorriti, Lobos, frente a Colonia).
+    islas: crate::islas::Islas,
     /// Entorno amplio (500 m): alturas, distancia al agua (m) y cobertura de bañado y de monte
     /// nativo (0..1).
     wide: Grid,
@@ -774,7 +778,19 @@ impl TerrainGen {
         let wide = Grid::from_u16_scaled(AMPLIO_BIN, wide_n, wide_step, wide_from, 100.0);
         let sea_wide = wide.sea_distance();
         let [marsh_wide, forest_wide] = Grid::channels_u8::<2>(AMPLIO_COB_BIN, wide_n, wide_step, wide_from);
+        // [ciudad] Agua quieta: lagunas y lagunetas de los bañados (ver `agua::AguasQuietas`).
+        let quietas = std::sync::Arc::new(crate::agua::AguasQuietas::new(
+            &[
+                crate::agua::DatosGrilla { from: main.from, step: main.step, n: main.n, alturas: &main.v, bio: BIOMAS_BIN },
+                crate::agua::DatosGrilla { from: ctx.from, step: ctx.step, n: ctx.n, alturas: &ctx.v, bio: BIOMAS_CTX_BIN },
+            ],
+            MAP_SIZE,
+            BIO_LAGUNA,
+            BIO_BANADO,
+        ));
         t.real = Some(Box::new(RealMap {
+            quietas,
+            islas: crate::islas::Islas::cargar(crate::islas::ISLAS_JSON),
             main,
             ctx,
             sea_main,
@@ -1450,8 +1466,29 @@ impl TerrainGen {
             if da < reach {
                 h -= depth * (1.0 - smoothstep(hw, reach, da));
             }
+            // [ciudad] Lagunas y lagunetas: el fondo baja bajo su nivel (el agua la pone `agua`).
+            if let Some((nivel, prof)) = self.agua_quieta(x, z) {
+                h = h.min(nivel - prof);
+            }
         }
         h
+    }
+
+    /// [ciudad] Nombre de la isla con contorno real en el punto (o cerca de su orilla).
+    pub fn isla(&self, x: f32, z: f32) -> Option<&str> {
+        let r = self.real.as_ref()?;
+        r.islas.nombre_en(x, z)
+    }
+
+    /// [ciudad] Agua quieta (lagunas y lagunetas de los bañados) en el punto: nivel del agua y
+    /// profundidad (m).
+    pub fn agua_quieta(&self, x: f32, z: f32) -> Option<(f32, f32)> {
+        self.real.as_ref()?.quietas.en(x, z)
+    }
+
+    /// [ciudad] El índice de agua quieta del mapa real (para `agua::Arroyos`).
+    pub fn aguas_quietas(&self) -> Option<std::sync::Arc<crate::agua::AguasQuietas>> {
+        self.real.as_ref().map(|r| r.quietas.clone())
     }
 
     fn build_grid(&mut self) {
@@ -1498,7 +1535,13 @@ impl TerrainGen {
     #[inline]
     pub fn height_with_coast(&self, x: f32, z: f32, coast: f32) -> f32 {
         if let Some(r) = &self.real {
-            return self.real_height(r, x, z);
+            // [ciudad] Las islas con su contorno real, sobre cualquier grilla.
+            let h = self.real_height(r, x, z);
+            if r.islas.en(x, z).is_some() {
+                let bump = self.n_detail.get_noise_2d(x * 9.0 + 41.0, z * 9.0 - 17.0) * 0.5 + 0.5;
+                return r.islas.altura(h, x, z, bump);
+            }
+            return h;
         }
         let d = coast - z;
         let mut h;
@@ -1523,6 +1566,10 @@ impl TerrainGen {
     /// ¿Hay agua acá? El río (bajo el nivel del mar) o el cauce de un arroyo.
     pub fn is_water(&self, x: f32, z: f32) -> bool {
         if self.height(x, z) < 0.5 {
+            return true;
+        }
+        // [ciudad] Lagunas y lagunetas de los bañados.
+        if self.agua_quieta(x, z).is_some() {
             return true;
         }
         let (d, hw) = self.arroyo_query(x, z);
@@ -1609,6 +1656,14 @@ impl TerrainGen {
     /// árboles, monte ribereño en las orillas de los arroyos, bañados en los bajos junto a
     /// ellos, playas de arena con médanos y puntas de piedra donde la costa es empinada.
     fn biome(&self, x: f32, z: f32, h: f32, slope: f32) -> Mat {
+        // [ciudad] Islas con su contorno real: orilla de piedra, pasto arriba (en 1726 ninguna
+        // tenía monte plantado; los pinos de la Gorriti son del siglo XX).
+        if let Some(e) = self.real.as_ref().and_then(|r| r.islas.en(x, z)) {
+            if e.d > -6.0 && h > -0.6 {
+                let n = self.n_detail.get_noise_2d(x * 4.0 - 7.0, z * 4.0 + 5.0) * 8.0;
+                return if e.d > 10.0 + n && slope < 0.7 { GRASS } else { COAST_ROCK };
+            }
+        }
         // Entorno amplio: biomas gruesos con su cobertura; en la transición se mezclan con los
         // del entorno vóxel a vóxel (sin línea).
         if let Some(r) = &self.real {
@@ -1652,7 +1707,9 @@ impl TerrainGen {
         }
         // Biomas oficiales (IDE Uruguay): mandan sobre las reglas heurísticas.
         match self.official_biome(x, z) {
-            BIO_LAGUNA => return STREAM,
+            // [ciudad] El fondo de la laguna (bajo el agua en vóxeles); en el borde que el
+            // agua no cubre, barro.
+            BIO_LAGUNA => return if self.agua_quieta(x, z).is_some() { STREAM } else { MUD },
             BIO_BANCO => return if h < 1.0 { SAND_WET } else { SAND },
             BIO_PLAYA => {
                 return if h < 0.7 || sd < 10.0 + fine * 6.0 {
@@ -1663,6 +1720,8 @@ impl TerrainGen {
                     SAND
                 }
             }
+            // [ciudad] Lagunetas del bañado: fondo de barro bajo el agua.
+            BIO_BANADO if self.agua_quieta(x, z).is_some() => return STREAM,
             BIO_BANADO if slope < 0.3 => {
                 // Pajonal y juncos con algún claro de pasto verde.
                 return if fine > 0.55 + blot * 0.2 { GRASS_LUSH } else { MARSH };
