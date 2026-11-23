@@ -16,6 +16,9 @@ no tiene); la investigación con sus fuentes, en [`costa-fuentes.md`](costa-fuen
   playas y 0,82–0,95 en Trouville y la Punta del Buceo; piedras emergidas de 10–100 m.
 - **Carrasco y Ciudad de la Costa**: arena (roca 0).
 - **Isla de las Gaviotas**, frente a Malvín (~320 m de la costa, 2,3 ha de roca con vegetación).
+- **Isla de Flores, Gorriti y Lobos** (y la de las Ratas y las de Colonia en el mapa del país):
+  contorno oficial de la IDE y altura de Copernicus en `islas.json`, ver
+  [mapa-real.md#islas](mapa-real.md#islas).
 
 Calidad: la fracción de roca está **medida** (polígonos `natural=bare_rock` de OpenStreetMap y
 playas de la IDE y de la Intendencia) en la mayoría de los tramos de Montevideo y **estimada** en

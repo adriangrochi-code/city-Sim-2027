@@ -93,6 +93,23 @@ fachada de la época. Otras reformas: techo de teja (la paja y el cuero se van) 
 | Plazas del ensanche | Suelo nivelado, canteros, caminos en cruz y en diagonal, cuatro palmeras canarias, bancos, faroles de gas y la columna central | [F] la Columna de la Paz (1867); [E] el resto |
 | Alamedas | Árboles cada 9 m en el cantero central del bulevar | [E] |
 
+## 4b. Ajustes del ensanche, las redes y las fachadas (v0.11.x)
+
+- **El ensanche se empalma solo con la red vieja** (`City::empalmar`, en `epocas/ensanche.rs`):
+  al trazarlo, hasta 6 calles empedradas desde las esquinas del borde del trazado hasta las
+  esquinas viejas más cercanas (a menos de 260 m, una por cuadra, hacia afuera del trazado y
+  prefiriendo las que siguen derecho una calle del ensanche) [E]. Se pagan aparte, si alcanza.
+  Antes el ensanche quedaba como una red de calles suelta y las redes de gas, agua y
+  colectores, que siguen la calle, no llegaban (la demostración las unía a mano).
+- **Las usinas y la boca del colector se empalman con todas las calles a menos de 60 m**
+  (`comps_cerca`), no solo con la más próxima. En la demostración de la época 2 el colector
+  cubría 0 solares: su sitio junto a la costa daba al camino suelto que la demostración le
+  había hecho al muelle. Ahora cubre todos (266 de 266) y el camino del muelle sale de la
+  esquina más cercana de la ciudad.
+- **Detalles de las fachadas** como modelos de micro-vóxeles: farol de gas de brazo en las casas
+  ricas y los almacenes de esquina desde 1853, macetas con geranios en los balcones (55 %),
+  llamadores (ver [modelos-de-detalle.md](modelos-de-detalle.md#detalles-de-las-fachadas-los-constructores-de-edificios-piden-modelos)).
+
 ## 5. Pendiente
 - Mercado central, aduana nueva, iglesias de la época, cementerio nuevo, hospital, estación
   de diligencias y muelle de vapores (están en el diseño de la época).

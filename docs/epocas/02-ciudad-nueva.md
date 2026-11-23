@@ -213,7 +213,9 @@ en la crónica.
 **Ensanche** (tarjeta en Calles): dos clics y la extensión, como el damero, a más de 380 m de la
 plaza mayor; cuadras de 100 varas, un **bulevar** de dos calzadas con su alameda en el medio y
 una **plaza** cada tres manzanas (palmeras, canteros, bancos, faroles y la columna). Las
-manzanas del ensanche cuentan como ciudad (no extramuros); se zonifican con el pincel.
+manzanas del ensanche cuentan como ciudad (no extramuros); se zonifican con el pincel. Al
+trazarlo, sus calles se **empalman solas** con la red vieja (hasta 6 calles de unión desde las
+esquinas del borde, una por cuadra), así el gas, el agua y los colectores llegan.
 
 **Casas de la época 2.** Lo que se levanta después del paso usa el kit neoclásico e
 italianizante: casa neoclásica de patio, casa de altos con balcón corrido de hierro fundido,
@@ -231,8 +233,8 @@ con una grilla de luces cerca de la cámara en el shader), menos delito, carbón
 mes en el presupuesto.
 
 **Agua corriente y colectores.** Usina de agua corriente (Agua): agua buena por la red de
-calles hasta 3 km. Colector y desagüe (Saneamiento, junto a la costa): los solares de su red
-dejan de tener pozo negro; baja la insalubridad y los pozos de agua dejan de ensuciarse.
+calles hasta 3 km. Colector y desagüe (Saneamiento, junto a la costa): los solares de su red (la de
+cualquier calle a menos de 60 m de la boca) dejan de tener pozo negro; baja la insalubridad y los pozos de agua dejan de ensuciarse.
 
 **Teatro** (Iglesia y obras): uno por ciudad, sube el valor del suelo alrededor y atrae
 pobladores.

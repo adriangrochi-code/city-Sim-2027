@@ -18,6 +18,19 @@ pub fn vox(m: f32) -> i32 {
 }
 use std::collections::HashMap;
 
+/// [ciudad] Un pedido de modelo de detalle (micro-vóxeles de 1/16 m: rejas, faroles de
+/// fachada, macetas; ver `crate::detalle` y `docs/sistemas/modelos-de-detalle.md`) que un
+/// constructor de edificios hace junto con sus vóxeles. Mientras se arma el edificio, `pos`
+/// va en vóxeles de diseño del marco alineado a los ejes y `giro` en ese marco; al girarlo al
+/// solar (`voxelize::build_rotated_det`) pasa a metros del mundo.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PedidoDetalle {
+    pub id: crate::detalle::Id,
+    pub pos: glam::Vec3,
+    pub giro: f32,
+    pub semilla: u32,
+}
+
 #[derive(Default)]
 pub struct Edits {
     /// Vóxeles de la grilla base (0,25 m).
@@ -33,6 +46,10 @@ pub struct Edits {
     pub design: HashMap<IVec3, Mat>,
     /// Superficie del terreno en columnas de diseño.
     pub design_surface: HashMap<IVec2, Mat>,
+    /// [ciudad] Modelos de detalle pedidos por el constructor. `None`: el que construye no
+    /// los dibuja (catálogo, sandbox), y el constructor usa sus vóxeles de siempre (la reja de
+    /// vóxeles, el farol de dos vóxeles). `Some`: los solares de la ciudad, que sí los dibujan.
+    pub detalles: Option<Vec<PedidoDetalle>>,
 }
 
 impl Edits {
@@ -73,6 +90,9 @@ impl Edits {
         self.ground.extend(o.ground);
         self.design.extend(o.design);
         self.design_surface.extend(o.design_surface);
+        if let Some(d) = o.detalles {
+            self.detalles.get_or_insert_with(Vec::new).extend(d);
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.voxels.is_empty() && self.surface.is_empty() && self.ground.is_empty() && self.design.is_empty() && self.design_surface.is_empty()

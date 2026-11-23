@@ -26,6 +26,7 @@ mod city;
 mod detalle; // [personajes]
 mod ecosistemas; // [atlas]
 mod fxhash;
+mod islas; // [ciudad]
 mod camera;
 mod lod;
 mod menu;

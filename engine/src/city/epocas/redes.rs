@@ -14,7 +14,7 @@
 //!   costa recoge las aguas servidas de los solares de su red; los pozos negros dejan de
 //!   ensuciar los pozos de agua y bajan la insalubridad.
 
-use super::super::services::{comp_at, components, Kind};
+use super::super::services::{comp_at, comps_cerca, components, Kind};
 use super::super::voxelize::road_height;
 use super::super::City;
 use crate::buildings::Edits;
@@ -33,6 +33,10 @@ pub const RADIO_FAROL_GAS: f32 = 45.0;
 /// Alcance de la luz de cada farol en el render (m) y su intensidad (el de sebo, menos).
 pub const LUZ_GAS: (f32, f32) = (11.0, 1.0);
 pub const LUZ_SEBO: (f32, f32) = (6.0, 0.35);
+
+/// Una usina o la boca de un colector se empalma con todas las calles a menos de esto (m): con
+/// la más cercana sola, un colector junto al camino suelto del muelle no servía a nadie.
+pub const RADIO_EMPALME: f32 = 60.0;
 
 /// Base del farol: el vóxel de diseño apoyado sobre la calzada.
 fn base_calzada(t: &TerrainGen, p: Vec2) -> i32 {
@@ -90,7 +94,7 @@ impl City {
         let mut out: Vec<([i32; 2], i32)> = Vec::new();
         if !usinas.is_empty() {
             let comp = components(&self.net);
-            let fuentes: Vec<(Vec2, f32, Option<u32>)> = usinas.iter().map(|&(c, r)| (c, r, comp_at(&self.net, &comp, c, 60.0))).collect();
+            let fuentes: Vec<(Vec2, f32, Vec<u32>)> = usinas.iter().map(|&(c, r)| (c, r, comps_cerca(&self.net, &comp, c, RADIO_EMPALME))).collect();
             let mut seen = HashSet::new();
             for ed in self.net.edges.values() {
                 let ce = comp.get(&ed.a).copied();
@@ -99,7 +103,7 @@ impl City {
                 let mut lado = 1.0;
                 while s < ed.len() - 3.0 {
                     let (p, tan) = ed.point(s);
-                    if fuentes.iter().any(|&(c, r, k)| k.is_some() && k == ce && p.distance(c) <= r) {
+                    if fuentes.iter().any(|(c, r, k)| ce.is_some_and(|ce| k.contains(&ce)) && p.distance(*c) <= *r) {
                         let q = p + Vec2::new(-tan.y, tan.x) * lado * (hw - 0.75);
                         let v = IVec2::new((q.x / DESIGN_VOXEL).floor() as i32, (q.y / DESIGN_VOXEL).floor() as i32);
                         if self.net.clearance(q, 20.0) > -1.2 && seen.insert(v / 10) {
@@ -155,14 +159,14 @@ impl City {
             return BTreeSet::new();
         }
         let comp = components(&self.net);
-        let ks: Vec<(Vec2, f32, Option<u32>)> = fuentes.iter().map(|&(c, r)| (c, r, comp_at(&self.net, &comp, c, 60.0))).collect();
+        let ks: Vec<(Vec2, f32, Vec<u32>)> = fuentes.iter().map(|&(c, r)| (c, r, comps_cerca(&self.net, &comp, c, RADIO_EMPALME))).collect();
         self.lots
             .lots
             .values()
             .filter(|l| l.level > 0)
             .filter(|l| {
                 let frente = comp_at(&self.net, &comp, l.c + l.f * (super::super::lots::D * 0.5 + 3.0), 14.0);
-                ks.iter().any(|&(c, r, kk)| kk.is_some() && kk == frente && c.distance(l.c) <= r)
+                ks.iter().any(|(c, r, kk)| frente.is_some_and(|f| kk.contains(&f)) && c.distance(l.c) <= *r)
             })
             .map(|l| l.id)
             .collect()

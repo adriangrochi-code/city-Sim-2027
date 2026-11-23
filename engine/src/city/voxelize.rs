@@ -446,6 +446,18 @@ pub fn build_rotated(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, dept
 /// apoyarla sobre lo más alto del terreno: para lo que se construye sobre el agua (muelles).
 #[allow(clippy::too_many_arguments)]
 pub fn build_rotated_at(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, depth: i32, seed: u64, fixed_base: Option<i32>, builder: &dyn Fn(&TerrainGen, &mut Edits, &Frame)) -> Built {
+    build_rotated_full(t, center, front, width, depth, seed, fixed_base, false, builder)
+}
+
+/// [ciudad] Como [`build_rotated`], pero el constructor puede pedir modelos de detalle
+/// (rejas, faroles de fachada, macetas: `Frame::detalle`), que salen en `edits.detalles` en
+/// metros del mundo y girados con el edificio. Lo usan los solares de la ciudad.
+pub fn build_rotated_det(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, depth: i32, seed: u64, builder: &dyn Fn(&TerrainGen, &mut Edits, &Frame)) -> Built {
+    build_rotated_full(t, center, front, width, depth, seed, None, true, builder)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_rotated_full(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, depth: i32, seed: u64, fixed_base: Option<i32>, detalles: bool, builder: &dyn Fn(&TerrainGen, &mut Edits, &Frame)) -> Built {
     let mut f = front.normalize_or(Vec2::NEG_Y);
     let ang = f.y.atan2(f.x);
     let quarter = std::f32::consts::FRAC_PI_2;
@@ -478,7 +490,7 @@ pub fn build_rotated_at(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, d
     // 1. Alineada a los ejes: u → +x, w → +z, centrada en `cv`.
     let origin = cv - IVec2::new(width / 2, depth / 2);
     let frame = Frame { origin, du: IVec2::X, dw: IVec2::Y, base, width, depth, seed };
-    let mut tmp = Edits::default();
+    let mut tmp = Edits { detalles: detalles.then(Vec::new), ..Default::default() };
     builder(t, &mut tmp, &frame);
     let mut cols: HashMap<IVec2, Vec<(i32, Mat)>> = HashMap::new();
     let (mut lo, mut hi) = (IVec2::splat(i32::MAX), IVec2::splat(i32::MIN));
@@ -496,6 +508,20 @@ pub fn build_rotated_at(t: &TerrainGen, center: Vec2, front: Vec2, width: i32, d
         hi = hi.max(k);
     }
     let mut out = Built { edits: Edits::default(), voxels: Vec::new() };
+    // [ciudad] Detalles: del marco alineado al mundo (la misma transformación que el
+    // re-muestreo de abajo, pero continua) y a metros.
+    if let Some(ds) = tmp.detalles.take() {
+        let v: Vec<crate::buildings::PedidoDetalle> = ds
+            .into_iter()
+            .map(|d| {
+                let l = Vec2::new(d.pos.x, d.pos.z) - cp;
+                let w = cp + s * l.x + bw * l.y;
+                let dir = s * d.giro.sin() + bw * d.giro.cos();
+                crate::buildings::PedidoDetalle { pos: glam::Vec3::new(w.x * vs, d.pos.y * vs, w.y * vs), giro: dir.x.atan2(dir.y), ..d }
+            })
+            .collect();
+        out.edits.detalles = Some(v);
+    }
     if lo.x > hi.x {
         return out;
     }

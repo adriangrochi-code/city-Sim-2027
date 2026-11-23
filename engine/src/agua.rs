@@ -59,19 +59,260 @@ pub struct Muestra {
     pub corriente: Vec2,
 }
 
+// [ciudad] --- Agua quieta: lagunas y lagunetas de los bañados ------------------------------
+
+/// Lado de los mosaicos del índice de agua quieta (celdas de la grilla).
+const MOSAICO: usize = 16;
+
+/// Una grilla de agua quieta: para cada celda con agua, la profundidad (m) y el nivel del agua
+/// (m), guardados en mosaicos de 16 × 16 celdas (casi todo el mapa es seco: solo se guardan los
+/// mosaicos con agua, con un mapa de bits para descartar rápido los demás).
+struct GrillaQuieta {
+    from: f32,
+    step: f32,
+    n: usize,
+    /// Mosaicos por lado y, por mosaico, si tiene agua.
+    nm: usize,
+    hay: Vec<bool>,
+    mosaicos: HashMap<(usize, usize), Vec<(f32, f32)>, crate::fxhash::FxBuild>,
+}
+
+impl GrillaQuieta {
+    fn celda(&self, i: usize, j: usize) -> (f32, f32) {
+        let (ti, tj) = (i / MOSAICO, j / MOSAICO);
+        if !self.hay[ti + tj * self.nm] {
+            return (0.0, 0.0);
+        }
+        self.mosaicos.get(&(ti, tj)).map_or((0.0, 0.0), |m| m[(i % MOSAICO) + (j % MOSAICO) * MOSAICO])
+    }
+
+    /// Profundidad interpolada entre las cuatro celdas vecinas (0 fuera del agua, así la orilla
+    /// baja suave) y el nivel de la celda con agua de más peso.
+    fn en(&self, x: f32, z: f32) -> Option<(f32, f32)> {
+        let fx = (x - self.from) / self.step;
+        let fz = (z - self.from) / self.step;
+        let m = self.n as f32 - 1.0;
+        if !(0.0..m).contains(&fx) || !(0.0..m).contains(&fz) {
+            return None;
+        }
+        let (i, j) = (fx as usize, fz as usize);
+        if !self.hay[i / MOSAICO + (j / MOSAICO) * self.nm] && !self.hay[(i + 1) / MOSAICO + ((j + 1) / MOSAICO) * self.nm] && !self.hay[(i + 1) / MOSAICO + (j / MOSAICO) * self.nm] && !self.hay[i / MOSAICO + ((j + 1) / MOSAICO) * self.nm] {
+            return None;
+        }
+        let (tx, tz) = (fx - i as f32, fz - j as f32);
+        let mut prof = 0.0;
+        let (mut nivel, mut peso) = (0.0, -1.0f32);
+        for (di, dj, w) in [(0, 0, (1.0 - tx) * (1.0 - tz)), (1, 0, tx * (1.0 - tz)), (0, 1, (1.0 - tx) * tz), (1, 1, tx * tz)] {
+            let (p, l) = self.celda(i + di, j + dj);
+            if p > 0.0 {
+                prof += p * w;
+                if w > peso {
+                    peso = w;
+                    nivel = l;
+                }
+            }
+        }
+        // La orilla no sigue la grilla: el umbral de la profundidad cambia con un ruido de
+        // unos 7 m (en el borde la profundidad interpolada sube de 0 a la de la celda).
+        let umbral = 0.05 + 0.3 * ruido_valor(x, z, 7.0, 0x0B1A);
+        (prof > umbral).then_some((nivel, prof))
+    }
+}
+
+/// Lagunas y lagunetas: agua quieta que no está unida a ningún cauce (las lagunas de la capa
+/// oficial de la IDE por encima del nivel del río, y los claros de agua libre de los bañados).
+/// El terreno se hunde con [`AguasQuietas::en`] y el agua se llena en vóxeles hasta su nivel,
+/// como la de los arroyos ([`Arroyos::en`]).
+///
+/// - **Lagunas** (`BIO_LAGUNA` de `biomas.bin`): cada laguna es una componente de celdas; su
+///   nivel es la mediana de la altura del MDT en sus celdas (el constructor del mapa las dejó
+///   llanas a su nivel) y se descartan las que quedan a menos de 1 m (esas son del río). La
+///   profundidad crece con la distancia a la orilla, de 0,6 a 2,5 m [E: no hay batimetría].
+/// - **Lagunetas de los bañados**: el agua libre entre los juncos y la paja. Un ruido suave de
+///   unos 90 m elige una parte de las celdas de bañado (las del borde no) [E]; cada claro
+///   tiene su nivel (mediana de sus celdas) y de 0,35 a 0,8 m de agua [E].
+pub struct AguasQuietas {
+    grillas: Vec<GrillaQuieta>,
+    /// La primera grilla manda dentro de `[0, lado)` en x y z (el mapa jugable).
+    lado: f32,
+    pub lagunas: usize,
+    pub lagunetas: usize,
+}
+
+/// Datos de una grilla para armar el agua quieta: origen, paso, muestras por lado, alturas del
+/// MDT y biomas oficiales (fila por fila).
+pub struct DatosGrilla<'a> {
+    pub from: f32,
+    pub step: f32,
+    pub n: usize,
+    pub alturas: &'a [f32],
+    pub bio: &'a [u8],
+}
+
+/// Ruido de valor suave (0..1) en el punto (x, z) con red de `lado` unidades, determinista.
+fn ruido_valor(x: f32, z: f32, lado: f32, semilla: u64) -> f32 {
+    let h = |a: i64, b: i64| {
+        let mut x = (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ semilla;
+        x ^= x >> 31;
+        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x ^= x >> 29;
+        (x >> 40) as f32 / (1u64 << 24) as f32
+    };
+    let (fx, fz) = (x / lado, z / lado);
+    let (a, b) = (fx.floor() as i64, fz.floor() as i64);
+    let s = |t: f32| t * t * (3.0 - 2.0 * t);
+    let (tx, tz) = (s(fx - a as f32), s(fz - b as f32));
+    let v0 = h(a, b) + (h(a + 1, b) - h(a, b)) * tx;
+    let v1 = h(a, b + 1) + (h(a + 1, b + 1) - h(a, b + 1)) * tx;
+    v0 + (v1 - v0) * tz
+}
+
+/// Ruido de las lagunetas: dos capas giradas (sin que los claros sigan la grilla).
+fn ruido_lagunetas(i: usize, j: usize, lado: f32) -> f32 {
+    let (x, z) = (i as f32, j as f32);
+    let a = ruido_valor(x, z, lado, 0xBA7A);
+    let b = ruido_valor(x * 0.8 - z * 0.6, x * 0.6 + z * 0.8, lado * 0.55, 0x5EED);
+    a * 0.65 + b * 0.35
+}
+
+/// Umbral del ruido para las lagunetas de los bañados [E]: más alto, menos agua libre.
+pub const UMBRAL_LAGUNETA: f32 = 0.66;
+
+impl AguasQuietas {
+    /// Arma el agua quieta de las grillas (la primera, la del mapa jugable de `lado` m).
+    pub fn new(datos: &[DatosGrilla], lado: f32, bio_laguna: u8, bio_banado: u8) -> AguasQuietas {
+        let mut out = AguasQuietas { grillas: Vec::new(), lado, lagunas: 0, lagunetas: 0 };
+        for d in datos {
+            let n = d.n;
+            // Celdas de agua: 1 laguna, 2 laguneta de bañado.
+            let mut tipo = vec![0u8; n * n];
+            // Las lagunetas, con la red del ruido de unos 90 m (al menos 2 celdas).
+            let lado_ruido = (90.0 / d.step).max(2.0);
+            for j in 1..n - 1 {
+                for i in 1..n - 1 {
+                    let k = i + j * n;
+                    if d.bio[k] == bio_laguna {
+                        tipo[k] = 1;
+                    } else if d.bio[k] == bio_banado && [k - 1, k + 1, k - n, k + n].iter().all(|&q| d.bio[q] == bio_banado) && ruido_lagunetas(i, j, lado_ruido) > UMBRAL_LAGUNETA {
+                        tipo[k] = 2;
+                    }
+                }
+            }
+            // Componentes (4 vecinos), su nivel y la distancia de cada celda a la orilla.
+            let mut comp = vec![u32::MAX; n * n];
+            let mut nivel_de: Vec<f32> = Vec::new();
+            let mut prof = vec![0.0f32; n * n];
+            let vecinas = |k: usize, ocho: bool| -> Vec<usize> {
+                let (i, j) = ((k % n) as i32, (k / n) as i32);
+                let d4 = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+                let d8 = [(-1, -1), (1, -1), (-1, 1), (1, 1)];
+                d4.iter()
+                    .chain(if ocho { d8.iter() } else { [].iter() })
+                    .map(|&(di, dj)| (i + di, j + dj))
+                    .filter(|&(a, b)| a >= 0 && b >= 0 && a < n as i32 && b < n as i32)
+                    .map(|(a, b)| a as usize + b as usize * n)
+                    .collect()
+            };
+            for k0 in 0..n * n {
+                if tipo[k0] == 0 || comp[k0] != u32::MAX {
+                    continue;
+                }
+                let id = nivel_de.len() as u32;
+                let mut celdas = vec![k0];
+                comp[k0] = id;
+                let mut q = 0;
+                while q < celdas.len() {
+                    let k = celdas[q];
+                    q += 1;
+                    for kk in vecinas(k, false) {
+                        if tipo[kk] == tipo[k0] && comp[kk] == u32::MAX {
+                            comp[kk] = id;
+                            celdas.push(kk);
+                        }
+                    }
+                }
+                let mut hs: Vec<f32> = celdas.iter().map(|&k| d.alturas[k]).collect();
+                hs.sort_by(f32::total_cmp);
+                let nivel = hs[hs.len() / 2];
+                // Las lagunas bajas son del río (el constructor las hundió bajo su agua).
+                let vale = nivel > 1.0;
+                nivel_de.push(if vale { nivel } else { f32::NAN });
+                if !vale {
+                    continue;
+                }
+                // Distancia a la orilla (en celdas, 8 vecinos con costo 1).
+                let mut dist: HashMap<usize, u32, crate::fxhash::FxBuild> = HashMap::default();
+                let mut frente: Vec<usize> = celdas.iter().copied().filter(|&k| vecinas(k, false).len() < 4 || vecinas(k, false).iter().any(|&q| comp[q] != id)).collect();
+                for &k in &frente {
+                    dist.insert(k, 1);
+                }
+                let mut nd = 1;
+                while !frente.is_empty() {
+                    nd += 1;
+                    let mut sig = Vec::new();
+                    for &k in &frente {
+                        for kk in vecinas(k, true) {
+                            if comp[kk] == id && !dist.contains_key(&kk) {
+                                dist.insert(kk, nd);
+                                sig.push(kk);
+                            }
+                        }
+                    }
+                    frente = sig;
+                }
+                let laguna = tipo[k0] == 1;
+                for &k in &celdas {
+                    let dm = (dist.get(&k).copied().unwrap_or(1) - 1) as f32 * d.step;
+                    prof[k] = if laguna { (0.6 + dm * 0.0125).min(2.5) } else { (0.35 + dm * 0.0075).min(0.8) };
+                }
+                if laguna {
+                    out.lagunas += 1;
+                } else {
+                    out.lagunetas += 1;
+                }
+            }
+            let nm = n.div_ceil(MOSAICO);
+            let mut g = GrillaQuieta { from: d.from, step: d.step, n, nm, hay: vec![false; nm * nm], mosaicos: HashMap::default() };
+            for k in 0..n * n {
+                if prof[k] <= 0.0 {
+                    continue;
+                }
+                let (i, j) = (k % n, k / n);
+                let (ti, tj) = (i / MOSAICO, j / MOSAICO);
+                g.hay[ti + tj * nm] = true;
+                let m = g.mosaicos.entry((ti, tj)).or_insert_with(|| vec![(0.0, 0.0); MOSAICO * MOSAICO]);
+                m[(i % MOSAICO) + (j % MOSAICO) * MOSAICO] = (prof[k], nivel_de[comp[k] as usize]);
+            }
+            out.grillas.push(g);
+        }
+        out
+    }
+
+    /// Nivel del agua (m) y profundidad del fondo bajo él (m), si el punto cae en una laguna o
+    /// en una laguneta de bañado.
+    pub fn en(&self, x: f32, z: f32) -> Option<(f32, f32)> {
+        let dentro = x >= 0.0 && z >= 0.0 && x < self.lado && z < self.lado;
+        let g = if dentro { self.grillas.first()? } else { self.grillas.get(1)? };
+        g.en(x, z)
+    }
+}
+
+
 /// Niveles del agua de todos los arroyos del mapa, con una grilla para buscar la muestra más
 /// cercana a un punto.
 #[derive(Default)]
 pub struct Arroyos {
     muestras: Vec<Muestra>,
     celdas: HashMap<(i32, i32), Vec<u32>, crate::fxhash::FxBuild>,
+    /// [ciudad] Lagunas y lagunetas de los bañados (agua quieta, sin corriente).
+    quietas: Option<std::sync::Arc<AguasQuietas>>,
 }
 
 const CELDA: f32 = 32.0;
 
 impl Arroyos {
     pub fn new(t: &TerrainGen) -> Arroyos {
-        let mut a = Arroyos::default();
+        let mut a = Arroyos { quietas: t.aguas_quietas(), ..Default::default() };
         for curso in t.stream_water() {
             for m in curso {
                 let id = a.muestras.len() as u32;
@@ -97,7 +338,10 @@ impl Arroyos {
     /// Nivel del agua y corriente del arroyo en este punto, si cae dentro del cauce de alguno.
     /// Se elige la muestra cuyo borde de agua queda más cerca (como `TerrainGen::arroyo_info`).
     pub fn en(&self, x: f32, z: f32) -> Option<(f32, Vec2)> {
-        let lista = self.celdas.get(&((x / CELDA).floor() as i32, (z / CELDA).floor() as i32))?;
+        // [ciudad] Fuera de los cauces, el agua quieta de lagunas y bañados (sin corriente).
+        let Some(lista) = self.celdas.get(&((x / CELDA).floor() as i32, (z / CELDA).floor() as i32)) else {
+            return self.quietas.as_ref()?.en(x, z).map(|(nivel, _)| (nivel, Vec2::ZERO));
+        };
         let p = Vec2::new(x, z);
         let mut mejor: Option<(f32, &Muestra)> = None;
         for &i in lista {
@@ -107,7 +351,10 @@ impl Arroyos {
                 mejor = Some((d, m));
             }
         }
-        mejor.map(|(_, m)| (m.nivel, m.corriente))
+        match mejor {
+            Some((_, m)) => Some((m.nivel, m.corriente)),
+            None => self.quietas.as_ref()?.en(x, z).map(|(nivel, _)| (nivel, Vec2::ZERO)),
+        }
     }
 }
 
@@ -462,6 +709,50 @@ mod tests {
         assert_eq!(rio_visible(*f, 0.0, 0.25), Some(0.0));
         assert_eq!(rio_visible(*f, 1.2, 0.25), Some(1.25));
         assert_eq!(rio_visible(*f, -0.9, 0.25), Some(-1.0));
+    }
+
+    /// [ciudad] Las lagunas y las lagunetas de los bañados (sin cauce) tienen agua en vóxeles,
+    /// quieta, a su nivel, sobre un fondo hundido.
+    #[test]
+    fn hay_agua_quieta_en_lagunas_y_banados() {
+        let (t, a) = mapa();
+        let q = t.aguas_quietas().expect("mapa real");
+        eprintln!("agua quieta: {} lagunas, {} lagunetas de bañado", q.lagunas, q.lagunetas);
+        assert!(q.lagunas >= 3 && q.lagunetas >= 20, "{} lagunas, {} lagunetas", q.lagunas, q.lagunetas);
+        // Puntos con agua quieta: el más hondo de una laguna (prof > 1 m) y uno de bañado,
+        // buscando en el entorno y en el mapa.
+        let (mut laguna, mut laguneta) = (None, None);
+        let mut z = -20000.0;
+        while z < 44000.0 && (laguna.is_none() || laguneta.is_none()) {
+            let mut x = -20000.0;
+            while x < 44000.0 {
+                if let Some((nivel, prof)) = t.agua_quieta(x, z) {
+                    if a.en(x, z).is_some_and(|(n, c)| (n - nivel).abs() < 1e-4 && c == Vec2::ZERO) {
+                        if prof > 1.0 && laguna.is_none() {
+                            laguna = Some((x, z, nivel));
+                        } else if prof > 0.3 && prof < 0.85 && laguneta.is_none() && x >= 0.0 && z >= 0.0 && x < 24000.0 && z < 24000.0 {
+                            laguneta = Some((x, z, nivel));
+                        }
+                    }
+                }
+                x += 37.0;
+            }
+            z += 37.0;
+        }
+        eprintln!("laguna {laguna:?} · laguneta {laguneta:?}");
+        for (nombre, punto) in [("laguna", laguna), ("laguneta de bañado", laguneta)] {
+            let (x, z, nivel) = punto.unwrap_or_else(|| panic!("sin {nombre}"));
+            // El fondo, bajo el agua; el lugar cuenta como agua (no se construye encima).
+            assert!(t.height(x, z) < nivel - 0.25, "{nombre}: fondo a {} m, agua a {nivel} m", t.height(x, z));
+            assert!(t.is_water(x, z), "{nombre}");
+            let m = columna(0, x, z);
+            let caras = caras_de_arriba(&m, AGUA_ARROYO);
+            let hit = caras.iter().find(|(c, _, _)| c.distance(Vec2::new(x, z)) < 0.5);
+            let (_, _, tope) = hit.unwrap_or_else(|| panic!("{nombre} en ({x}, {z}) sin agua en vóxeles"));
+            assert!((tope - nivel).abs() <= 0.25, "{nombre}: agua a {tope} m, nivel {nivel} m");
+            // Quieta: sin corriente.
+            assert!(m.water.iter().filter(|q| q.dir() == 0 && q.material() == AGUA_ARROYO).any(|q| q.smooth[0] == 0));
+        }
     }
 
     #[test]

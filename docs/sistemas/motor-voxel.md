@@ -1180,6 +1180,19 @@ titileo).
   se llenan hasta ese nivel redondeado al vóxel del nivel de detalle; donde el agua da a una
   orilla o a un tramo más bajo se mallan los costados (cascadas, con espuma clara que cae).
   Donde el cauce baja al nivel del río, manda el río.
+- **Agua quieta: lagunas y lagunetas de los bañados** (`agua::AguasQuietas`, v0.11.x). Hasta
+  acá solo el agua unida a un cauce salía en vóxeles; las lagunas oficiales eran una superficie
+  pintada al ras del suelo. Ahora cada laguna de `biomas.bin` por encima de 1 m (9 en el mapa y
+  el entorno) y los claros de agua libre de los bañados (~1.100 lagunetas, elegidas con un
+  ruido suave de ~90 m entre las celdas de bañado que no son borde [E]) son componentes con su
+  nivel (la mediana del MDT en sus celdas) y una profundidad que crece con la distancia a la
+  orilla (lagunas de 0,6 a 2,5 m, lagunetas de 0,35 a 0,8 m [E], guardadas en mosaicos de
+  16 × 16 celdas). `terrain.rs` hunde el fondo bajo ese nivel y `Arroyos::en` las devuelve como
+  agua sin corriente fuera de los cauces: `stream.rs` las llena en vóxeles como a los arroyos,
+  sin tocar el mallado ni el shader. La orilla no sigue la grilla (el umbral de profundidad
+  cambia con un ruido de 7 m). Cuentan como agua para construir (`is_water`). Los tajamares
+  (menos de 1 ha) no se dibujan: son obras del siglo XX que el constructor del mapa ya
+  descarta. ![Lagunetas del bañado del Pantanoso](../capturas/agua-laguneta-banado.jpg)
 - **Sombreado (`water.wgsl`, `vs_quad`):** celdas del tamaño del vóxel (o más grandes si
   medirían menos de ~6 píxeles), cada una con su tinte, su inclinación para el brillo del sol
   y un brillo que sube y baja (la ola es de luz, no de geometría), borde de celda de cerca,

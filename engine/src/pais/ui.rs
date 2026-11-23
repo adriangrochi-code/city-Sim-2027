@@ -408,6 +408,20 @@ impl PaisUi {
                 painter.text(q, Align2::CENTER_CENTER, txt, f, Color32::from_rgb(120, 30, 70));
             }
         }
+        // [ciudad] Islas con su contorno real (islas.json: Flores, Gorriti, Lobos, las Ratas,
+        // San Gabriel, Farallón): a 1 km casi no ocupan una celda del relieve, así que se dibujan
+        // encima, con su nombre al acercarse.
+        for (nombre, partes) in crate::islas::contornos_geo() {
+            let mut centro = None;
+            for parte in partes {
+                let v: Vec<Pos2> = parte.iter().map(|q| self.a_pantalla(rect, g.celda(q[0], q[1]))).collect();
+                centro.get_or_insert(v[0]);
+                painter.add(Shape::convex_polygon(v, Color32::from_rgb(150, 160, 104), st(1.0, Color32::from_rgb(90, 84, 70))));
+            }
+            if let (Some(c), true) = (centro, self.capas.rotulos && z > 4.0) {
+                painter.text(c + vec2(0.0, 4.0), Align2::CENTER_TOP, nombre, FontId::proportional(11.0), Color32::from_rgb(220, 235, 250));
+            }
+        }
         // Rótulos de ríos y lagunas.
         if self.capas.rotulos && z > 2.5 {
             for r in g.rios.iter().filter(|r| r.largo_km > 120.0) {

@@ -62,31 +62,14 @@ pub fn ensanche(s: &mut Session) -> String {
     let g = s.game.as_mut().unwrap();
     g.city.money += 300_000;
     let Some((a, b, cursor)) = sitio_ensanche(&g.city, &t) else { return "ERROR: no hay lugar para el ensanche".into() };
+    // Las calles de unión con la ciudad vieja las hace el propio trazado (`City::empalmar`).
     let r = g.city.trazar_ensanche(&t, a, b, cursor);
-    // Se une a las calles de la ciudad vieja con calles empedradas (las redes de gas, agua y
-    // colectores siguen la calle).
-    let mut r = r;
-    let viejos: Vec<Vec2> = g.city.net.nodes.values().copied().filter(|p| !g.city.epoca.ensanche.contiene(*p)).collect();
-    let nuevos: Vec<Vec2> = g.city.net.nodes.values().copied().filter(|p| g.city.epoca.ensanche.contiene(*p)).collect();
-    let mut pares: Vec<(f32, Vec2, Vec2)> = nuevos.iter().filter_map(|n| viejos.iter().map(|v| (v.distance(*n), *n, *v)).filter(|x| x.0 > 8.0).min_by(|x, y| x.0.total_cmp(&y.0))).filter(|x| x.0 < 160.0).collect();
-    pares.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let mut unidas = 0;
-    for (_, n, v) in pares {
-        if unidas >= 4 {
-            break;
-        }
-        let pts = super::roads::line(n, v);
-        if g.city.road_problem(&t, &pts, super::roads::RoadKind::Stone).is_none() {
-            if let (Ok(e), Ok(acc)) = (g.city.build_road(&t, &pts, super::roads::RoadKind::Stone), r.as_mut()) {
-                acc.extend(e);
-                unidas += 1;
-            }
-        }
-    }
     let en = &g.city.epoca.ensanche;
-    let info = en.trazados.last().map_or(String::new(), |tr| format!("{} × {} manzanas, {} plazas, {} árboles", tr.nu, tr.nv, en.plazas.len(), en.arboles.len()));
+    let info = en.trazados.last().map_or(String::new(), |tr| format!("{} × {} manzanas, {} plazas, {} árboles, {} calles de empalme con la red vieja", tr.nu, tr.nv, en.plazas.len(), en.arboles.len(), tr.empalmes));
     let n = g.city.lots.lots.values().filter(|l| g.city.epoca.ensanche.contiene(l.c)).count();
-    format!("{info} · {n} solares · {unidas} calles de unión con la ciudad vieja · {}", apply(s, r))
+    let comp = super::services::components(&g.city.net);
+    let n_comp: std::collections::BTreeSet<u32> = comp.values().copied().collect();
+    format!("{info} · {n} solares · {} redes de calles (1 = todo unido) · {}", n_comp.len(), apply(s, r))
 }
 
 /// Zonifica el ensanche: casas, y comercio sobre el bulevar.
@@ -146,7 +129,7 @@ pub fn servicios(s: &mut Session) -> String {
     }
     out.push(col);
     let g = s.game.as_ref().unwrap();
-    format!("{} · {} faroles de gas · {} solares con agua corriente · {} con colector", out.join(" · "), g.city.epoca.faroles_gas.len(), g.city.epoca.agua_red.len(), g.city.epoca.cloaca.len())
+    format!("{} · {} faroles de gas · {} solares con agua corriente · {} con colector (de {} edificados)", out.join(" · "), g.city.epoca.faroles_gas.len(), g.city.epoca.agua_red.len(), g.city.epoca.cloaca.len(), g.city.lots.lots.values().filter(|l| l.level > 0).count())
 }
 
 /// Años de Ciudad Nueva: casas nuevas en el ensanche, viejas modernizadas en la ciudad vieja.
@@ -169,8 +152,10 @@ pub fn crecer(s: &mut Session) -> String {
     let nuevas = obras.iter().filter(|o| o.contexto.epoca >= 1).count();
     let reformadas = obras.iter().filter(|o| o.contexto.reforma > 0).count();
     let viejas = obras.len() - nuevas - reformadas;
+    // [ciudad] Modelos de detalle de las fachadas.
+    let det = g.city.fachadas.cuenta(&g.city.lots).iter().map(|(k, v)| format!("{k:?} {v}")).collect::<Vec<_>>().join(", ");
     let out = format!(
-        "{months} meses en {sim:.2?} · {} · {} habitantes ({:?}) · casas de la época 2: {nuevas} · modernizadas: {reformadas} · coloniales: {viejas} · faroles de gas {} · sebo {} · ",
+        "{months} meses en {sim:.2?} · {} · {} habitantes ({:?}) · casas de la época 2: {nuevas} · modernizadas: {reformadas} · coloniales: {viejas} · faroles de gas {} · sebo {} · detalles de fachada: {det} · ",
         g.city.date(),
         g.city.habitantes(),
         g.city.poblacion.epoca,

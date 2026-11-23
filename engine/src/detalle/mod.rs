@@ -416,10 +416,25 @@ pub enum Id {
     Veleta,
     Letrero,
     Palenque,
+    // [ciudad] Detalles de las fachadas (los piden los constructores de `structures/`).
+    /// Reja de hierro forjado embutida en el vano de una ventana de 1 m × 2 m (y de 2,5 m).
+    RejaPlana,
+    RejaPlanaAlta,
+    /// Reja volada (jaula que sale medio metro de la fachada), 1 m × 2 m (y de 2,5 m).
+    RejaVolada,
+    RejaVoladaAlta,
+    /// Farol de aceite de fachada, colgado de un brazo de hierro.
+    FarolBrazo,
+    /// Farol de gas de fachada (época 2), de brazo con voluta.
+    FarolGasBrazo,
+    /// Maceta de barro con un geranio (balcones).
+    Maceta,
+    /// Aldaba o llamador de la puerta de calle.
+    Llamador,
 }
 
 impl Id {
-    pub const TODOS: [Id; 23] = [
+    pub const TODOS: [Id; 31] = [
         Id::Caballo,
         Id::CaballoEnsillado,
         Id::Vaca,
@@ -443,6 +458,14 @@ impl Id {
         Id::Veleta,
         Id::Letrero,
         Id::Palenque,
+        Id::RejaPlana,
+        Id::RejaPlanaAlta,
+        Id::RejaVolada,
+        Id::RejaVoladaAlta,
+        Id::FarolBrazo,
+        Id::FarolGasBrazo,
+        Id::Maceta,
+        Id::Llamador,
     ];
 }
 

@@ -268,6 +268,8 @@ impl CityData {
             growth_acc: self.acumulado_crecimiento,
             poblacion: super::poblacion::Poblacion::nueva(1726),
             suelo: Default::default(),
+            // [ciudad] se rehacen al voxelizar los solares (`rebuild_edits`)
+            fachadas: Default::default(),
             mejoras: Vec::new(),
             llegados_barco: 0,
             desarrollo: self.desarrollo.clone().unwrap_or_default(),

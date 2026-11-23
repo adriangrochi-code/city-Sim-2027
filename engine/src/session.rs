@@ -253,6 +253,8 @@ impl Session {
                 let mut cajas = Vec::new();
                 // [personajes] vecinos, animales y detalles de micro-vóxeles
                 crate::city::agentes::fauna::cajas_ciudad(&g.city, &self.terrain, Vec2::new(self.cam.target.x, self.cam.target.z), self.hour, &mut cajas);
+                // [ciudad] rejas, faroles de fachada, macetas y llamadores de las casas
+                g.city.fachadas.vigentes(&g.city.lots).cajas(Vec2::new(self.cam.target.x, self.cam.target.z), &mut cajas);
                 r.set_agents(&cajas);
             }
             None => r.set_agents(&[]),

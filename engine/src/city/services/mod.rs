@@ -481,6 +481,16 @@ pub(crate) fn comp_at(net: &RoadNetwork, comp: &BTreeMap<u32, u32>, p: Vec2, max
     comp.get(&net.edges[&n.edge].a).copied()
 }
 
+/// Componentes de todas las calles que pasan a menos de `maxd` m de `p`. Una usina o la boca
+/// de un colector se empalman con cualquier calle cercana, no solo con la más próxima (que
+/// puede ser un camino suelto, como el del muelle).
+pub(crate) fn comps_cerca(net: &RoadNetwork, comp: &BTreeMap<u32, u32>, p: Vec2, maxd: f32) -> Vec<u32> {
+    let mut v: Vec<u32> = net.edges_near(p, maxd).into_iter().filter_map(|e| comp.get(&net.edges[&e].a).copied()).collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 /// Personas que consumen agua en un solar (casas: sus vecinos; comercios y talleres: como una
 /// casa del mismo nivel).
 fn need(l: &Lot) -> i32 {
