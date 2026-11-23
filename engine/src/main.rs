@@ -13,13 +13,15 @@
 //!   motor --bench carpeta              banco de pruebas reproducible (tabla y capturas)
 //! Opciones: --mapa real (Montevideo, sin la escena), --scene ciudad|catalogo|vacia, --cam x,z,distancia,giro,inclinación,
 //!   --hour 10.5, --size 1600x900, --levels 11, --threads N, --msaa 1|4 (por omisión 4×; 1× en la ventana con render por CPU), --frames N,
-//!   --sin-suavizar (sin el suavizado de los escalones del terreno)
+//!   --sin-suavizar (sin el suavizado de los escalones del terreno),
+//!   --calidad minimo|bajo|medio|alto|ultra (con --bench: el preset de calidad)
 //!   --draw directo|indirecto|gpu (modo de dibujo), --hiz 0|1 (descarte de lo tapado; por omisión, sí con descarte en GPU)
 
 mod version;
 mod app;
 mod bench;
 mod buildings;
+mod cache; // [lod]
 mod city;
 mod detalle; // [personajes]
 mod ecosistemas; // [atlas]
@@ -43,6 +45,8 @@ mod trees;
 mod tour;
 mod ui;
 mod world;
+mod relieve; // [lod]
+mod autoajuste; // [lod]
 mod agua;
 
 use camera::OrbitCamera;
@@ -73,6 +77,8 @@ struct Args {
     /// `--juego` explícito: entra directo a una partida nueva, sin el menú principal.
     juego_directo: bool,
     levels_set: bool,
+    /// [lod] `--calidad minimo|bajo|medio|alto|ultra` (banco): aplica el preset.
+    calidad: Option<autoajuste::Calidad>,
     sandbox: bool,
     scene_set: bool,
     /// Capturas y sandbox sobre el mapa real de Montevideo (`--mapa real`).
@@ -101,6 +107,7 @@ fn parse_args() -> Args {
         juego: false,
         juego_directo: false,
         levels_set: false,
+        calidad: None,
         sandbox: false,
         scene_set: false,
         real: false,
@@ -159,6 +166,7 @@ fn parse_args() -> Args {
             "--msaa" => a.msaa = if next == "1" { 1 } else { 4 },
             // Sin --msaa: 4× en capturas y con GPU; 1× en la ventana si el render es por CPU.
             "--threads" => a.threads = next.parse().unwrap_or(a.threads).max(1),
+            "--calidad" => a.calidad = autoajuste::Calidad::from_name(&next),
             // Dibujo: directo, indirecto (múltiple, descarte en CPU) o gpu (descarte en GPU).
             "--draw" => {
                 let m = match next.as_str() {
@@ -304,7 +312,17 @@ fn main() {
     let mut args = parse_args();
     let plaza = Vec2::new(13500.0, 16300.0);
     if let Some(dir) = &args.bench {
-        let o = bench::Options { dir: dir.clone(), threads: args.threads, levels: args.levels, msaa: if args.msaa == 0 { 4 } else { args.msaa }, frames: args.frames.unwrap_or(5) as u32, size: if args.size == (1600, 900) { (1280, 720) } else { args.size } };
+        let mut o = bench::Options { dir: dir.clone(), threads: args.threads, levels: args.levels, msaa: if args.msaa == 0 { 4 } else { args.msaa }, frames: args.frames.unwrap_or(5) as u32, size: if args.size == (1600, 900) { (1280, 720) } else { args.size }, calidad: None };
+        // [lod] Con un preset: sus niveles, anillo, sombras, suavizado, hilos, subida y caché.
+        if let Some(p) = args.calidad.and_then(|c| c.preset()) {
+            if !args.levels_set {
+                o.levels = p.niveles;
+            }
+            if args.msaa == 0 {
+                o.msaa = p.msaa;
+            }
+            o.calidad = args.calidad;
+        }
         if let Err(e) = bench::run(&o) {
             eprintln!("Error: {e}");
             std::process::exit(1);
@@ -353,7 +371,7 @@ fn main() {
     let _ = scene.center;
     let t_city = t0.elapsed();
 
-    let levels: Vec<LevelSpec> = (0..args.levels).map(|lod| LevelSpec { lod }).collect();
+    let levels: Vec<LevelSpec> = (0..args.levels).map(LevelSpec::new).collect();
     let t1 = Instant::now();
     let world = World::generate(terrain, &edits, &levels, focus);
     let t_gen = t1.elapsed();

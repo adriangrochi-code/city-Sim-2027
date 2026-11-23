@@ -25,6 +25,58 @@ pub fn scene_camera(scene: &str) -> [f32; 5] {
     }
 }
 
+/// [lod] Tope de vértices subidos por cuadro en la ventana (repartir la carga entre cuadros
+/// evita tirones).
+pub const WINDOW_VERTEX_BUDGET: usize = 160_000;
+
+/// [lod] Lo que subió un cuadro: órdenes aplicadas, bytes de mallas y tiempo de CPU (ms).
+#[derive(Clone, Copy, Default, Debug)]
+pub struct UploadFrame {
+    pub ops: usize,
+    pub bytes: u64,
+    pub ms: f64,
+    /// Parte del tiempo en recibir y elegir (`poll`) y en `maintain` (ms).
+    pub poll_ms: f64,
+    pub maintain_ms: f64,
+}
+
+/// [lod] Sube a la GPU lo que terminaron los hilos de trabajo, con el presupuesto del cuadro.
+/// La usan la ventana ([`Session::apply_ops`]) y el banco (vuelo), así miden lo mismo.
+pub fn upload_ops(streamer: &mut Streamer, r: &mut Renderer, vertex_budget: usize) -> UploadFrame {
+    let t0 = Instant::now();
+    let b0 = r.uploaded_bytes;
+    // Tope de vértices y de bytes (lo que entra en el presupuesto de tiempo de subida).
+    let byte_budget = if vertex_budget == usize::MAX { usize::MAX } else { streamer.ritmo.bytes() };
+    let ops = streamer.poll_budget(vertex_budget, byte_budget);
+    let poll_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let n = ops.len();
+    let tm = Instant::now();
+    r.maintain();
+    let maintain_ms = tm.elapsed().as_secs_f64() * 1000.0;
+    let tu = Instant::now();
+    for op in ops {
+        match op {
+            Op::Set(k, m) => {
+                r.set_column(k, &m);
+                streamer.give_back(k, m);
+            }
+            Op::Remove(k) => r.remove_column(k),
+        }
+    }
+    let bytes = r.uploaded_bytes - b0;
+    streamer.ritmo.medir(bytes, tu.elapsed().as_secs_f64() * 1000.0);
+    UploadFrame { ops: n, bytes, ms: t0.elapsed().as_secs_f64() * 1000.0, poll_ms, maintain_ms }
+}
+
+/// [lod] Le pasa la cámara al streamer como la ventana: centro de los anillos, altura del ojo
+/// sobre el terreno (nivel más fino) y, para la prioridad y la oclusión, el ojo y la mirada.
+pub fn view_to_streamer(streamer: &mut Streamer, cam: &OrbitCamera, view_h: f32) {
+    let eye = cam.eye();
+    streamer.set_view(eye, Vec2::new(cam.target.x - eye.x, cam.target.z - eye.z));
+    let eye_h = (eye.y - cam.target.y).max(1.0);
+    streamer.update_view(Vec2::new(cam.target.x, cam.target.z), eye_h, cam.fov_y, view_h);
+}
+
 pub struct Session {
     pub terrain: Arc<TerrainGen>,
     pub streamer: Streamer,
@@ -53,7 +105,8 @@ impl Session {
     pub fn with_terrain(scene: &str, terrain: Arc<TerrainGen>, levels: u32, threads: usize, cam: [f32; 5], hour: f32) -> Session {
         let started = Instant::now();
         let store = Arc::new(RwLock::new(EditStore::new(levels)));
-        let streamer = Streamer::new(terrain.clone(), store, levels, threads);
+        let mut streamer = Streamer::new(terrain.clone(), store, levels, threads);
+        streamer.prewarm_relief(); // [lod]
         // La escena (miles de edificios) se arma en otro hilo: mientras tanto ya se ve el terreno.
         let (tx, rx) = channel();
         let scene_name = scene.to_string();
@@ -89,7 +142,8 @@ impl Session {
         let mut store = EditStore::new(levels);
         store.apply(edits, false);
         let store = Arc::new(RwLock::new(store));
-        let streamer = Streamer::new(terrain.clone(), store, levels, threads);
+        let mut streamer = Streamer::new(terrain.clone(), store, levels, threads);
+        streamer.prewarm_relief(); // [lod]
         let ground = terrain.height(cam[0], cam[1]).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(cam[0], ground, cam[1]), yaw: cam[3], pitch: cam[4], distance: cam[2], fov_y: 50.0 };
         Session { terrain, streamer, cam, hour, day_paused: false, tool: 2, rot: 0, hit: None, scene_ready: Some(Duration::ZERO), started, first_frame: None, seed: 1, scene_rx: None, view_h: 900.0, game: Some(game) }
@@ -167,8 +221,7 @@ impl Session {
             }
             self.apply_edits(&batch);
         }
-        let eye_h = (self.cam.eye().y - self.cam.target.y).max(1.0);
-        self.streamer.update_view(Vec2::new(self.cam.target.x, self.cam.target.z), eye_h, self.cam.fov_y, self.view_h);
+        view_to_streamer(&mut self.streamer, &self.cam, self.view_h);
     }
 
     pub fn scene_loaded(&self) -> bool {
@@ -208,15 +261,7 @@ impl Session {
         let centro = Vec2::new(self.cam.target.x, self.cam.target.z);
         let luces = self.game.as_ref().map_or(Vec::new(), |g| g.city.luces_cerca(centro, 300.0, crate::render::luces::MAX));
         r.set_lights(centro, &luces);
-        let ops = self.streamer.poll(vertex_budget);
-        let n = ops.len();
-        r.maintain();
-        for op in ops {
-            match op {
-                Op::Set(k, m) => r.set_column(k, &m),
-                Op::Remove(k) => r.remove_column(k),
-            }
-        }
+        let n = upload_ops(&mut self.streamer, r, vertex_budget).ops;
         if self.first_frame.is_none() && r.column_count() > 0 {
             self.first_frame = Some(self.started.elapsed());
         }

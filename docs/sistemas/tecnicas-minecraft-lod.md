@@ -1,9 +1,16 @@
 # Técnicas del mod LOD de Minecraft aplicadas al motor de vóxeles
 
 > Documento de plan. Complementa a [motor-voxel.md](motor-voxel.md) (sobre todo §4, §10–12, §16 y
-> §17). Fecha: 2026-11-18. **No cambia código**: es el inventario, la comparación y el plan por
-> fases para llevar al motor (`engine/`) lo que el mod LOD de Minecraft (`/home/user/minecraft-lod`,
-> Java/NeoForge, versión 0.26.38) ya resolvió y midió.
+> §17). Fecha: 2026-11-18. Es el inventario, la comparación y el plan por fases para llevar al
+> motor (`engine/`) lo que el mod LOD de Minecraft (`/home/user/minecraft-lod`, Java/NeoForge,
+> versión 0.26.38) ya resolvió y midió.
+>
+> **Estado al 2026-11-23:** hechas las fases **0, 1, 2 y 5** (ver §5, resultados y desvíos del
+> plan); las fases 3, 4 y 6 siguen pendientes. Código nuevo: `engine/src/cache.rs`,
+> `relieve.rs`, `autoajuste.rs`; cambios marcados con `[lod]` en `stream.rs`, `lod.rs`,
+> `session.rs`, `bench.rs`, `save.rs`, `app.rs`, `menu.rs`, `mesher.rs`, `render/mod.rs`, `agua.rs`
+> y `world/mod.rs` (`terrain.rs` no se tocó: las cotas del relieve se arman con `height` y
+> `forest_density`, que ya existían).
 >
 > **Advertencia sobre las medidas.** Las del mod salen casi todas de Xvfb con llvmpipe (render por
 > software) y de perfiles JFR; las del motor, de lavapipe. Los porcentajes de "ganancia esperada"
@@ -581,7 +588,22 @@ Cada ficha: **Mod** · **Motor hoy** · **Brecha** · **Ganancia esperada** · *
 
 ### 3.1 Antes de empezar: los cuatro trabajos en curso
 
-El plan arranca **después** de que se unan a `ccr-889e1313-dztkuu` estos trabajos, porque tocan los
+> **Actualización 2026-11-23: los cuatro ya entraron** (v0.10.0 y v0.10.1: `engine/src/agua.rs`,
+> la época 2, `engine/src/pais/`, `engine/src/detalle/`). Lo que eso cambió del plan:
+> - **Agua en vóxeles:** las columnas llevan el agua (`agua::mallar`); el nivel del río lo pone el
+>   shader y los arroyos tienen nivel fijo por mapa, así que la marea **no** entra en la firma de
+>   la caché (§2.11 paso 2: la "versión del terreno" es constante por `Streamer`). Para la oclusión,
+>   lo dibujado de una columna con agua llega hasta 3 m (la marea).
+> - **Mapa del país:** vive en `pais/` y su propio modo de pantalla; no tocó el menú de Opciones,
+>   así que los presets (Fase 5) entraron en `menu.rs` sin conflicto.
+> - **Personajes:** el pipeline instanciado nuevo (`detalle/`, `set_agents`) **no** reemplazó el
+>   búfer de la flora: `Renderer::refresh_detail` sigue rearmando la flora entera cuando cambia una
+>   columna (§2.6 paso 5, pendiente).
+> - **Otro agente sigue trabajando en flora y clasificación del terreno** (`terrain.rs`,
+>   `trees.rs`, `pais/`, `tools/`): por eso la Fase 2 no agregó la pirámide en `terrain.rs`, sino
+>   en `relieve.rs`, muestreando las funciones públicas que ya había.
+
+El plan arrancaba **después** de que se unan a `ccr-889e1313-dztkuu` estos trabajos, porque tocan los
 mismos archivos:
 
 | Trabajo en curso | Archivos que toca (según su encargo) | Fases de este plan que chocan |
@@ -741,3 +763,138 @@ fundido y SSAO: si llegan antes, esas filas quedan en "no".
 - Licencias: del mod (del mismo autor) se toman ideas y, si conviene, código propio. Lo que el mod
   tomó de **Voxy** (todos los derechos reservados) es solo idea; **FarPlaneTwo** y **FSR 1** son MIT
   (crédito en el archivo que los adapte).
+
+---
+
+## 5. Resultados de las fases 0, 1, 2 y 5 (2026-11-23)
+
+> **Medido con render por software** (lavapipe/llvmpipe, Vulkan, 4 núcleos, 3 hilos de trabajo,
+> 1280×720, MSAA 4×). Valen las proporciones y los conteos (columnas, caras, diferencias de
+> imagen), **no** los milisegundos absolutos: con lavapipe la "GPU" es la CPU. Durante las
+> corridas había otro agente compilando en la misma máquina: los tiempos de pared varían
+> ±15–50 % entre corridas; por eso las comparaciones de tiempo que siguen son de corridas
+> **seguidas** (`motor --bench` del commit de la Fase 0 sin cambios del streamer, y enseguida
+> el del final) o del **mismo binario** con las funciones apagadas por variables de entorno
+> (`MOTOR_SIN_CACHE=1 MOTOR_SIN_OCLUSION=1 MOTOR_HILOS_NORMALES=1`).
+
+### 5.1 Qué quedó
+
+| Fase | Técnica del mod | En el motor |
+|---|---|---|
+| 0 | Calibración con vuelo, percentiles e informes comparables | `bench.rs`: tabla de **streaming** (vuelo de 84 s con zoom 150 m ↔ 3 km y 3 km a 40 m/s con el presupuesto de la ventana a 60 Hz; p50/p95/p99, 1 % peor, peor cuadro, peor subida, columnas generadas, de la caché, ocultas, bytes subidos, pendientes, hasta ocioso), **zoom de ida y vuelta** (dos vueltas), **teletransporte** Lejos → Calle (hasta lo visible listo y hasta todo listo), **salto al recentrar** (Península y Lejos), columna "Generadas (ocultas)" por vista y `bench.json`. `MOTOR_BANCO=streaming` corre solo la parte de streaming y `MOTOR_BANCO_VISTAS=peninsula,calle` solo esas vistas. |
+| 1 | `BoundedRegionCache` (0.26.6) | `cache.rs`: LRU por bytes **contando el costo fijo por entrada** (96 B), clave (columna, firma); la firma es (vecinas en el anillo, generación de ediciones de la columna y de las vecinas a ≤ 2 columnas). Las mallas no se copian: la ventana devuelve al `Streamer` la malla que acaba de subir (`give_back`) y la caché la saca al reusarla. Presupuesto por preset (32 a 256 MB; 128 por omisión). |
+| 1 | `PrioridadVista` (0.26.18) | `Streamer::prio`: distancia × (1 + 1,83·(cos 50° − cos θ)) fuera del cono de la mirada (hasta 4× detrás); la cola se reordena si la mirada gira más de 15°. |
+| 1 | Subida con tope de bytes (0.25.4) | `RitmoSubida`: bytes por cuadro = presupuesto en ms / costo por byte medido (media móvil); se suma al tope de 160 000 vértices de antes. |
+| 1 | Hilos de generación con menos prioridad (0.25.4) | `setpriority` (+5) por hilo en Linux, `SetThreadPriority(BELOW_NORMAL)` en Windows; `MOTOR_HILOS_NORMALES=1` lo apaga. Límite de concurrencia ajustable en caliente (el semáforo de `GenerationTaskScheduler`). |
+| 2 | `OclusionRelieve` + horizonte real | `relieve.rs`: pirámide de cotas (mínimo y máximo) del terreno muestreada una vez por mapa (16 m sobre el mapa y 3 km alrededor, 512 m en el entorno amplio, ±180 km; margen de medio desnivel de la celda + 5/9 m; ~1 s en 4 núcleos, compartida entre partidas) y densidad del monte (64 / 512 m) para las copas de los niveles gruesos. Barrido por 2048 sectores, de cerca hacia afuera, con la tangente y la bajada `d²/2R` de `voxel.wgsl::curved` acotadas en las dos puntas; lo dibujado de una columna se acota con la misma función de la cara de arriba que usa el mallado (`top_from_height`, `top_from_height_far`), árboles (+25 m), copas (+11 m + un vóxel), agua (3 m) y obras (`max_y`). Ojo un 15 % más alto (≥ 3 m), nada a menos de 300 m, solo tapan columnas sin obras a ≥ 150 m, ninguna con el ojo bajo el terreno. Se reevalúa al recentrar o cuando el ojo se mueve un 10 % de su altura; el barrido corre en un hilo aparte. Lo tapado que puede tirar sombra (niveles ≤ 6, a menos de 6 km) se posterga en vez de saltearse. |
+| 2 | `DynamicHorizonRadius` | Sin clase aparte (como preveía §2.10): un nivel con todas sus columnas tapadas no se genera. Además, `Streamer::set_active_levels` apaga niveles gruesos en caliente (perilla de la Fase 5). |
+| 5 | `QualityPreset` + `recomendarPorHardware` | `autoajuste.rs`: Mínimo…Ultra (tabla de §2.8 con caché por preset); recomendación por `wgpu::DeviceType`, núcleos y RAM (`/proc/meminfo`); en Opciones, fila "Calidad" (★ = recomendada) + "Auto-ajuste" + "FPS objetivo"; la primera vez se aplica la recomendada y se avisa; las opciones viejas quedan en Personalizado ("A mano"). `Settings`: `calidad`, `anillo`, `cache_mb`, `subida_ms`, `hilos`, `fps_objetivo`, `autoajuste`. `motor --bench --calidad minimo…ultra`. |
+| 5 | Anillo como perilla (§2.4) | `LevelSpec { lod, ring }` con `lod::RINGS = [16, 20, 24, 28, 32]` y `Streamer::set_ring` (recentra; lo viejo se quita cuando lo nuevo lo cubre). |
+| 5 | `BalanceadorCpuGpu` + vsync (0.26.38) | `Autoajuste`: ciclos de 1 s, una perilla por vez; GPU: sombras → anillo → niveles; CPU: hilos → subida → anillo → niveles; tirones: hilos; recupera en orden inverso tras 2 ciclos bajo el 80 %. Objetivo ≥ intervalo del vsync (refresco del monitor de winit); en el tope (≤ 110 % del intervalo) no baja nada y recupera por **carga** (máx. de GPU y trabajo del hilo principal sin la espera de la superficie), de a un paso, prueba de 8 ciclos y espera de 30 → 240 ciclos si pierde el tope. Ignora cuadros no dibujados (`frame_key`), el menú y los recorridos. GPU: marcas de tiempo del pase principal leídas sin esperar (`map_async`, uno o dos cuadros tarde); sin ellas, "manda la GPU" si el hilo principal ocupa menos del 60 % del cuadro. Diagnóstico: segunda línea del contador de FPS ("auto-ajuste: manda la GPU · en el tope, carga 6,1 ms de 16,7 · sombras ↓ (GPU al límite)") y el perfil (`CITYSIM_PERFIL`). |
+
+**No se hizo** (queda anotado): "Medir y ajustar" (calibración desde Opciones, §2.8 paso 3); flora por columna en vez de rearmar el búfer entero (§2.6 paso 5); la pirámide de máximos con la grilla del mapa real en `terrain.rs` (se muestreó `height` en `relieve.rs` para no tocar `terrain.rs`, que está trabajando otro agente).
+
+### 5.2 Vistas quietas: columnas generadas e imagen
+
+Corridas seguidas (`antes`: el banco de la Fase 0 sin los cambios del streamer; `después`: todo).
+"Generadas (ocultas)": columnas que salieron de los hilos de trabajo y, entre paréntesis, las que
+se dejaron sin generar porque el relieve las tapa. La diferencia de imagen compara las capturas
+de cada vista entre las dos corridas (píxeles con diferencia > 8 en algún canal).
+
+| Vista | Columnas generadas antes → después | Ocultas | Generar+mallar (pared) antes → después | CPU de generación antes → después | Caras | Diferencia de imagen |
+|---|---|---|---|---|---|---|
+| Ciudad de cerca | 4896 → 4737 (−3 %) | 168 | 1,39 → 1,43 s | 3,23 → 3,33 s | 0,80 → 0,78 M | 0,000 % |
+| Península | 4032 → 4032 | 0 | 0,92 → 0,99 s | 2,11 → 2,25 s | 0,54 → 0,54 M | 0,000 % |
+| Lejos (9 km) | 3168 → 3168 | 0 | 0,73 → 0,74 s | 1,69 → 1,70 s | 0,26 → 0,26 M | 0,000 % |
+| Ciudad de noche | 4896 → 4904 | 1 | 1,45 → 1,39 s | 3,37 → 3,26 s | 0,80 → 0,80 M | 0,000 % |
+| Calle (nivel del suelo) | 4896 → 4167 (**−15 %**) | 736 | 1,43 → 1,18 s (−17 %) | 3,33 → 2,75 s (−17 %) | 0,81 → 0,73 M | 0,000 % |
+| Cerro, rasante | 4896 → 4896 | 0 | 3,43 → 3,36 s | 9,03 → 8,90 s | 2,08 → 2,08 M | 0,000 % (barrido 0,000 %) |
+| Miguelete de cerca | 4896 → 3823 (**−22 %**) | 1079 | 4,20 → 3,66 s (−13 %) | 11,26 → 9,87 s (−12 %) | 3,22 → 3,06 M | 0,000 % |
+| Cerro | 4464 → 4464 | 0 | 3,11 → 3,18 s | 8,25 → 8,45 s | 1,74 → 1,74 M | 0,000 % |
+
+- **Imagen idéntica** en las 14 capturas del banco (vistas, barridos de cámara del Hi-Z, multitudes
+  y las dos del salto al recentrar): las fases 0–2 no cambian el aspecto.
+- **Oclusión:** −15 % de columnas en "Calle" y −22 % en "Miguelete"; 0 desde arriba (Península,
+  Lejos, Cerro) como se esperaba. En "Cerro, rasante" el ojo está a ~390 m (la cámara orbita a
+  2,5 km de la cima): ve por encima de todo, nada queda tapado. Quedó por debajo del −25 % del
+  criterio: el margen de los niveles gruesos es grande (la cara de arriba de un vóxel de 256 m
+  se redondea, y las copas del monte suman un vóxel entero), y conservador a propósito.
+- Las caras dibujadas en "Calle" bajan de 0,81 a 0,73 M en la GPU (lo tapado ya no se sube; el
+  Hi-Z igual descartaba el 62 %).
+- Sombras: las cascadas de "Calle" y "Ciudad de cerca" quedaron iguales (misma imagen; lo tapado a
+  menos de 6 km en niveles con sombra se posterga, no se saltea).
+
+### 5.3 Streaming (Fase 0 antes → después)
+
+| Prueba | Antes | Después |
+|---|---|---|
+| Zoom 150 m ↔ 3 km, columnas generadas en la 1.ª / 2.ª vuelta | 1256 / 1256 (100 %) | 409 / **0 (0 %)**; de la caché 1060 / 1256 |
+| Zoom, tiempo de cada vuelta hasta ocioso | 0,6 s / 0,6 s | 0,3 s / 0,2 s |
+| Vuelo: columnas generadas | 72 371 | 64 312 (−11 %; 9847 de la caché, 233 tapadas) |
+| Vuelo: cuadro p50 / p95 / p99 | 0,07 / 1,04 / 1,71 ms | 0,10 / 1,61 / 2,62 ms |
+| Vuelo: 1 % peor / peor cuadro / peor subida | 2,48 / 8,3 / 8,3 ms | 4,12 / 24,0 / 24,0 ms |
+| Vuelo: subido | 168,4 MB | 173,7 MB |
+| Teletransporte Lejos → Calle: lo visible / todo listo | 1,06 / 1,06 s | 0,86 / 0,91 s |
+| Teletransporte: columnas generadas | 2911 | 2873 |
+| Salto al recentrar (Península / Lejos) | 4,36 % / 0,46 % | 4,36 % / 0,46 % (no cambia: es la Fase 3) |
+| Oclusión en el vuelo | — | 570 evaluaciones; armar las cajas, peor 3,3 ms en el hilo principal; el barrido, peor 15 ms en su hilo |
+
+A/B del vuelo con el mismo binario (dos pares de corridas alternadas, carga de la máquina ~1–1,5;
+las tres últimas columnas apagan una sola cosa, con el barrido de la oclusión todavía en el hilo
+principal):
+
+| Vuelo | Todo apagado | Todo prendido | Sin caché | Sin oclusión | Hilos con prioridad normal |
+|---|---|---|---|---|---|
+| p99 | 1,68 / 1,65 ms | 3,81 / 3,45 ms (barrido en el hilo principal) → 2,33 ms (en su hilo) | 2,88 ms | 2,09 ms | 3,17 ms |
+| peor subida | 9,1 / 9,7 ms | 19,9 / 24,3 ms | 8,8 ms | 18,2 ms | 22,6 ms |
+| columnas generadas | 72 410 / 72 468 | 62 469 / 62 426 | 72 694 | 62 217 | 62 527 |
+
+Lectura honesta: **el criterio de la Fase 1 para el vuelo no se cumplió** (se pedía p99 −30 % y
+peor subida ≤ 4 ms). El zoom de ida y vuelta sí (0 % la segunda vez, criterio ≤ 20 %), y el
+teletransporte bajó un 19 % hasta lo visible (criterio −30 %). Lo que subió el p99 del vuelo:
+(1) la caché entrega columnas sin esperar a los hilos, así que más cuadros suben el presupuesto
+entero (es trabajo que antes esperaba; las columnas llegan antes); (2) la oclusión costaba ~1 ms
+del p99 mientras el barrido corría en el hilo principal: se pasó a un hilo aparte. Los picos de
+"peor subida" (un solo cuadro de 18–24 ms con ~70 órdenes y ~100 KB) aparecen en `set_column` /
+`remove_column` del renderer (asignador del megabúfer y escrituras de lavapipe), no en el
+streamer; con un solo cuadro por corrida, el máximo es ruido de lavapipe hasta medirlo en placa.
+
+### 5.4 Presets (`motor --bench --calidad …`, vistas Península y Calle, 3 cuadros)
+
+| Preset | Niveles · anillo · sombras · MSAA | Columnas Península / Calle | Caras Península / Calle | Cuadro Península (sombra en caché) |
+|---|---|---|---|---|
+| Mínimo | 9 · 16 · 2×1024² · 1× | 1408 / 1757 | 0,33 / 0,42 M | 115 ms |
+| Bajo | 9 · 20 · 2×2048² · 1× | 2200 / 2710 | 0,41 / 0,57 M | 142 ms |
+| Medio | 10 · 24 · 3×2048² · 4× | 3600 / 4105 | 0,50 / 0,73 M | 239 ms |
+| Alto | 11 · 24 · 4×2048² · 4× | 4032 / 4160 | 0,54 / 0,73 M | 262 ms |
+| Ultra | 11 · 32 · 4×4096² · 4× | 7168 / 6887 | 0,76 / 1,04 M | 321 ms |
+
+Columnas y caras bajan de forma monótona de Ultra a Mínimo. Mínimo tiene el **61 %** de las caras
+de Alto en Península (el criterio pedía ≤ 50 %: con anillo de 16 el nivel 0 sigue teniendo la
+misma resolución; bajar más exige vóxeles más grandes de cerca o la Fase 3). En lavapipe la
+recomendación da **Mínimo** (adaptador `Cpu`).
+
+### 5.5 Pruebas nuevas
+
+`cache::` (límite de bytes con costo fijo, firmas, LRU), `stream::` (zoom de ida y vuelta sale de
+la caché y una edición rehace solo lo tocado; la malla de la caché es igual a la generada; **la
+oclusión nunca tapa una columna visible** con el relieve real en cuatro vistas rasantes y una
+desde arriba, comprobado con rayos contra el terreno; con oclusión el streamer termina y al subir
+genera lo que aparece), `relieve::` (loma, curvatura, cotas conservadoras contra el terreno
+muestreado cada 1–32 m en 900 zonas), `lod::` (cualquier anillo cubre todo una sola vez),
+`autoajuste::` (con vsync no baja nada; con objetivo mayor que el refresco nunca llega al piso y
+recupera de a un paso; espera creciente si pierde el tope; orden GPU y CPU; ignora cuadros no
+dibujados y el menú; no oscila; presets y recomendación) y `save::` (opciones viejas quedan en
+Personalizado sin cambios; preset aplicado ida y vuelta).
+
+### 5.6 Riesgos
+
+- Nada de esto se midió en una placa real: los presets, el auto-ajuste y el presupuesto de
+  subida en ms están calibrados a ciegas. `medir-fps.bat` debería registrar el preset
+  recomendado y la línea del auto-ajuste.
+- La oclusión es conservadora por construcción y probada con rayos, pero se reevalúa por pasos
+  (10 % de la altura del ojo): al orbitar rápido con la cámara rasante, una columna que deja de
+  estar tapada tarda lo que tarda en generarse (los niveles gruesos, que son los que se tapan,
+  se generan en milisegundos).
+- El auto-ajuste no se probó en una ventana real (acá no hay pantalla): sus decisiones están
+  cubiertas con series sintéticas.

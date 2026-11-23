@@ -342,7 +342,7 @@ mod tests {
     /// Columna de chunks del nivel `lod` que contiene el punto, con sus vecinas en el anillo.
     fn columna(lod: u32, x: f32, z: f32) -> Mesh {
         let (t, a) = mapa();
-        let spec = LevelSpec { lod };
+        let spec = LevelSpec::new(lod); // [lod]
         let cm = spec.chunk_m();
         let col = IVec2::new((x / cm).floor() as i32, (z / cm).floor() as i32);
         let ring: HashSet<IVec2> = (-1..=1).flat_map(|j| (-1..=1).map(move |i| col + IVec2::new(i, j))).collect();

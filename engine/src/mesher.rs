@@ -209,6 +209,7 @@ fn smooth_normal(tops: &[i32], cx: i32, cz: i32) -> [i8; 4] {
 
 /// Malla de una columna (o de un chunk): caras compactas agrupadas por dirección
 /// ([`DIRS`]), con posición relativa a `origin`, y caja envolvente.
+#[derive(Clone)] // [lod] la caché de columnas guarda copias (ver `cache.rs`)
 pub struct Mesh {
     pub quads: [Vec<Quad>; 6],
     /// Origen de la malla en metros y tamaño del vóxel.

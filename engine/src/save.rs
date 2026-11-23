@@ -340,6 +340,28 @@ pub struct Settings {
     /// por cara) o suave (laderas con la luz de la pendiente). Se aplica enseguida.
     #[serde(default = "si")]
     pub terreno_voxeles: bool,
+    /// [lod] Calidad de una sola perilla (ver `autoajuste::Calidad`). `None` = el jugador todavía
+    /// no eligió: al abrir el juego se recomienda una según el equipo. Las opciones guardadas
+    /// antes de los presets no tienen el campo: quedan en Personalizado, con sus valores.
+    #[serde(default = "personalizado")]
+    pub calidad: Option<crate::autoajuste::Calidad>,
+    /// [lod] Lado de los anillos de detalle en chunks (16 a 32, ver `lod::RINGS`).
+    pub anillo: i32,
+    /// [lod] Caché de columnas en RAM (MB).
+    pub cache_mb: u32,
+    /// [lod] Presupuesto de subida de mallas por cuadro (ms).
+    pub subida_ms: f32,
+    /// [lod] Hilos de generación (0 = núcleos lógicos − 1).
+    pub hilos: u32,
+    /// [lod] Cuadros por segundo que busca el auto-ajuste (nunca más que el refresco con vsync).
+    pub fps_objetivo: u32,
+    /// [lod] Auto-ajuste de las perillas según el cuello de botella (CPU o GPU).
+    #[serde(default = "si")]
+    pub autoajuste: bool,
+}
+
+fn personalizado() -> Option<crate::autoajuste::Calidad> {
+    Some(crate::autoajuste::Calidad::Personalizado)
 }
 
 fn si() -> bool {
@@ -361,7 +383,27 @@ fn voxel_cm() -> u32 {
 impl Default for Settings {
     fn default() -> Self {
         let q = crate::render::ShadowQuality::DEFAULT;
-        Settings { escala_interfaz: 1.0, sincronizacion_vertical: true, mostrar_fps: false, niveles: crate::lod::LEVELS, msaa: 0, autoguardado_meses: 12, voxel_cm: voxel_cm(), niveles_max: crate::lod::LEVELS, sombras_cascadas: q.cascades, sombras_resolucion: q.resolution, terreno_voxeles: true }
+        Settings {
+            escala_interfaz: 1.0,
+            sincronizacion_vertical: true,
+            mostrar_fps: false,
+            niveles: crate::lod::LEVELS,
+            msaa: 0,
+            autoguardado_meses: 12,
+            voxel_cm: voxel_cm(),
+            niveles_max: crate::lod::LEVELS,
+            sombras_cascadas: q.cascades,
+            sombras_resolucion: q.resolution,
+            terreno_voxeles: true,
+            // [lod] Lo de antes de los presets (anillo de 24, subida de 3 ms), sin elegir calidad.
+            calidad: None,
+            anillo: crate::lod::RING_CHUNKS,
+            cache_mb: crate::stream::CACHE_MB as u32,
+            subida_ms: 3.0,
+            hilos: 0,
+            fps_objetivo: 60,
+            autoajuste: true,
+        }
     }
 }
 
@@ -392,7 +434,38 @@ impl Settings {
         }
         let q = self.shadow_quality();
         (self.sombras_cascadas, self.sombras_resolucion) = (q.cascades, q.resolution);
+        // [lod]
+        self.anillo = crate::lod::LevelSpec::ring_valid(self.anillo);
+        self.cache_mb = self.cache_mb.clamp(16, 2048);
+        self.subida_ms = if self.subida_ms.is_finite() { self.subida_ms.clamp(0.5, 4.0) } else { 3.0 };
+        self.hilos = self.hilos.min(64);
+        self.fps_objetivo = self.fps_objetivo.clamp(20, 240);
         self
+    }
+
+    /// [lod] Aplica un preset de calidad (Personalizado no cambia nada). `nucleos`: núcleos
+    /// lógicos del equipo (para los hilos de generación).
+    pub fn aplicar_calidad(&mut self, c: crate::autoajuste::Calidad, nucleos: usize) {
+        self.calidad = Some(c);
+        let Some(p) = c.preset() else { return };
+        self.niveles = p.niveles;
+        self.anillo = p.anillo;
+        (self.sombras_cascadas, self.sombras_resolucion) = p.sombras;
+        self.msaa = p.msaa;
+        self.hilos = p.hilos(nucleos) as u32;
+        self.subida_ms = p.subida_ms;
+        self.fps_objetivo = p.fps_objetivo;
+        self.cache_mb = p.cache_mb;
+    }
+
+    /// [lod] Hilos de generación con `creados` hilos de trabajo disponibles.
+    pub fn hilos_para(&self, creados: usize) -> usize {
+        if self.hilos == 0 { creados } else { (self.hilos as usize).min(creados) }.max(1)
+    }
+
+    /// [lod] Techo de las perillas del auto-ajuste (lo que eligió el jugador o el preset).
+    pub fn techo(&self, creados: usize) -> crate::autoajuste::Perillas {
+        crate::autoajuste::Perillas::desde(self.niveles, self.anillo, (self.sombras_cascadas, self.sombras_resolucion), self.hilos_para(creados), self.subida_ms)
     }
 
     pub fn shadow_quality(&self) -> crate::render::ShadowQuality {
@@ -504,6 +577,25 @@ mod tests {
         assert_eq!(Settings::load(&d).niveles, crate::lod::LEVELS);
         std::fs::write(d.join("opciones.json"), r#"{"niveles": 7, "voxel_cm": 25}"#).unwrap();
         assert_eq!(Settings::load(&d).niveles, crate::lod::MAP_LEVELS);
+        // [lod] Opciones de antes de los presets: Personalizado, con sus valores y lo de antes
+        // (anillo de 24, auto-ajuste prendido); sin archivo, la calidad queda sin elegir.
+        std::fs::write(d.join("opciones.json"), r#"{"niveles": 10, "voxel_cm": 25, "niveles_max": 11, "sombras_cascadas": 3, "sombras_resolucion": 2048, "msaa": 1}"#).unwrap();
+        let v = Settings::load(&d);
+        assert_eq!(v.calidad, Some(crate::autoajuste::Calidad::Personalizado));
+        assert_eq!((v.niveles, v.sombras_cascadas, v.sombras_resolucion, v.msaa, v.anillo), (10, 3, 2048, 1, crate::lod::RING_CHUNKS));
+        assert!(v.autoajuste);
+        std::fs::remove_file(d.join("opciones.json")).unwrap();
+        assert_eq!(Settings::load(&d).calidad, None);
+        // Un preset aplicado se guarda y se carga igual; cada preset da otro techo.
+        let mut m = Settings::default();
+        m.aplicar_calidad(crate::autoajuste::Calidad::Minimo, 4);
+        assert_eq!((m.niveles, m.anillo, m.hilos, m.msaa), (9, 16, 1, 1));
+        m.store(&d).unwrap();
+        assert_eq!(Settings::load(&d), m);
+        let mut u = Settings::default();
+        u.aplicar_calidad(crate::autoajuste::Calidad::Ultra, 8);
+        assert_eq!((u.niveles, u.anillo, u.hilos, u.sombras_resolucion), (11, 32, 7, 4096));
+        assert_ne!(u.techo(7), m.techo(7));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

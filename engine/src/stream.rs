@@ -7,6 +7,7 @@
 //! calcula directamente. Fuera del anillo del nivel se considera aire, igual que antes: así
 //! los bordes entre niveles generan "faldones" que tapan grietas.
 
+use crate::cache::{CacheMallas, Firma};
 use crate::lod::{choose_first_level, level_columns_from, LevelSpec, CHUNK};
 use crate::mesher::{self, Mesh};
 use crate::palette::*;
@@ -50,6 +51,8 @@ struct Job {
     key: Key,
     version: u32,
     ring: Arc<HashSet<IVec2>>,
+    /// [lod] Firma con la que se genera (para guardarla en la caché).
+    firma: Firma,
 }
 impl PartialEq for Job {
     fn eq(&self, o: &Self) -> bool {
@@ -74,6 +77,9 @@ pub struct ColumnResult {
     pub version: u32,
     pub prio: f32,
     pub mesh: Mesh,
+    /// [lod] Firma de la malla y si salió de la caché (entonces no hace falta guardarla).
+    pub firma: Firma,
+    pub from_cache: bool,
 }
 
 struct Shared {
@@ -81,6 +87,9 @@ struct Shared {
     cv: Condvar,
     quit: AtomicBool,
     in_flight: AtomicUsize,
+    /// [lod] Hilos que pueden estar generando a la vez (perilla del auto-ajuste: el semáforo
+    /// ajustable de `GenerationTaskScheduler` del mod). Bajarlo no corta trabajos en curso.
+    limit: AtomicUsize,
 }
 
 /// Cambios para el renderer.
@@ -93,6 +102,15 @@ pub enum Op {
 pub struct Stats {
     pub columns_built: usize,
     pub uploads: usize,
+    /// [lod] Columnas que salieron de la caché en vez de generarse.
+    pub cache_hits: usize,
+    /// [lod] Columnas que no se generaron porque el relieve las tapa (o quedan bajo el horizonte).
+    pub hidden_skipped: usize,
+    /// [lod] Evaluaciones de la oclusión por relieve y su peor tiempo (ms, hilo principal).
+    pub occl_evals: usize,
+    pub occl_ms_max: f64,
+    /// [lod] Peor tiempo del barrido en su hilo (ms).
+    pub occl_thread_ms_max: f64,
 }
 
 pub struct Streamer {
@@ -108,20 +126,108 @@ pub struct Streamer {
     center: Vec2,
     /// Nivel más fino que se genera (LOD por tamaño en pantalla).
     pub first: u32,
+    /// [lod] Niveles en uso (los más gruesos se pueden apagar en caliente).
+    active: u32,
     shared: Arc<Shared>,
     rx: Receiver<ColumnResult>,
     workers: Vec<JoinHandle<()>>,
     pub stats: Stats,
+    /// [lod] Caché de mallas en RAM (zoom y paneos de ida y vuelta sin regenerar).
+    pub cache: CacheMallas,
+    /// [lod] Generación de ediciones por columna (sube con cada edición que la toca o toca una
+    /// vecina a menos de dos columnas): parte de la firma de la caché.
+    edit_gen: FxMap<Key, u32>,
+    /// [lod] Columnas que esperan en `uploads` con su versión (salidas de la caché).
+    staged: FxMap<Key, u32>,
+    /// [lod] Firma de la malla que está en la GPU (al retirarla se marca como recién usada).
+    shown: FxMap<Key, Firma>,
+    /// [lod] Ojo y mirada horizontal (normalizada) de la cámara, para la prioridad por vista y la
+    /// oclusión por relieve; y la mirada con la que se ordenó la cola por última vez.
+    view: Option<(Vec3, Vec2)>,
+    queued_dir: Vec2,
+    /// [lod] Ritmo de subida: presupuesto en ms por cuadro y costo medido por byte.
+    pub ritmo: RitmoSubida,
+    /// [lod] Oclusión por relieve antes de generar (Fase 2): columnas queridas que no se generan
+    /// porque el relieve o el horizonte las tapan, y el ojo con el que se evaluó.
+    hidden: FxSet<Key>,
+    /// [lod] Tapadas que pueden tirar sombra: se generan, pero al final.
+    postpone: FxSet<Key>,
+    occl_eye: Option<Vec3>,
+    pub occlusion: bool,
+    /// [lod] Cajas de la oclusión ya calculadas (las cotas de una columna no cambian salvo con
+    /// ediciones: se vacía con cada edición).
+    boxes: FxMap<Key, crate::relieve::Caja>,
+    /// [lod] Barrido de la oclusión en un hilo aparte (en las pruebas, en el mismo hilo).
+    pub occl_sync: bool,
+    occl_tx: Option<std::sync::mpsc::Sender<(u64, Vec2, f32, Vec<Key>, Vec<crate::relieve::Caja>)>>,
+    occl_rx: Option<Receiver<(u64, Vec<Key>, Vec<bool>, f64)>>,
+    occl_pending: bool,
+    occl_again: bool,
+    occl_epoch: u64,
+    relief: Option<Arc<crate::relieve::Relieve>>,
+    relief_rx: Option<Receiver<Arc<crate::relieve::Relieve>>>,
+    terrain: Arc<TerrainGen>,
 }
+
+/// [lod] Presupuesto de subida por cuadro en tiempo: cuántos bytes de mallas entran en `ms`
+/// según lo que tardaron las subidas anteriores (media móvil del costo por byte).
+#[derive(Clone, Copy, Debug)]
+pub struct RitmoSubida {
+    pub ms: f64,
+    pub ns_por_byte: f64,
+}
+
+impl Default for RitmoSubida {
+    fn default() -> Self {
+        RitmoSubida { ms: 2.0, ns_por_byte: 1.0 }
+    }
+}
+
+impl RitmoSubida {
+    /// Bytes que entran en el presupuesto (nunca menos de 64 KB: siempre sube algo).
+    pub fn bytes(&self) -> usize {
+        ((self.ms * 1e6 / self.ns_por_byte.max(0.01)) as usize).max(64 * 1024)
+    }
+    /// Suma una medida (subida de `bytes` en `ms`); las chicas no dicen nada del costo.
+    pub fn medir(&mut self, bytes: u64, ms: f64) {
+        if bytes >= 32 * 1024 {
+            let x = ms * 1e6 / bytes as f64;
+            self.ns_por_byte = 0.8 * self.ns_por_byte + 0.2 * x;
+        }
+    }
+}
+
+/// [lod] Bytes que se suben a la GPU con una malla.
+pub fn upload_bytes(m: &Mesh) -> usize {
+    m.quad_count() * std::mem::size_of::<crate::mesher::Quad>() + m.detail.len() * std::mem::size_of::<crate::trees::Micro>()
+}
+
+/// [lod] Presupuesto de la caché por omisión (preset Medio).
+pub const CACHE_MB: usize = 128;
+/// [lod] Coseno del medio ángulo horizontal que cuenta como "en la vista" para la prioridad
+/// (50°: la vista de 16:9 con 50° verticales mide ~39° de medio ancho, más margen).
+const COS_VISTA: f32 = 0.643;
+/// [lod] Reordenar la cola cuando la mirada gira más que esto (coseno de 15°).
+const COS_REORDEN: f32 = 0.966;
+/// [lod] Margen de altura de lo dibujado sobre el terreno en una columna sin obras: árboles
+/// (los más altos, ~20 m) y copas del monte.
+const TREE_ALLOWANCE: f32 = 25.0;
+/// [lod] Copas del monte en los niveles sin árboles sueltos (`forest_canopy`: hasta ~10,4 m).
+const CANOPY_ALLOWANCE: f32 = 11.0;
+/// [lod] Niveles que dibujan los pases de sombra (hasta 16 m por vóxel en las cascadas grandes,
+/// `render::SHADOW_FAR_LOD`) y alcance de las cascadas (~5 km de medio lado en el Cerro).
+const SHADOW_CASTER_LOD: u32 = 6;
+const SHADOW_REACH: f32 = 6000.0;
 
 impl Streamer {
     pub fn new(terrain: Arc<TerrainGen>, store: Arc<RwLock<EditStore>>, levels: u32, threads: usize) -> Streamer {
-        let specs: Vec<LevelSpec> = (0..levels).map(|lod| LevelSpec { lod }).collect();
-        let shared = Arc::new(Shared { queue: Mutex::new(BinaryHeap::new()), cv: Condvar::new(), quit: AtomicBool::new(false), in_flight: AtomicUsize::new(0) });
+        let specs: Vec<LevelSpec> = (0..levels).map(LevelSpec::new).collect();
+        let shared = Arc::new(Shared { queue: Mutex::new(BinaryHeap::new()), cv: Condvar::new(), quit: AtomicBool::new(false), in_flight: AtomicUsize::new(0), limit: AtomicUsize::new(threads.max(1)) });
         let (tx, rx) = sync_channel(MAX_READY);
         let mut workers = Vec::new();
         // [agua en vóxeles] Niveles del agua de los arroyos (una vez por mapa).
         let arroyos = Arc::new(crate::agua::Arroyos::new(&terrain));
+        let terrain_keep = terrain.clone();
         for _ in 0..threads.max(1) {
             let (sh, tx, t, s, specs): (Arc<Shared>, SyncSender<ColumnResult>, Arc<TerrainGen>, Arc<RwLock<EditStore>>, Vec<LevelSpec>) = (shared.clone(), tx.clone(), terrain.clone(), store.clone(), specs.clone());
             let a = arroyos.clone();
@@ -139,11 +245,335 @@ impl Streamer {
             next_version: 1,
             center: Vec2::ZERO,
             first: 0,
+            active: levels.max(1),
             shared,
             rx,
             workers,
             stats: Stats::default(),
+            // `MOTOR_SIN_CACHE=1` la apaga (para medir antes y después con el mismo binario).
+            cache: CacheMallas::new(if std::env::var("MOTOR_SIN_CACHE").is_ok() { 0 } else { CACHE_MB << 20 }),
+            edit_gen: FxMap::default(),
+            staged: FxMap::default(),
+            shown: FxMap::default(),
+            view: None,
+            queued_dir: Vec2::ZERO,
+            ritmo: RitmoSubida::default(),
+            hidden: FxSet::default(),
+            postpone: FxSet::default(),
+            occl_eye: None,
+            boxes: FxMap::default(),
+            occl_sync: false,
+            occl_tx: None,
+            occl_rx: None,
+            occl_pending: false,
+            occl_again: false,
+            occl_epoch: 0,
+            occlusion: std::env::var("MOTOR_SIN_OCLUSION").is_err(),
+            relief: None,
+            relief_rx: None,
+            terrain: terrain_keep,
         }
+    }
+
+    /// [lod] Cambia el lado de los anillos (perilla de calidad): recentra con el anillo nuevo.
+    /// Lo viejo se retira recién cuando lo nuevo lo cubre, como al mover la cámara.
+    pub fn set_ring(&mut self, ring: i32) {
+        let ring = LevelSpec::ring_valid(ring);
+        if self.specs.first().is_some_and(|s| s.ring == ring) {
+            return;
+        }
+        for s in &mut self.specs {
+            s.ring = ring;
+        }
+        self.regions.clear();
+        let (c, f) = (self.center, self.first);
+        if !self.sets.is_empty() {
+            self.update_with(c, f);
+        }
+    }
+
+    /// [lod] Niveles en uso (1 a los creados): sacar los más gruesos achica el alcance.
+    pub fn set_active_levels(&mut self, n: u32) {
+        let n = n.clamp(1, self.specs.len() as u32);
+        if n == self.active {
+            return;
+        }
+        self.active = n;
+        self.regions.clear();
+        let (c, f) = (self.center, self.first);
+        if !self.sets.is_empty() {
+            self.update_with(c, f);
+        }
+    }
+
+    pub fn active_levels(&self) -> u32 {
+        self.active
+    }
+
+    pub fn ring(&self) -> i32 {
+        self.specs.first().map_or(crate::lod::RING_CHUNKS, |s| s.ring)
+    }
+
+    /// [lod] Hilos de trabajo que pueden generar a la vez (1 a los creados).
+    pub fn set_concurrency(&self, n: usize) {
+        self.shared.limit.store(n.clamp(1, self.workers.len().max(1)), AtOrd::SeqCst);
+        self.shared.cv.notify_all();
+    }
+
+    pub fn concurrency(&self) -> usize {
+        self.shared.limit.load(AtOrd::SeqCst)
+    }
+
+    pub fn threads(&self) -> usize {
+        self.workers.len()
+    }
+
+    /// [lod] Firma con la que se generaría hoy la columna: vecinas en el anillo y ediciones.
+    fn firma(&self, key: Key) -> Firma {
+        let mut vecinas = 0u8;
+        if let Some(set) = self.sets.get(key.0 as usize) {
+            let mut bit = 0;
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    if dx == 0 && dz == 0 {
+                        continue;
+                    }
+                    if set.contains(&(key.1 + IVec2::new(dx, dz))) {
+                        vecinas |= 1 << bit;
+                    }
+                    bit += 1;
+                }
+            }
+        }
+        Firma { vecinas, ediciones: self.edit_gen.get(&key).copied().unwrap_or(0) }
+    }
+
+    /// [lod] Un trabajo para la cola, o la malla de la caché si está con la firma de hoy.
+    fn job_or_cached(&mut self, key: Key, version: u32, prio: f32) -> Option<Job> {
+        if self.staged.get(&key) == Some(&version) {
+            return None;
+        }
+        let firma = self.firma(key);
+        if let Some(mesh) = self.cache.sacar(key, firma) {
+            self.stats.cache_hits += 1;
+            self.staged.insert(key, version);
+            self.uploads.push(ColumnResult { key, version, prio, mesh, firma, from_cache: true });
+            return None;
+        }
+        Some(Job { prio, key, version, ring: self.sets[key.0 as usize].clone(), firma })
+    }
+
+    /// [lod] Ojo de la cámara y mirada (para la prioridad por vista y la oclusión por relieve).
+    pub fn set_view(&mut self, eye: Vec3, look: Vec2) {
+        let dir = look.try_normalize().unwrap_or(Vec2::NEG_Y);
+        self.view = Some((eye, dir));
+    }
+
+    /// [lod] Empieza a armar la pirámide del relieve en un hilo aparte (si no está ya): la
+    /// partida la pide al crearse, así la oclusión está lista cuando llega la primera vista.
+    pub fn prewarm_relief(&mut self) {
+        if self.occlusion && self.relief.is_none() && self.relief_rx.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let t = self.terrain.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::relieve::obtener(&t));
+            });
+            self.relief_rx = Some(rx);
+        }
+    }
+
+    /// [lod] Devuelve la malla que se acaba de subir a la GPU (`Op::Set`): queda en la caché sin
+    /// copiarla, por si la columna sale de los anillos y vuelve.
+    pub fn give_back(&mut self, key: Key, mesh: Mesh) {
+        if let Some(&f) = self.shown.get(&key) {
+            self.cache.guardar_propia(key, f, mesh);
+        }
+    }
+
+    /// [lod] Columnas queridas que ahora no se generan porque el relieve las tapa.
+    pub fn hidden_count(&self) -> usize {
+        self.hidden.len()
+    }
+
+    /// [lod] Una columna tapada que puede tirar sombra sobre lo visible (niveles que dibujan los
+    /// pases de sombra, dentro del alcance de las cascadas) no se saltea: va al final de la cola.
+    fn shadow_caster(&self, key: Key) -> bool {
+        if key.0 > SHADOW_CASTER_LOD {
+            return false;
+        }
+        let cm = self.specs[key.0 as usize].chunk_m();
+        let c = Vec2::new((key.1.x as f32 + 0.5) * cm, (key.1.y as f32 + 0.5) * cm);
+        c.distance(self.center) < SHADOW_REACH + cm
+    }
+
+    fn postponed(&self, key: Key) -> f32 {
+        if self.postpone.contains(&key) {
+            1.0e7
+        } else {
+            0.0
+        }
+    }
+
+    /// [lod] Recibe la pirámide de cotas del relieve cuando el hilo que la arma termina.
+    fn poll_relief(&mut self) {
+        let Some(rx) = &self.relief_rx else { return };
+        if let Ok(r) = rx.try_recv() {
+            self.relief = Some(r);
+            self.relief_rx = None;
+            if self.update_occlusion(true) {
+                self.requeue_all();
+            }
+        }
+    }
+
+    /// [lod] Vuelve a decidir qué columnas tapa el relieve si el ojo se movió lo suficiente (o
+    /// `force`, al recentrar). Devuelve si cambió algo (hay que rehacer la cola).
+    ///
+    /// Conservador: se evalúa con el ojo un 15 % más alto (por lo menos 3 m) y se vuelve a
+    /// evaluar cuando el ojo se mueve un 10 % de su altura sobre el suelo; las columnas nunca se
+    /// tapan a menos de 300 m del ojo ni con el ojo bajo el terreno; solo tapan las que no tienen
+    /// obras; y las que ya se generaron no se quitan (las descarta el Hi-Z al dibujar).
+    fn update_occlusion(&mut self, force: bool) -> bool {
+        let Some((eye, _)) = self.view.filter(|_| self.occlusion) else { return false };
+        let Some(relief) = self.relief.clone() else {
+            self.prewarm_relief();
+            return false;
+        };
+        let ground = self.terrain.height(eye.x, eye.z);
+        let above = eye.y - ground.max(0.0);
+        if let Some(p) = self.occl_eye {
+            if !force && (eye - p).length() < 0.1 * above.max(0.0) + 1.0 {
+                return false;
+            }
+        }
+        self.occl_eye = Some(eye);
+        let t_occl = std::time::Instant::now();
+        if eye.y < ground + 1.0 {
+            // Con el ojo bajo el terreno no se tapa nada (y se descarta lo que esté en vuelo).
+            self.occl_epoch += 1;
+            let changed = !self.hidden.is_empty() || !self.postpone.is_empty();
+            self.hidden.clear();
+            self.postpone.clear();
+            return changed;
+        }
+        let e = eye.y + (0.15 * above).max(3.0);
+        let keys: Vec<Key> = self.versions.keys().copied().collect();
+        let mut cajas = Vec::with_capacity(keys.len());
+        {
+            let store = self.store.read().unwrap();
+            if self.boxes.len() > 50_000 {
+                self.boxes.clear();
+            }
+            for &key in &keys {
+                if let Some(c) = self.boxes.get(&key) {
+                    cajas.push(*c);
+                    continue;
+                }
+                let spec = self.specs[key.0 as usize];
+                let cm = spec.chunk_m();
+                let (x0, z0) = (key.1.x as f32 * cm, key.1.y as f32 * cm);
+                let (x1, z1) = (x0 + cm, z0 + cm);
+                let edit = store.levels.get(key.0 as usize).and_then(|l| l.max_y.get(&key.1)).copied();
+                let caja = match relief.cotas(x0, z0, x1, z1) {
+                    Some((lo, hi)) => {
+                        let vs = spec.voxel();
+                        // Lo dibujado: la cara de arriba queda a medio vóxel de la altura, la tierra
+                        // firme por lo menos un vóxel sobre el agua (3 m en los niveles con la
+                        // malla bajada, `lod::far_drop`), el agua con la marea, los árboles (hasta
+                        // 4 m por vóxel, mapa real), las copas del monte (un vóxel más en los
+                        // niveles gruesos) y las obras.
+                        // La cara de arriba es una función creciente de la altura: la de las
+                        // cotas acota la de todo lo de adentro.
+                        let drop = crate::lod::far_drop(key.0);
+                        let face = |h: f32| if drop > 0.0 { (top_from_height_far(h, vs, drop) + 1) as f32 * vs - drop } else { (top_from_height(h, vs) + 1) as f32 * vs };
+                        let mut top = face(hi).max(3.0);
+                        if self.terrain.is_real() {
+                            if vs <= TREE_MAX_VOXEL {
+                                top += TREE_ALLOWANCE;
+                            } else if relief.monte(x0, z0, x1, z1) {
+                                top += CANOPY_ALLOWANCE + vs;
+                            }
+                        }
+                        if let Some(my) = edit {
+                            top = top.max((my + 1) as f32 * vs + vs);
+                        }
+                        crate::relieve::Caja { x0, z0, x1, z1, lo: face(lo), hi: top, oclusor: edit.is_none() }
+                    }
+                    None => crate::relieve::Caja { x0, z0, x1, z1, lo: f32::MIN, hi: f32::MAX, oclusor: false },
+                };
+                self.boxes.insert(key, caja);
+                cajas.push(caja);
+            }
+        }
+        let ojo = Vec2::new(eye.x, eye.z);
+        if self.occl_sync {
+            let out = crate::relieve::ocultas(ojo, e, &cajas, 300.0, 150.0);
+            self.stats.occl_evals += 1;
+            self.stats.occl_ms_max = self.stats.occl_ms_max.max(t_occl.elapsed().as_secs_f64() * 1000.0);
+            return self.apply_occlusion(&keys, &out);
+        }
+        // En la ventana, el barrido corre en un hilo aparte (no traba el cuadro); el resultado
+        // se aplica al llegar (`poll_occlusion`). Si ya hay uno en vuelo, se pide otro después.
+        if self.occl_pending {
+            self.occl_again = true;
+            return false;
+        }
+        if self.occl_tx.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<(u64, Vec2, f32, Vec<Key>, Vec<crate::relieve::Caja>)>();
+            let (rtx, rrx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                for (epoch, ojo, e, keys, cajas) in rx {
+                    let t0 = std::time::Instant::now();
+                    let out = crate::relieve::ocultas(ojo, e, &cajas, 300.0, 150.0);
+                    if rtx.send((epoch, keys, out, t0.elapsed().as_secs_f64() * 1000.0)).is_err() {
+                        break;
+                    }
+                }
+            });
+            self.occl_tx = Some(tx);
+            self.occl_rx = Some(rrx);
+        }
+        self.occl_pending = true;
+        let _ = self.occl_tx.as_ref().unwrap().send((self.occl_epoch, ojo, e, keys, cajas));
+        self.stats.occl_ms_max = self.stats.occl_ms_max.max(t_occl.elapsed().as_secs_f64() * 1000.0);
+        false
+    }
+
+    /// [lod] Aplica un resultado de la oclusión (en hilo aparte); rehace la cola si cambió algo.
+    fn poll_occlusion(&mut self) {
+        let Some(rx) = &self.occl_rx else { return };
+        let Ok((epoch, keys, out, ms)) = rx.try_recv() else { return };
+        self.occl_pending = false;
+        self.stats.occl_evals += 1;
+        self.stats.occl_thread_ms_max = self.stats.occl_thread_ms_max.max(ms);
+        let changed = epoch == self.occl_epoch && self.apply_occlusion(&keys, &out);
+        if std::mem::take(&mut self.occl_again) {
+            self.occl_eye = None;
+            self.update_occlusion(true);
+        }
+        if changed {
+            self.requeue_all();
+        }
+    }
+
+    /// [lod] Nuevos conjuntos de tapadas y postergadas a partir del barrido; devuelve si cambió.
+    fn apply_occlusion(&mut self, keys: &[Key], out: &[bool]) -> bool {
+        let (old_h, old_p) = (std::mem::take(&mut self.hidden), std::mem::take(&mut self.postpone));
+        for (i, &key) in keys.iter().enumerate() {
+            // Solo lo que se sigue queriendo y todavía no se generó.
+            if !out[i] || !self.versions.contains_key(&key) || self.ready.get(&key) == self.versions.get(&key) {
+                continue;
+            }
+            if self.shadow_caster(key) {
+                self.postpone.insert(key);
+            } else {
+                if !old_h.contains(&key) {
+                    self.stats.hidden_skipped += 1;
+                }
+                self.hidden.insert(key);
+            }
+        }
+        self.hidden != old_h || self.postpone != old_p
     }
 
     fn bump(&mut self, key: Key) {
@@ -154,22 +584,37 @@ impl Streamer {
     fn prio(&self, key: Key) -> f32 {
         let cm = self.specs[key.0 as usize].chunk_m();
         let c = Vec2::new((key.1.x as f32 + 0.5) * cm, (key.1.y as f32 + 0.5) * cm);
-        c.distance(self.center) + key.0 as f32
+        // [lod] Prioridad por vista (`PrioridadVista` del mod): lo que está fuera del cono de la
+        // mirada pesa más cuanto más atrás queda (hasta 4× justo detrás). Lo cercano al ojo no.
+        let mut f = 1.0;
+        if let Some((eye, dir)) = self.view {
+            let d = c - Vec2::new(eye.x, eye.z);
+            let len = d.length();
+            if len > 2.0 * cm {
+                let cos = d.dot(dir) / len;
+                if cos < COS_VISTA {
+                    f += 1.83 * (COS_VISTA - cos);
+                }
+            }
+        }
+        c.distance(self.center) * f + key.0 as f32
     }
 
     /// Recentra los anillos y elige el nivel más fino según la altura de la cámara sobre el
     /// terreno, para no generar detalle que mediría menos de medio píxel.
     pub fn update_view(&mut self, center: Vec2, eye_height: f32, fov_y: f32, view_h: f32) {
-        let first = choose_first_level(self.first, eye_height, fov_y, view_h, self.specs.len() as u32);
+        let first = choose_first_level(self.first, eye_height, fov_y, view_h, self.active);
         self.update_with(center, first);
     }
 
     /// Centro de los anillos de detalle y radio del círculo que el último anillo cubre seguro
-    /// (m): el anillo es un cuadrado de [`crate::lod::RING_CHUNKS`] chunks alineado de a dos,
+    /// (m): el anillo es un cuadrado de `ring` chunks (ver [`LevelSpec`]) alineado de a dos,
     /// así el centro puede quedar hasta un chunk corrido.
     pub fn reach(&self) -> (Vec2, f32) {
-        let last = self.specs.last().map_or(0.0, |s| s.chunk_m());
-        (self.center, (crate::lod::RING_CHUNKS / 2 - 1) as f32 * last)
+        let last_spec = self.specs.get(self.active as usize - 1);
+        let last = last_spec.map_or(0.0, |s| s.chunk_m());
+        let ring = last_spec.map_or(crate::lod::RING_CHUNKS, |s| s.ring);
+        (self.center, (ring / 2 - 1) as f32 * last)
     }
 
     /// Recentra los anillos de detalle si la cámara se movió lo suficiente (todos los niveles).
@@ -181,12 +626,20 @@ impl Streamer {
     fn update_with(&mut self, center: Vec2, first: u32) {
         self.center = center;
         let mut regions: Vec<(IVec2, IVec2)> = self.specs.iter().map(|s| s.region(center)).collect();
-        regions.push((IVec2::splat(first as i32), IVec2::ZERO));
+        regions.push((IVec2::new(first as i32, self.active as i32), IVec2::ZERO));
         if regions == self.regions {
+            // [lod] Sin recentrar: la cola se reordena si la mirada giró o la oclusión cambió.
+            let rotated = self.view.is_some_and(|(_, d)| d.dot(self.queued_dir) < COS_REORDEN);
+            if self.update_occlusion(false) || rotated {
+                self.requeue_all();
+            }
             return;
         }
+        // [lod] Solo los niveles activos (perilla del auto-ajuste); los demás quedan vacíos.
+        let first = first.min(self.active - 1);
         self.first = first;
-        let cols = level_columns_from(&self.specs, center, first);
+        let mut cols = level_columns_from(&self.specs[..self.active as usize], center, first);
+        cols.resize(self.specs.len(), Vec::new());
         let mut new_sets = Vec::new();
         for (li, list) in cols.into_iter().enumerate() {
             let lod = li as u32;
@@ -196,6 +649,8 @@ impl Streamer {
             let removed: Vec<IVec2> = old.difference(&new).copied().collect();
             for c in &removed {
                 self.versions.remove(&(lod, *c));
+                self.hidden.remove(&(lod, *c));
+                self.postpone.remove(&(lod, *c));
                 if self.ready.contains_key(&(lod, *c)) {
                     self.retired.insert((lod, *c));
                 }
@@ -223,29 +678,40 @@ impl Streamer {
         }
         self.sets = new_sets;
         self.regions = regions;
+        self.update_occlusion(true);
         self.requeue_all();
     }
 
     /// Rehace la cola con todo lo que falta, ordenado por cercanía a la cámara actual.
     fn requeue_all(&mut self) {
         let mut jobs = BinaryHeap::new();
-        for (&key, &v) in &self.versions {
-            if self.ready.get(&key) != Some(&v) {
-                jobs.push(Job { prio: self.prio(key), key, version: v, ring: self.sets[key.0 as usize].clone() });
+        let todo: Vec<(Key, u32)> = self.versions.iter().filter(|(k, v)| self.ready.get(k) != Some(v) && !self.hidden.contains(k)).map(|(k, v)| (*k, *v)).collect();
+        for (key, v) in todo {
+            let prio = self.prio(key) + self.postponed(key);
+            if let Some(j) = self.job_or_cached(key, v, prio) {
+                jobs.push(j);
             }
         }
         *self.shared.queue.lock().unwrap() = jobs;
+        self.queued_dir = self.view.map_or(Vec2::ZERO, |v| v.1);
         self.shared.cv.notify_all();
     }
 
     fn enqueue(&mut self, keys: &[Key], urgent: bool) {
-        let mut q = self.shared.queue.lock().unwrap();
+        let mut jobs = Vec::new();
         for &key in keys {
             if let Some(&v) = self.versions.get(&key) {
+                // Una edición se ve aunque la columna estuviera tapada: se genera igual.
+                self.hidden.remove(&key);
+                self.postpone.remove(&key);
                 let prio = if urgent { -1.0 + key.0 as f32 * 0.01 } else { self.prio(key) };
-                q.push(Job { prio, key, version: v, ring: self.sets[key.0 as usize].clone() });
+                if let Some(j) = self.job_or_cached(key, v, prio) {
+                    jobs.push(j);
+                }
             }
         }
+        let mut q = self.shared.queue.lock().unwrap();
+        q.extend(jobs);
         drop(q);
         self.shared.cv.notify_all();
     }
@@ -259,6 +725,18 @@ impl Streamer {
 
     fn requeue_touched(&mut self, touched: Vec<HashSet<IVec2>>, urgent: bool) -> Vec<Key> {
         let mut keys = Vec::new();
+        // [lod] La caché deja de servir para las tocadas y sus vecinas hasta dos columnas (los
+        // bordes y los árboles talados por una obra cercana); las cajas de la oclusión, tampoco.
+        self.boxes.clear();
+        for (li, set) in touched.iter().enumerate() {
+            for c in set {
+                for dz in -2..=2 {
+                    for dx in -2..=2 {
+                        *self.edit_gen.entry((li as u32, *c + IVec2::new(dx, dz))).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
         for (li, set) in touched.into_iter().enumerate() {
             for c in set {
                 let key = (li as u32, c);
@@ -302,6 +780,14 @@ impl Streamer {
     /// Recibe columnas terminadas y devuelve cambios para la GPU, con un presupuesto de
     /// vértices por cuadro (para no trabar la imagen).
     pub fn poll(&mut self, vertex_budget: usize) -> Vec<Op> {
+        self.poll_budget(vertex_budget, usize::MAX)
+    }
+
+    /// [lod] Igual que [`poll`], con un tope de vértices **y** uno de bytes por cuadro (el de
+    /// bytes sale del ritmo de subida medido, ver [`RitmoSubida`]). Siempre sube al menos una.
+    pub fn poll_budget(&mut self, vertex_budget: usize, byte_budget: usize) -> Vec<Op> {
+        self.poll_relief();
+        self.poll_occlusion();
         while let Ok(r) = self.rx.try_recv() {
             self.stats.columns_built += 1;
             if self.versions.get(&r.key) == Some(&r.version) {
@@ -312,15 +798,21 @@ impl Streamer {
         self.uploads.sort_by(|a, b| b.prio.partial_cmp(&a.prio).unwrap_or(Ordering::Equal));
         let mut ops = Vec::new();
         let mut used = 0usize;
+        let mut bytes = 0usize;
         while let Some(r) = self.uploads.pop() {
+            if r.from_cache {
+                self.staged.remove(&r.key);
+            }
             if self.versions.get(&r.key) != Some(&r.version) {
                 continue;
             }
             used += r.mesh.quad_count().max(1) * 4;
+            bytes += upload_bytes(&r.mesh);
             self.ready.insert(r.key, r.version);
             self.stats.uploads += 1;
+            self.shown.insert(r.key, r.firma);
             ops.push(Op::Set(r.key, r.mesh));
-            if used >= vertex_budget {
+            if used >= vertex_budget || bytes >= byte_budget {
                 break;
             }
         }
@@ -341,6 +833,9 @@ impl Streamer {
             for key in done {
                 self.retired.remove(&key);
                 self.ready.remove(&key);
+                if let Some(f) = self.shown.remove(&key) {
+                    self.cache.tocar(key, f);
+                }
                 ops.push(Op::Remove(key));
             }
         }
@@ -394,7 +889,8 @@ impl Streamer {
     fn is_current(&self, key: Key) -> bool {
         match self.versions.get(&key) {
             None => true,
-            Some(v) => self.ready.get(&key) == Some(v),
+            // [lod] Una columna tapada por el relieve no se genera: no hace esperar a nadie.
+            Some(v) => self.ready.get(&key) == Some(v) || self.hidden.contains(&key),
         }
     }
 
@@ -425,6 +921,25 @@ impl Streamer {
     pub fn wanted_columns(&self) -> usize {
         self.versions.len()
     }
+
+    /// [lod] Columnas queridas que todavía no están en la GPU con su versión al día y cuyo
+    /// centro cae en el cono horizontal de la vista (`dir` normalizada, `cos_half` = coseno del
+    /// medio ángulo) o a menos de un chunk del ojo. Para medir "lo visible listo" en el banco.
+    pub fn missing_in_view(&self, eye: Vec2, dir: Vec2, cos_half: f32) -> usize {
+        self.versions
+            .keys()
+            .filter(|&&key| {
+                if self.is_current(key) {
+                    return false;
+                }
+                let cm = self.specs[key.0 as usize].chunk_m();
+                let c = Vec2::new((key.1.x as f32 + 0.5) * cm, (key.1.y as f32 + 0.5) * cm);
+                let d = c - eye;
+                let len = d.length();
+                len < cm || d.dot(dir) >= cos_half * len
+            })
+            .count()
+    }
 }
 
 impl Drop for Streamer {
@@ -444,6 +959,11 @@ impl Drop for Streamer {
 }
 
 fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen>, arroyos: Arc<crate::agua::Arroyos>, store: Arc<RwLock<EditStore>>, specs: Vec<LevelSpec>) {
+    // [lod] Los hilos de generación, debajo del hilo principal (el que dibuja): en 4 núcleos
+    // compiten con él (idea del mod, 0.25.4). `MOTOR_HILOS_NORMALES=1` lo apaga para medir.
+    if std::env::var("MOTOR_HILOS_NORMALES").is_err() {
+        lower_thread_priority();
+    }
     loop {
         let job = {
             let mut q = sh.queue.lock().unwrap();
@@ -451,9 +971,12 @@ fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen
                 if sh.quit.load(AtOrd::SeqCst) {
                     return;
                 }
-                if let Some(j) = q.pop() {
-                    sh.in_flight.fetch_add(1, AtOrd::SeqCst);
-                    break j;
+                // [lod] Con el límite de concurrencia lleno, se espera aunque haya trabajo.
+                if sh.in_flight.load(AtOrd::SeqCst) < sh.limit.load(AtOrd::SeqCst) {
+                    if let Some(j) = q.pop() {
+                        sh.in_flight.fetch_add(1, AtOrd::SeqCst);
+                        break j;
+                    }
                 }
                 q = sh.cv.wait(q).unwrap();
             }
@@ -462,8 +985,37 @@ fn worker(sh: Arc<Shared>, tx: SyncSender<ColumnResult>, terrain: Arc<TerrainGen
             let s = store.read().unwrap();
             build_column(&terrain, &arroyos, &s, specs[job.key.0 as usize], job.key.1, &job.ring)
         };
-        let _ = tx.send(ColumnResult { key: job.key, version: job.version, prio: job.prio, mesh });
+        let _ = tx.send(ColumnResult { key: job.key, version: job.version, prio: job.prio, mesh, firma: job.firma, from_cache: false });
         sh.in_flight.fetch_sub(1, AtOrd::SeqCst);
+        sh.cv.notify_one();
+    }
+}
+
+/// [lod] Baja la prioridad del hilo actual ante el planificador del sistema (Linux: `nice` del
+/// hilo +5; Windows: debajo de lo normal). Sin efecto en otros sistemas.
+fn lower_thread_priority() {
+    #[cfg(target_os = "linux")]
+    {
+        extern "C" {
+            fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+            fn gettid() -> i32;
+        }
+        // PRIO_PROCESS con el id del hilo: en Linux la prioridad es por hilo.
+        unsafe {
+            let _ = setpriority(0, gettid() as u32, 5);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetCurrentThread() -> isize;
+            fn SetThreadPriority(thread: isize, priority: i32) -> i32;
+        }
+        // THREAD_PRIORITY_BELOW_NORMAL
+        unsafe {
+            let _ = SetThreadPriority(GetCurrentThread(), -1);
+        }
     }
 }
 
@@ -1111,6 +1663,7 @@ mod tests {
     }
     use super::*;
     use crate::buildings::Edits;
+    use std::collections::HashMap;
     use std::time::{Duration, Instant};
 
     fn pump(s: &mut Streamer, secs: u64) -> Vec<Key> {
@@ -1118,15 +1671,17 @@ mod tests {
         let mut order = Vec::new();
         while !s.idle() && t0.elapsed() < Duration::from_secs(secs) {
             for op in s.poll(usize::MAX) {
-                if let Op::Set(k, _) = op {
+                if let Op::Set(k, m) = op {
                     order.push(k);
+                    s.give_back(k, m);
                 }
             }
             std::thread::sleep(Duration::from_millis(2));
         }
         for op in s.poll(usize::MAX) {
-            if let Op::Set(k, _) = op {
+            if let Op::Set(k, m) = op {
                 order.push(k);
+                s.give_back(k, m);
             }
         }
         order
@@ -1304,6 +1859,203 @@ mod tests {
         }
         apply(&mut shown, s.poll(usize::MAX));
         check(&s, &shown, c0, "al final");
+        assert!(s.retired.is_empty());
+    }
+
+    // --- [lod] Caché de columnas y oclusión por relieve -----------------------------------
+
+    #[test]
+    fn el_zoom_de_ida_y_vuelta_sale_de_la_cache_y_una_edicion_rehace_solo_lo_tocado() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(5)));
+        let mut s = Streamer::new(t.clone(), store, 5, 2);
+        let c = Vec2::new(13500.0, 16300.0);
+        s.update_with(c, 0);
+        pump(&mut s, 120);
+        let mut vuelta = |s: &mut Streamer| {
+            let b0 = s.stats.columns_built;
+            s.update_with(c, 3);
+            pump(s, 120);
+            s.update_with(c, 0);
+            pump(s, 120);
+            s.stats.columns_built - b0
+        };
+        let primera = vuelta(&mut s);
+        let segunda = vuelta(&mut s);
+        assert!(primera > 100, "la primera vuelta generó {primera}");
+        assert!(segunda * 5 <= primera, "la segunda vuelta generó {segunda} de {primera} (debería salir casi todo de la caché)");
+        assert!(s.cache.bytes() <= s.cache.presupuesto);
+        // Una edición con el nivel 0 fuera de los anillos: al volver, solo se rehacen las
+        // columnas cerca de la edición (las demás salen de la caché).
+        s.update_with(c, 3);
+        pump(&mut s, 120);
+        let v = IVec3::new(54020, terrain_top_l0(&t, 54020, 65220) + 1, 65220);
+        let mut e = Edits::default();
+        e.fill(v, v + IVec3::splat(3), CAL);
+        s.edit(&e);
+        pump(&mut s, 120);
+        let b0 = s.stats.columns_built;
+        s.update_with(c, 0);
+        pump(&mut s, 120);
+        let rehechas = s.stats.columns_built - b0;
+        assert!(rehechas <= 3 * 25 + segunda, "se rehicieron {rehechas} columnas por una edición de 1 m");
+        // Y la malla de la columna editada es la nueva (con la obra).
+        let key = (0u32, IVec2::new(54020 >> 5, 65220 >> 5));
+        assert_eq!(s.ready.get(&key), s.versions.get(&key));
+    }
+
+    /// Lo que se generó desde la caché es idéntico a lo generado de cero (mismas caras).
+    #[test]
+    fn la_malla_de_la_cache_es_la_misma_que_la_generada() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(4)));
+        let mut s = Streamer::new(t, store, 4, 2);
+        let c = Vec2::new(13500.0, 16300.0);
+        s.update_with(c, 0);
+        let mut fresh: HashMap<Key, Vec<crate::mesher::Quad>> = HashMap::new();
+        let collect = |s: &mut Streamer, out: &mut HashMap<Key, Vec<crate::mesher::Quad>>| {
+            let t0 = Instant::now();
+            while t0.elapsed() < Duration::from_secs(120) {
+                for op in s.poll(usize::MAX) {
+                    if let Op::Set(k, m) = op {
+                        out.insert(k, m.quads_grouped().0);
+                        s.give_back(k, m);
+                    }
+                }
+                if s.idle() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        collect(&mut s, &mut fresh);
+        s.update_with(c, 2);
+        collect(&mut s, &mut HashMap::new());
+        let hits = s.stats.cache_hits;
+        let mut again = HashMap::new();
+        s.update_with(c, 0);
+        collect(&mut s, &mut again);
+        assert!(s.stats.cache_hits > hits + 100, "casi nada salió de la caché");
+        for (k, q) in &again {
+            if let Some(f) = fresh.get(k) {
+                assert_eq!(q, f, "la columna {k:?} de la caché no es igual a la generada");
+            }
+        }
+    }
+
+    /// Ojo de una cámara orbital (como `OrbitCamera::eye`).
+    fn ojo(t: &TerrainGen, cam: [f32; 5]) -> (Vec3, Vec2) {
+        let target = Vec3::new(cam[0], t.height(cam[0], cam[1]).max(0.0), cam[1]);
+        let (y, p) = (cam[3].to_radians(), cam[4].to_radians());
+        let back = Vec3::new(y.sin() * p.cos(), p.sin(), y.cos() * p.cos());
+        let eye = target + back * cam[2];
+        (eye, Vec2::new(target.x - eye.x, target.z - eye.z))
+    }
+
+    /// ¿Se ve algún punto de la superficie de la columna desde el ojo? Rayo recto en el espacio
+    /// dibujado (todo baja d²/2R desde el ojo, como `voxel.wgsl::curved`), con pasos que crecen
+    /// con la distancia; tapa solo el terreno que queda claramente por encima del rayo (más de 2 m
+    /// y medio vóxel del nivel que se dibuja ahí).
+    fn se_ve(t: &TerrainGen, s: &Streamer, eye: Vec3, key: Key) -> bool {
+        let k = crate::relieve::K_CURVA;
+        let cm = s.specs[key.0 as usize].chunk_m();
+        let vox_at = |x: f32, z: f32| {
+            s.specs.iter().find(|sp| s.versions.contains_key(&(sp.lod, IVec2::new((x / sp.chunk_m()).floor() as i32, (z / sp.chunk_m()).floor() as i32)))).map_or(256.0, |sp| sp.voxel())
+        };
+        let pts = [(0.5, 0.5), (0.02, 0.02), (0.98, 0.02), (0.02, 0.98), (0.98, 0.98), (0.5, 0.02), (0.02, 0.5), (0.98, 0.5), (0.5, 0.98)];
+        for (fx, fz) in pts {
+            let (px, pz) = ((key.1.x as f32 + fx) * cm, (key.1.y as f32 + fz) * cm);
+            let d = Vec2::new(px - eye.x, pz - eye.z).length();
+            let py = t.height(px, pz).max(0.0) - k * d * d;
+            let mut blocked = false;
+            let mut dq = 50.0f32;
+            while dq < d * 0.995 {
+                let f = dq / d;
+                let (qx, qz) = (eye.x + (px - eye.x) * f, eye.z + (pz - eye.z) * f);
+                let ray = eye.y + (py - eye.y) * f;
+                let ground = t.height(qx, qz) - k * dq * dq;
+                if ground - ray > 2.0 + vox_at(qx, qz) * 0.5 {
+                    blocked = true;
+                    break;
+                }
+                dq *= 1.01;
+            }
+            if !blocked {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn esperar_relieve(s: &mut Streamer) {
+        s.update_occlusion(false);
+        let t0 = Instant::now();
+        while s.relief.is_none() && t0.elapsed() < Duration::from_secs(60) {
+            s.poll_relief();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(s.relief.is_some(), "la pirámide del relieve no se armó");
+    }
+
+    /// La oclusión por relieve nunca deja sin generar una columna que se ve, con el relieve real
+    /// de Montevideo: vistas rasantes (el Cerro, el Miguelete, la costa) y desde arriba.
+    #[test]
+    fn la_oclusion_por_relieve_nunca_tapa_una_columna_visible() {
+        let t = Arc::new(TerrainGen::montevideo());
+        let mut total = 0;
+        for (cam, nombre, min_ocultas) in [
+            ([5924.0, 12270.0, 2500.0, 200.0, 6.0], "Cerro rasante (el ojo a ~400 m)", 0),
+            ([10431.2, 9144.2, 45.0, 120.0, 14.0], "Miguelete de cerca", 50),
+            ([11097.7, 14308.9, 25.0, 30.0, 6.0], "costa, a la altura de la calle", 50),
+            ([8000.0, 11000.0, 60.0, 300.0, 4.0], "llano al oeste, rasante", 50),
+            ([5924.0, 12270.0, 3000.0, 200.0, 60.0], "Cerro desde arriba", 0),
+        ] {
+            let store = Arc::new(RwLock::new(EditStore::new(crate::lod::LEVELS)));
+            let mut s = Streamer::new(t.clone(), store, crate::lod::LEVELS, 1);
+            s.occl_sync = true;
+            let (eye, look) = ojo(&t, cam);
+            s.set_view(eye, look);
+            esperar_relieve(&mut s);
+            let target_h = t.height(cam[0], cam[1]).max(0.0);
+            s.update_view(Vec2::new(cam[0], cam[1]), (eye.y - target_h).max(1.0), 50.0, 720.0);
+            let ocultas: Vec<Key> = s.hidden.iter().chain(s.postpone.iter()).copied().collect();
+            println!("{nombre}: {} tapadas ({} postergadas) de {} · ojo a {:.0} m", ocultas.len(), s.postpone.len(), s.wanted_columns(), eye.y);
+            for &key in &ocultas {
+                assert!(!se_ve(&t, &s, eye, key), "{nombre}: la columna {key:?} se ve y quedó tapada");
+            }
+            assert!(ocultas.len() >= min_ocultas, "{nombre}: solo {} columnas tapadas de {}", ocultas.len(), s.wanted_columns());
+            if nombre.contains("arriba") {
+                assert!(ocultas.len() * 50 <= s.wanted_columns(), "{nombre}: desde arriba se taparon {}", ocultas.len());
+            }
+            total += ocultas.len();
+        }
+        assert!(total > 0);
+    }
+
+    /// Con la oclusión, la vista queda completa igual (las tapadas no hacen esperar el retiro de
+    /// lo viejo) y al subir la cámara lo que aparece se genera.
+    #[test]
+    fn con_oclusion_el_streamer_termina_y_al_subir_genera_lo_que_aparece() {
+        let t = Arc::new(TerrainGen::montevideo());
+        let store = Arc::new(RwLock::new(EditStore::new(crate::lod::LEVELS)));
+        let mut s = Streamer::new(t.clone(), store, crate::lod::LEVELS, 3);
+        s.occl_sync = true;
+        let cam = [10431.2, 9144.2, 45.0, 120.0, 14.0];
+        let (eye, look) = ojo(&t, cam);
+        s.set_view(eye, look);
+        esperar_relieve(&mut s);
+        let c = Vec2::new(cam[0], cam[1]);
+        s.update_view(c, 12.0, 50.0, 720.0);
+        pump(&mut s, 240);
+        assert!(s.idle(), "no terminó");
+        let tapadas = s.hidden.len();
+        assert!(tapadas > 0);
+        assert!(s.stats.columns_built + tapadas >= s.wanted_columns());
+        // Desde 3 km de altura casi nada queda tapado: se genera lo que faltaba.
+        s.set_view(eye + Vec3::Y * 3000.0, look);
+        s.update_view(c, 3000.0, 50.0, 720.0);
+        pump(&mut s, 240);
+        assert!(s.hidden.len() * 20 < tapadas.max(20), "siguen tapadas {} de {tapadas}", s.hidden.len());
         assert!(s.retired.is_empty());
     }
 }

@@ -57,6 +57,8 @@ pub struct Options {
     pub msaa: u32,
     pub frames: u32,
     pub size: (u32, u32),
+    /// [lod] Preset de calidad (`--calidad`): anillo, sombras, hilos, subida y caché.
+    pub calidad: Option<crate::autoajuste::Calidad>,
 }
 
 /// Fracción de píxeles con diferencia > 8 en algún canal.
@@ -75,6 +77,8 @@ struct Extra {
     agentes: Vec<String>, // [personajes]
     hiz: Vec<String>,
     csm: Vec<String>,
+    /// [lod] Una fila por vista para `bench.json`.
+    json: Vec<serde_json::Value>,
 }
 
 pub fn run(o: &Options) -> Result<(), String> {
@@ -92,27 +96,49 @@ pub fn run(o: &Options) -> Result<(), String> {
     let store = Arc::new(RwLock::new(store));
     let (rss_store, _) = memory_mb();
     let mut r = Renderer::new_msaa(o.msaa)?;
+    // [lod] Sombras del preset; la pirámide del relieve se arma antes de medir (en el juego se
+    // arma al empezar la partida, mientras carga la escena).
+    if let Some(p) = o.calidad.and_then(|c| c.preset()) {
+        r.set_shadow_quality(crate::render::ShadowQuality { cascades: p.sombras.0, resolution: p.sombras.1 });
+    }
+    let t_relieve = Instant::now();
+    crate::relieve::obtener(&terrain);
+    println!("Pirámide del relieve (mapa de prueba) armada en {:.2?}", t_relieve.elapsed());
     let (rss_gpu, _) = memory_mb();
     println!("Memoria: con las ediciones cargadas {rss_store:.0} MB · con el renderer creado {rss_gpu:.0} MB");
     let q = r.shadow_quality();
     let mut md = String::new();
     let _ = writeln!(md, "Versión: {}\n", crate::version::completa());
+    let _ = writeln!(md, "Calidad: {}\n", o.calidad.map_or("sin preset (opciones del banco)", |c| c.nombre()));
     let _ = writeln!(md, "Adaptador: {} · dibujo {} · Hi-Z {} · {} hilos · {} niveles · MSAA {}× · {}×{} · {} cuadros por vista", r.adapter_name, r.draw_mode.name(), if r.hiz_supported { "disponible" } else { "no disponible" }, o.threads, o.levels, o.msaa, o.size.0, o.size.1, o.frames);
     let _ = writeln!(md, "Sombras: {} cascadas de {}² ({:.0} MB)", q.cascades, q.resolution, q.bytes() as f64 / 1048576.0);
     let _ = writeln!(md, "Escena ciudad: armada en {:.2?} · {} vóxeles editados guardados en todos los niveles · ediciones ≈ {:.1} MB\n", t_scene, edit_voxels, edit_bytes as f64 / 1048576.0);
-    let _ = writeln!(md, "| Vista | Generar+mallar (pared) | CPU generación | CPU mallado | Columnas | Triángulos | Caras | Geometría en GPU | Megabúfer | Subido | Dibujos (principal / sombras) | Columnas / caras dibujadas | Caras de sombra | CPU por cuadro | Total por cuadro (sombra rehecha) | Total por cuadro (sombra en caché) | GPU pase principal | RSS |");
-    let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    let _ = writeln!(md, "| Vista | Generar+mallar (pared) | CPU generación | CPU mallado | Columnas | Generadas (ocultas) | Triángulos | Caras | Geometría en GPU | Megabúfer | Subido | Dibujos (principal / sombras) | Columnas / caras dibujadas | Caras de sombra | CPU por cuadro | Total por cuadro (sombra rehecha) | Total por cuadro (sombra en caché) | GPU pase principal | RSS |");
+    let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     println!("{md}");
-    let mut extra = Extra { hiz: Vec::new(), csm: Vec::new(), agentes: Vec::new() };
-    for v in &VIEWS {
+    let mut extra = Extra { hiz: Vec::new(), csm: Vec::new(), agentes: Vec::new(), json: Vec::new() };
+    let mut json = serde_json::json!({ "version": crate::version::completa(), "adaptador": r.adapter_name.clone(), "hilos": o.threads, "niveles": o.levels, "tamano": [o.size.0, o.size.1] });
+    // [lod] `MOTOR_BANCO=streaming`: solo la parte de streaming (para medir rápido).
+    // `MOTOR_BANCO_VISTAS=peninsula,calle`: solo esas vistas (y sin la parte de streaming).
+    let solo_streaming = std::env::var("MOTOR_BANCO").is_ok_and(|v| v == "streaming");
+    let vistas: Option<Vec<String>> = std::env::var("MOTOR_BANCO_VISTAS").ok().map(|v| v.split(',').map(|s| s.trim().to_string()).collect());
+    let quiero = |v: &View| !solo_streaming && vistas.as_ref().is_none_or(|l| l.iter().any(|s| s == v.slug));
+    for v in VIEWS.iter().filter(|v| quiero(v)) {
         bench_view(o, &mut r, &terrain, &store, v, &mut md, &mut extra)?;
     }
     // Mapa real de Montevideo, sin ediciones.
     let real = Arc::new(TerrainGen::montevideo());
+    crate::relieve::obtener(&real);
     let empty = Arc::new(RwLock::new(EditStore::new(o.levels)));
-    for v in &REAL_VIEWS {
+    for v in REAL_VIEWS.iter().filter(|v| quiero(v)) {
         bench_view(o, &mut r, &real, &empty, v, &mut md, &mut extra)?;
     }
+    // [lod] Streaming (Fase 0 del plan de técnicas del mod LOD).
+    let t_stream = Instant::now();
+    let stream = if vistas.is_none() { bench_streaming(o, &mut r, &terrain, &store)? } else { StreamReport { md: String::new(), json: serde_json::Value::Null } };
+    println!("{}", stream.md);
+    println!("   (streaming medido en {:.0} s)", t_stream.elapsed().as_secs_f64());
+    json["streaming"] = stream.json;
     let (_, peak) = memory_mb();
     let _ = writeln!(md, "\nMemoria máxima del proceso (VmHWM): {peak:.0} MB");
     if !extra.hiz.is_empty() {
@@ -144,7 +170,11 @@ pub fn run(o: &Options) -> Result<(), String> {
     // [/personajes]
     println!("{}", &md[md.find("\n### ").unwrap_or(0)..]);
     println!("Memoria máxima del proceso (VmHWM): {peak:.0} MB");
+    md.push_str(&stream.md);
     std::fs::write(format!("{}/bench.md", o.dir), md).map_err(|e| e.to_string())?;
+    json["vistas"] = serde_json::Value::Array(extra.json.clone());
+    json["memoria_max_mb"] = serde_json::json!(peak);
+    std::fs::write(format!("{}/bench.json", o.dir), serde_json::to_vec_pretty(&json).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -156,11 +186,11 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
     GEN_NS.store(0, Ordering::SeqCst);
     MESH_NS.store(0, Ordering::SeqCst);
     let center = Vec2::new(v.cam[0], v.cam[1]);
-    let mut s = Streamer::new(terrain.clone(), store.clone(), o.levels, o.threads);
+    let mut s = new_streamer(o, terrain, store);
     let ts = Instant::now();
     let cam = camera(terrain, &v.cam);
     if lod_px {
-        s.update_view(center, cam.eye().y - cam.target.y, cam.fov_y, o.size.1 as f32);
+        crate::session::view_to_streamer(&mut s, &cam, o.size.1 as f32);
     } else {
         s.update(center);
     }
@@ -182,6 +212,7 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
         std::thread::sleep(Duration::from_millis(1));
     }
     let wall = ts.elapsed();
+    let (built, hidden) = (s.stats.columns_built, s.stats.hidden_skipped);
     drop(s);
     r.maintain();
     let (w, h) = o.size;
@@ -218,13 +249,15 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
     let (vb, ib) = r.gpu_bytes();
     let (rss, _) = memory_mb();
     let line = format!(
-        "| {} | {:.2} s (subida {:.2} s) | {:.2} s | {:.2} s | {} | {:.2} M | {:.2} M | {:.1} MB | {:.0} MB | {:.1} MB | {} / {} | {} / {:.2} M | {:.2} M | {:.1} ms | {:.0} ms | {:.0} ms | {} | {:.0} MB |",
+        "| {} | {:.2} s (subida {:.2} s) | {:.2} s | {:.2} s | {} | {} ({}) | {:.2} M | {:.2} M | {:.1} MB | {:.0} MB | {:.1} MB | {} / {} | {} / {:.2} M | {:.2} M | {:.1} ms | {:.0} ms | {:.0} ms | {} | {:.0} MB |",
         v.name,
         wall.as_secs_f64(),
         upload.as_secs_f64(),
         GEN_NS.load(Ordering::SeqCst) as f64 / 1e9,
         MESH_NS.load(Ordering::SeqCst) as f64 / 1e9,
         r.column_count(),
+        built,
+        hidden,
         r.triangles() as f64 / 1e6,
         r.quad_count() as f64 / 1e6,
         (vb + ib) as f64 / 1048576.0,
@@ -244,6 +277,11 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
     println!("{line}");
     println!("   alturas {:.2} s · superficie {:.2} s · chunks mallados {}", crate::stream::HEIGHT_NS.swap(0, Ordering::SeqCst) as f64 / 1e9, crate::stream::SURF_NS.swap(0, Ordering::SeqCst) as f64 / 1e9, crate::stream::CHUNKS.swap(0, Ordering::SeqCst));
     let _ = writeln!(md, "{line}");
+    extra.json.push(serde_json::json!({
+        "vista": v.slug, "generar_s": wall.as_secs_f64(), "subida_s": upload.as_secs_f64(), "columnas": r.column_count(), "columnas_generadas": built, "ocultas": hidden,
+        "caras": r.quad_count(), "bytes_subidos": r.uploaded_bytes - up0, "cpu_cuadro_ms": acc.cpu_ms / n, "total_cuadro_ms": acc.total_ms / n, "total_cache_ms": cached / n,
+    }));
+    println!("   columnas generadas {built} · ocultas por relieve {hidden}");
 
     // Cascadas: tamaño y pases con la cámara en movimiento (límite de la ventana).
     let sizes: Vec<String> = r.cascade_sizes().iter().map(|(h, t)| if *h >= 1000.0 { format!("{:.1} km · {:.0} cm", h / 1000.0, t) } else { format!("{:.0} m · {:.1} cm", h, t) }).collect();
@@ -355,4 +393,249 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
     }
     // [/personajes]
     Ok(())
+}
+
+// --- [lod] Streaming: vuelo, zoom de ida y vuelta, teletransporte y salto al recentrar ------
+//
+// Fase 0 del plan de `docs/sistemas/tecnicas-minecraft-lod.md` (§2.18). Mide el streaming con
+// el presupuesto de subida de la ventana y cuadros a ritmo de 60 Hz (el hilo principal duerme
+// lo que sobra del cuadro, como con vsync), sin dibujar: el "cuadro" es el trabajo de CPU del
+// hilo principal en el streaming (recentrar, recibir y subir mallas). Con lavapipe valen las
+// proporciones, no los números absolutos.
+
+/// Percentiles de una serie de tiempos (ms).
+#[derive(Clone, Copy, Default)]
+pub struct Percentiles {
+    pub p50: f64,
+    pub p95: f64,
+    pub p99: f64,
+    /// Media del 1 % de cuadros más lentos.
+    pub peor1: f64,
+    pub max: f64,
+    pub media: f64,
+}
+
+pub fn percentiles(v: &[f64]) -> Percentiles {
+    if v.is_empty() {
+        return Percentiles::default();
+    }
+    let mut s = v.to_vec();
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let at = |q: f64| s[((s.len() - 1) as f64 * q).round() as usize];
+    let n1 = (s.len() / 100).max(1);
+    Percentiles { p50: at(0.5), p95: at(0.95), p99: at(0.99), peor1: s[s.len() - n1..].iter().sum::<f64>() / n1 as f64, max: s[s.len() - 1], media: s.iter().sum::<f64>() / s.len() as f64 }
+}
+
+impl Percentiles {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({ "p50": self.p50, "p95": self.p95, "p99": self.p99, "peor_1": self.peor1, "max": self.max, "media": self.media })
+    }
+}
+
+/// Ritmo de los cuadros simulados (60 Hz).
+const FRAME: Duration = Duration::from_micros(16_667);
+
+/// Un cuadro como en la ventana: recentrar los anillos según la cámara y subir lo terminado con
+/// el presupuesto de la ventana. Devuelve (trabajo total, subida) en ms y los bytes subidos.
+fn window_step(s: &mut Streamer, r: &mut Renderer, terrain: &TerrainGen, cam: &mut OrbitCamera, view_h: f32) -> (f64, f64, u64) {
+    let t0 = Instant::now();
+    cam.target.y = terrain.height(cam.target.x, cam.target.z).max(0.0);
+    crate::session::view_to_streamer(s, cam, view_h);
+    let tv = t0.elapsed().as_secs_f64() * 1000.0;
+    let up = crate::session::upload_ops(s, r, crate::session::WINDOW_VERTEX_BUDGET);
+    if std::env::var("MOTOR_BANCO_DETALLE").is_ok() && t0.elapsed().as_secs_f64() * 1000.0 > 6.0 {
+        println!("cuadro lento: vista {tv:.2} · poll {:.2} · maintain {:.2} · subir {:.2} ({} órdenes, {} KB)", up.poll_ms, up.maintain_ms, up.ms - up.poll_ms - up.maintain_ms, up.ops, up.bytes / 1024);
+    }
+    (t0.elapsed().as_secs_f64() * 1000.0, up.ms, up.bytes)
+}
+
+fn pace(t0: Instant) {
+    if let Some(rest) = FRAME.checked_sub(t0.elapsed()) {
+        std::thread::sleep(rest);
+    }
+}
+
+/// Espera (con cuadros de la ventana) hasta que el streamer queda ocioso; devuelve los segundos.
+fn settle(s: &mut Streamer, r: &mut Renderer, terrain: &TerrainGen, cam: &mut OrbitCamera, view_h: f32, max_s: f64) -> f64 {
+    let t0 = Instant::now();
+    while t0.elapsed().as_secs_f64() < max_s {
+        let tf = Instant::now();
+        window_step(s, r, terrain, cam, view_h);
+        if s.idle() {
+            break;
+        }
+        pace(tf);
+    }
+    t0.elapsed().as_secs_f64()
+}
+
+fn look_yaw(dir: Vec2) -> f32 {
+    (-dir.x).atan2(-dir.y).to_degrees()
+}
+
+pub struct StreamReport {
+    pub md: String,
+    pub json: serde_json::Value,
+}
+
+pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &Arc<RwLock<EditStore>>) -> Result<StreamReport, String> {
+    let mut md = String::new();
+    let view_h = o.size.1 as f32;
+    let city = Vec2::new(13500.0, 16300.0);
+    let cerro = crate::terrain::CERRO;
+    let dir = (cerro - city).normalize();
+    let near = |c: Vec2| OrbitCamera { target: Vec3::new(c.x, 0.0, c.y), yaw: look_yaw(dir), pitch: 32.0, distance: 150.0, fov_y: 50.0 };
+
+    // 1) Vuelo: zoom 150 m → 3 km → 150 m (4 s cada tramo) y 3 km hacia el cerro a 40 m/s.
+    r.clear_columns();
+    r.maintain();
+    let mut s = new_streamer(o, terrain, store);
+    let mut cam = near(city);
+    let t_first = settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+    let (b0, c0) = (r.uploaded_bytes, s.stats.columns_built);
+    let mut work = Vec::new();
+    let mut upload_max = 0.0f64;
+    let dt = FRAME.as_secs_f32();
+    let zoom_frames = (4.0 / dt) as usize;
+    let fly_frames = (3000.0 / 40.0 / dt) as usize;
+    let t_flight = Instant::now();
+    for f in 0..2 * zoom_frames + fly_frames {
+        let tf = Instant::now();
+        if f < zoom_frames {
+            cam.distance = 150.0 * 20f32.powf((f + 1) as f32 / zoom_frames as f32);
+        } else if f < 2 * zoom_frames {
+            cam.distance = 3000.0 * (1.0 / 20f32).powf((f + 1 - zoom_frames) as f32 / zoom_frames as f32);
+        } else {
+            let k = (f + 1 - 2 * zoom_frames) as f32 * dt * 40.0;
+            let p = city + dir * k;
+            cam.target.x = p.x;
+            cam.target.z = p.y;
+        }
+        let (w, u, _) = window_step(&mut s, r, terrain, &mut cam, view_h);
+        work.push(w);
+        upload_max = upload_max.max(u);
+        pace(tf);
+    }
+    let flight_s = t_flight.elapsed().as_secs_f64();
+    let pending_end = s.pending();
+    let t_idle = settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+    let (bytes, cols) = (r.uploaded_bytes - b0, s.stats.columns_built - c0);
+    let (hits, hidden) = (s.stats.cache_hits, s.stats.hidden_skipped);
+    let (occl_n, occl_max, occl_hilo) = (s.stats.occl_evals, s.stats.occl_ms_max, s.stats.occl_thread_ms_max);
+    let p = percentiles(&work);
+    drop(s);
+    let _ = writeln!(md, "\n### Streaming: vuelo, zoom de ida y vuelta, teletransporte y salto al recentrar\n");
+    let _ = writeln!(md, "Cuadros a 60 Hz sin dibujar: el cuadro es el trabajo de CPU del hilo principal en el streaming (recentrar, recibir y subir mallas con el presupuesto de la ventana). Vuelo: zoom 150 m → 3 km → 150 m (4 s cada tramo) y 3 km hacia el cerro a 40 m/s. Con lavapipe valen las proporciones, no los números absolutos.\n");
+    let _ = writeln!(md, "| Prueba | Cuadros | p50 | p95 | p99 | 1 % peor | Peor cuadro | Peor subida | Columnas generadas | De la caché | Ocultas por relieve | Subido | Pendientes al final | Hasta ocioso |");
+    let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    let _ = writeln!(md, "| Vuelo ({flight_s:.0} s; primera carga {t_first:.1} s) | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.1} ms | {:.1} ms | {cols} | {hits} | {hidden} | {:.1} MB | {pending_end} | {t_idle:.1} s |", work.len(), p.p50, p.p95, p.p99, p.peor1, p.max, upload_max, bytes as f64 / 1048576.0);
+    let mut json = serde_json::json!({
+        "oclusion": { "evaluaciones": occl_n, "peor_ms_principal": occl_max, "peor_ms_hilo": occl_hilo },
+        "vuelo": { "cuadros": work.len(), "segundos": flight_s, "primera_carga_s": t_first, "cuadro_ms": p.json(), "peor_subida_ms": upload_max, "columnas_generadas": cols, "de_la_cache": hits, "ocultas": hidden, "bytes_subidos": bytes, "pendientes_al_final": pending_end, "hasta_ocioso_s": t_idle }
+    });
+
+    // 2) Zoom de ida y vuelta, esperando a quedar ocioso en cada punta (dos vueltas).
+    r.clear_columns();
+    r.maintain();
+    let mut s = new_streamer(o, terrain, store);
+    let mut cam = near(city);
+    settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+    let mut vueltas = Vec::new();
+    for _ in 0..2 {
+        let (c0, h0, b0) = (s.stats.columns_built, s.stats.cache_hits, r.uploaded_bytes);
+        let t0 = Instant::now();
+        cam.distance = 3000.0;
+        settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+        cam.distance = 150.0;
+        settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+        vueltas.push((s.stats.columns_built - c0, s.stats.cache_hits - h0, r.uploaded_bytes - b0, t0.elapsed().as_secs_f64()));
+    }
+    drop(s);
+    for (k, v) in vueltas.iter().enumerate() {
+        let _ = writeln!(md, "| Zoom 150 m ↔ 3 km, vuelta {} | — | — | — | — | — | — | — | {} | {} | — | {:.1} MB | 0 | {:.1} s |", k + 1, v.0, v.1, v.2 as f64 / 1048576.0, v.3);
+    }
+    let _ = writeln!(md, "\nOclusión por relieve en el vuelo: {occl_n} evaluaciones; la peor, {occl_max:.2} ms en el hilo principal (armar las cajas) y {occl_hilo:.2} ms en su hilo (el barrido).");
+    let ratio = if vueltas[0].0 > 0 { vueltas[1].0 as f64 / vueltas[0].0 as f64 } else { 0.0 };
+    let _ = writeln!(md, "\nZoom de ida y vuelta: la segunda vuelta genera el {:.0} % de las columnas de la primera.", ratio * 100.0);
+    json["zoom"] = serde_json::json!(vueltas.iter().map(|v| serde_json::json!({ "columnas_generadas": v.0, "de_la_cache": v.1, "bytes_subidos": v.2, "segundos": v.3 })).collect::<Vec<_>>());
+
+    // 3) Teletransporte: de la vista lejana (9 km) a la calle; hasta lo visible listo y hasta ocioso.
+    r.clear_columns();
+    r.maintain();
+    let mut s = new_streamer(o, terrain, store);
+    let mut cam = camera(terrain, &VIEWS[2].cam);
+    settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+    let mut cam = camera(terrain, &VIEWS[4].cam);
+    let c0 = s.stats.columns_built;
+    let t0 = Instant::now();
+    let (eye, look) = (Vec2::new(cam.eye().x, cam.eye().z), Vec2::new(cam.target.x - cam.eye().x, cam.target.z - cam.eye().z).normalize());
+    // Medio ángulo horizontal de la vista (FOV vertical 50°) más 10° de margen.
+    let half = ((25f32.to_radians().tan() * o.size.0 as f32 / o.size.1 as f32).atan() + 10f32.to_radians()).cos();
+    let mut t_visible = None;
+    let mut work = Vec::new();
+    while t0.elapsed().as_secs_f64() < 240.0 {
+        let tf = Instant::now();
+        work.push(window_step(&mut s, r, terrain, &mut cam, view_h).0);
+        if t_visible.is_none() && s.missing_in_view(eye, look, half) == 0 {
+            t_visible = Some(t0.elapsed().as_secs_f64());
+        }
+        if s.idle() {
+            break;
+        }
+        pace(tf);
+    }
+    let t_all = t0.elapsed().as_secs_f64();
+    let t_visible = t_visible.unwrap_or(t_all);
+    let tp = percentiles(&work);
+    let cols = s.stats.columns_built - c0;
+    drop(s);
+    let _ = writeln!(md, "\nTeletransporte de «Lejos (9 km)» a «Calle»: lo visible listo en {t_visible:.2} s, todo en {t_all:.2} s, {cols} columnas generadas; cuadro p99 {:.2} ms, peor {:.1} ms.", tp.p99, tp.max);
+    json["teletransporte"] = serde_json::json!({ "visible_listo_s": t_visible, "todo_listo_s": t_all, "columnas_generadas": cols, "cuadro_ms": tp.json() });
+
+    // 4) Salto al recentrar: misma cámara, anillos centrados en A y en A + 512 m (un chunk del
+    // nivel 6); diferencia de imagen entre las dos (píxeles con diferencia > 8).
+    let _ = writeln!(md, "\n| Vista | Salto al recentrar (píxeles cambiados) |\n|---|---|");
+    let mut saltos = serde_json::Map::new();
+    let (w, h) = o.size;
+    for v in [&VIEWS[1], &VIEWS[2]] {
+        let cam = camera(terrain, &v.cam);
+        let mut imgs = Vec::new();
+        for shift in [0.0, 512.0] {
+            r.clear_columns();
+            r.maintain();
+            let mut s = new_streamer(o, terrain, store);
+            crate::session::view_to_streamer(&mut s, &cam, view_h);
+            if shift > 0.0 {
+                s.update_view(Vec2::new(cam.target.x + shift, cam.target.z), (cam.eye().y - cam.target.y).max(1.0), cam.fov_y, view_h);
+            }
+            loop {
+                crate::session::upload_ops(&mut s, r, usize::MAX);
+                if s.idle() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            drop(s);
+            r.maintain();
+            r.bench_frame(&cam, v.hour, w, h);
+            imgs.push(r.capture_image(&cam, v.hour, w, h, None));
+        }
+        let _ = imgs[1].save(format!("{}/bench-{}-recentrado.png", o.dir, v.slug));
+        let d = diff(&imgs[0], &imgs[1]);
+        let _ = writeln!(md, "| {} | {:.2} % |", v.name, d * 100.0);
+        saltos.insert(v.slug.to_string(), serde_json::json!(d));
+    }
+    json["salto_al_recentrar"] = serde_json::Value::Object(saltos);
+    Ok(StreamReport { md, json })
+}
+
+fn new_streamer(o: &Options, terrain: &Arc<TerrainGen>, store: &Arc<RwLock<EditStore>>) -> Streamer {
+    let mut s = Streamer::new(terrain.clone(), store.clone(), o.levels, o.threads);
+    if let Some(p) = o.calidad.and_then(|c| c.preset()) {
+        s.set_ring(p.anillo);
+        s.set_concurrency(p.hilos(crate::autoajuste::nucleos()));
+        s.ritmo.ms = p.subida_ms as f64;
+        s.cache.set_presupuesto((p.cache_mb as usize) << 20);
+    }
+    s
 }
