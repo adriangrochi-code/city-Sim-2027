@@ -672,9 +672,43 @@ impl City {
             news.extend(self.services_step(t, e));
         }
         // Vecinos y vehículos.
-        self.agentes.tick(t, &self.net, &self.lots, self.plaza, dt);
+        self.tick_agentes(t, dt); // [ia]
         news
     }
+
+    // [ia]
+    /// Avanza los vecinos y vehículos con lo que la ciudad sabe: las personas de la población,
+    /// la muralla y sus portones terminados, la lluvia del mes y la epidemia.
+    pub fn tick_agentes(&mut self, t: &TerrainGen, dt: f32) {
+        let walls = &self.services.walls;
+        let (nn, ne) = self.net.counters();
+        let firma = walls.tramos.iter().fold((nn as u64) << 32 ^ ne as u64 ^ (self.net.edges.len() as u64) << 48, |h, tr| (h ^ ((tr.built * 10.0) as u64).wrapping_add(tr.a.x.to_bits() as u64)).wrapping_mul(0x100_0000_01B3)) | 1;
+        if self.agentes.firma_muralla() != firma {
+            self.agentes.set_muralla(firma, self.muralla_trazada(), self.portones_terminados());
+        }
+        let ctx = agentes::Contexto { poblacion: self.poblacion.fundada.then_some(&self.poblacion), dias_de_lluvia: self.climate.last.rain_days, epidemia: self.services.epidemic.active() };
+        self.agentes.tick_con(t, &self.net, &self.lots, self.plaza, &ctx, dt);
+    }
+
+    /// Tramos de muralla ya empezados (para el recinto intramuros de los agentes).
+    pub fn muralla_trazada(&self) -> Vec<(Vec2, Vec2)> {
+        self.services.walls.tramos.iter().filter(|tr| tr.built > 0.0).map(|tr| (tr.a, tr.b)).collect()
+    }
+
+    /// Posiciones de los portones terminados (donde una calle cruza un tramo ya levantado).
+    pub fn portones_terminados(&self) -> Vec<Vec2> {
+        let mut out = Vec::new();
+        for tr in &self.services.walls.tramos {
+            let d = (tr.b - tr.a).normalize_or_zero();
+            for (g, w) in self.wall_gates(tr.a, tr.b) {
+                if tr.built >= (g + w * 0.5 + 2.5).min(tr.len()) - 0.01 {
+                    out.push(tr.a + d * g);
+                }
+            }
+        }
+        out
+    }
+    // [/ia]
 
     /// Lo que la ciudad le pasa a la economía este mes. Mientras no existan en el motor las
     /// estancias, hornos y canteras del prototipo, el entorno rural produce según la población.

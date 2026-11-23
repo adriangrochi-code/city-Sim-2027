@@ -1,11 +1,13 @@
 # IA de los vecinos y tránsito: diagnóstico y plan
 
-> Documento de sistema (plan; **no hay código nuevo todavía**). Complementa a
+> Documento de sistema. **Implementadas las bases comunes y la época 1, colonial** (F0, F1 y F2
+> de §5, ver «Estado» abajo); el resto sigue siendo plan. Complementa a
 > [agentes-y-conduccion.md](agentes-y-conduccion.md) (lo que ya está hecho),
 > [poblacion.md](poblacion.md) (personas, rasgos, felicidad), al [GDD](../GDD.md) §4.3 y §4.6 y
 > a los documentos de cada época en [../epocas/](../epocas/).
 > Pedido: *«mejorar la IA para que tenga actitudes más realistas, sobre todo más adelante con
-> el tránsito»*. Estado: **borrador v0.1, 18 de noviembre de 2026**.
+> el tránsito»*. Estado: **v0.2, 23 de noviembre de 2026** (plan del 18 de noviembre +
+> implementación colonial).
 
 La regla de diseño sigue siendo la de agentes-y-conduccion.md: **si un jugador sigue a cualquier
 vecino durante un día, lo que hace tiene que tener sentido**. A eso este plan le suma una
@@ -15,6 +17,44 @@ saturada), nunca de errores de la IA (todos en el mismo carril, gente que desapa
 que se esfuman cuando se traban).
 
 ---
+
+## Estado de la implementación (23 de noviembre de 2026)
+
+Código en `engine/src/city/agentes/`: `mod.rs` (simulación), `agenda.rs` (agenda encadenada,
+recados y vida social), `perfil.rs` (perfil de conducta y azar por contador), `portones.rs`
+(portones con aduana), `ruta.rs` (tiempos medidos y rutas), `datos.rs` + el archivo de datos
+`assets/datos/transito_colonial.json` (portones, tropas, horarios por oficio, recados, clima,
+cruces y adelantamiento, cada número con su estado ESTIMADO o DOCUMENTADO). La ciudad los
+alimenta con `City::tick_agentes` (población, muralla, lluvia del mes, epidemia).
+
+| Punto | Estado | Cómo |
+|---|---|---|
+| D1 ubicuidad | **Hecho** | Agenda encadenada: el plan del día es una lista de actividades (destino, hora mínima de salida, estancia) y la salida siguiente se programa **al llegar** (`Vecino::plan`, `Estado::salidas`). Prueba `ningun_vecino_esta_en_dos_lugares` (un día hábil y un domingo, cuadro a cuadro: un agente por vecino como máximo y toda vuelta después de su llegada). |
+| D2 personas | **Hecho** | Con la población fundada, cada vecino es una persona (`CLAVE_PERSONA` + id) de `habitantes_de_lote`, con su trabajo (`lugar_de_trabajo`, o el campo, el puerto, el cabildo o la iglesia según el oficio), horario por oficio (datos), clase y ganado del hogar, parientes (visitas) y quién hace la compra del hogar. Se recalcula cada mes. Sin población, vecinos sintéticos como antes (con perfil). |
+| Perfil (§3) | **Hecho** | `Perfil` de 12 bytes: prisa, prudencia, cortesía, paciencia, velocidad a pie (edad y salud), valor del tiempo (clase), flexibilidad (oficio), sociabilidad, devoción, conocimiento (años en la ciudad), caballo propio y edad. Usa v0 y T del IDM, el hueco crítico, el adelantamiento, la velocidad a pie y los recados. No usa sexo ni origen. |
+| Azar por contador (D16) | **Hecho** para los vecinos | `azar(semilla, persona, día, motivo)` (*splitmix64*): plan, horarios, fidelidad a la pulpería, lluvia del día, revisión en el portón, barro. Carretas y carros siguen con la secuencia guardada. |
+| Personajes = personas | **Hecho** | El agente lleva la persona; `dibujo::quien` la viste (sexo, edad, oficio, riqueza) con `ropa::vestir`. Prueba `los_agentes_son_las_personas_y_se_visten_como_ellas`. |
+| D5–D7 tiempos | **Hecho** | Se guarda la **demora relativa** (tardó / libre de ese tipo de vehículo), **por franja** (madrugada, mañana, tarde, noche) y **con olvido** exponencial hacia lo libre (τ = medio día de juego). Las rutas usan una **foto por hora del reloj** (misma ruta con o sin caché, y la partida cargada elige igual). Pruebas `los_tiempos_olvidan_un_atasco_viejo`, `el_jinete_no_evita_la_calle_que_dejaron_las_carretas`. |
+| D3 escala | Opción A | La ficha muestra la duración física y la del reloj aparte. |
+| D4 destino | En parte | Con persona, el trabajo es el suyo; sin persona, el comercio o taller sale con peso exp(−d/600 m) (gravitatorio). |
+| D15 desaparecer | **Hecho** | Si cambia la red, el agente recalcula desde donde está (`Eleccion::Recalculada`); solo si no hay camino termina el viaje ahí (estadística `perdidos`). |
+| Portones con aduana | **Hecho** | Punto de servicio por portón terminado (`City::portones_terminados`): cola FIFO por sentido (la fila del carril), revisión según la carga (datos), derecho cobrado, cierre de noche (6 a 21 h, ESTIMADO), espera media, máximo de cola, contrabando estimado. Pruebas `el_porton_forma_cola_y_cobra`, `de_noche_el_porton_esta_cerrado`, `los_contrabandistas_evitan_el_porton`. |
+| Contrabandistas | **Hecho** | Una fracción de las carretas (datos) busca una ruta sin tramos con portón; si no hay, entra por el portón. |
+| Arreos | **Hecho** | `Tipo::Arreo`: tropa de 40 a 160 cabezas (0,6 m por cabeza), 3 km/h, del campo a los corrales de extramuros por rutas que no tocan tramos intramuros (radio de los datos o la distancia a la muralla); nadie la adelanta; los troperos vuelven a caballo. Dibujo: vacas en columnas de tres y troperos a los costados (`dibujo::tropa`). Pruebas `el_arreo_no_entra_intramuros`, `nadie_adelanta_un_arreo_pero_si_una_carreta`. |
+| Adelantamiento | **Hecho** | Jinete con prudencia < 0,6 detrás de una carreta o un carro lento, con el carril contrario libre 40 + 60·prudencia m, lugar para volver y sin portón ni cruce antes de terminar. |
+| Prioridad en cruces | **Hecho** | En los cruces con calle empedrada y de tierra, pasan primero los de la empedrada; los de la de tierra esperan en la línea un hueco ≥ hueco crítico (+ lo que tardan en despejar el cruce) que baja con la espera; la salvaguarda de un minuto (y 90 s para el hueco) sigue. Prueba `en_el_cruce_la_calle_empedrada_tiene_prioridad`. |
+| Peatones que cruzan | **Hecho** | En las esquinas esperan un hueco (según su prudencia) frente al primero de cada fila que llega; los vehículos frenan antes del cruce si hay alguien en la calzada. |
+| Clima | **Hecho** | Si llueve se sortea por día con los días de lluvia del mes; con lluvia bajan las salidas optativas (más los prudentes), a pie más lento; con dos días seguidos, barro: carretas más lentas en la tierra y algunas se empantanan unos minutos. Epidemia: salidas optativas a la mitad. Prueba `con_lluvia_salen_menos_a_pasear`. |
+| Vida social | **Hecho** | Compra en la pulpería del barrio (una de las tres más cercanas, con fidelidad), recova, pulpería a la vuelta del trabajo (sociabilidad), misa del domingo y de semana (devoción), paseo de la plaza el domingo, visitas a parientes. |
+| UI | **Hecho** | Ficha del portón (abierto o cerrado, cola por sentido, espera media, pasados, derechos, contrabando); capa «Cola en portones»; ficha del vecino con su persona, carácter, cómo eligió la ruta y la **agenda del día** (lo hecho con sus horas y lo que falta). |
+| Pendiente | — | Aguadores y serenos como agentes; incendios (curiosos y baldes), delito de noche y protestas; carretas empantanadas que esperan ayuda; salida de misa con fuerza social; colas por carril en lugar de ordenar todo (D16, rendimiento); D8–D13 de las épocas con autos. |
+
+**Mediciones** (prueba `rendimiento_con_el_tope_de_agentes`, 3.000 agentes al azar en la
+ciudad de prueba, compilación optimizada, máquina compartida con carga ~8 en 4 núcleos):
+**0,22–0,25 ms por paso** sin foco y 0,22 con el foco lejos (todos de a saltos); con el foco
+en la plaza (todos cerca, con la posición anterior para el dibujo) 0,47–0,52 ms, como antes de
+este cambio (lo que pesa es la pose de cada agente). En la demostración (`--demo-ciudad`,
+~1.950 vecinos-personas, 450 en la calle a las 7:30) la simulación cuesta 0,22–0,27 ms por cuadro de media. Recorrido de la IA: `MOTOR_SOLO_IA=1 motor --demo-ciudad <dir>` (portón con cola, ficha del portón, capa, arreo de 111 cabezas sin tramos intramuros, ficha de un vecino con su agenda; guardar y cargar IGUAL). Capturas en `docs/capturas/ia-*.jpg`.
 
 ## 0. Resumen
 

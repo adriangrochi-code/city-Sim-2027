@@ -300,6 +300,8 @@ pub fn cards(cat: Category, game: &Game) -> Option<Vec<Card>> {
             layer_card(game, Layer::Salud, Icon::Hospital, "Salud", "Quién tiene botica, médico u hospital cerca"),
             layer_card(game, Layer::Saneamiento, Icon::Basura, "Saneamiento", "Insalubridad de cada casa (agua mala, pozos negros, basura), los basurales y los pozos sucios"),
             layer_card(game, Layer::Delito, Icon::Delito, "Delito", "Mapa de calor del riesgo de robos y asaltos, y la ronda de serenos, alcaldes y guardia"),
+            // [ia]
+            layer_card(game, Layer::Portones, Icon::Muralla, "Cola en portones", "La muralla y sus portones: el anillo crece y se pone rojo con la cola (oscuro si está cerrado de noche); cada carreta o jinete que espera o está en revisión, marcado. Abrir otro portón reparte la cola"),
             layer_card(game, Layer::Valor, Icon::Valor, "Valor del suelo", "Mapa de calor del valor de cada solar (también los vacíos): cerca de la plaza y del muelle, con agua y frente empedrado vale más; el olor, el ruido y el humo de la industria lo bajan. Los solares que valen más se edifican primero y pagan más alquiler"),
             layer_card(game, Layer::Molestias, Icon::Saladero, "Molestias", "Olor, ruido, humo y agua sucia de talleres, curtiembres, hornos, canteras y el basurero, con su alcance; el agua sucia baja por el arroyo"),
             layer_card(game, Layer::Cultivo, Icon::Quintas, "Tierra para cultivo", "Dónde rinde una chacra de trigo, maíz o huerta: índice de productividad CONEAT, aptitud para cultivos de verano, pendiente y bañados (de pardo a verde oscuro)"),

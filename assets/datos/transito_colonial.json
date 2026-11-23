@@ -1,0 +1,122 @@
+{
+  "descripcion": "Datos del tránsito y de la rutina de los vecinos en la época colonial (City Sim 2027): portones de la muralla con aduana, arreos de ganado, horarios por oficio, recados y vida social, clima y conducta en los cruces. Lo lee engine/src/city/agentes/datos.rs (se puede cambiar sin tocar el código). Estado de cada número: ESTIMADO (diseño del juego, con la base indicada en «nota») o DOCUMENTADO (lo dice la fuente citada). No hay ningún número de archivo colonial verificado todavía: todo lo histórico es ESTIMADO hasta confirmarlo. Ver docs/sistemas/ia-y-transito.md §4.1.",
+  "version": 1,
+  "fuentes": {
+    "treiber_2000": "Treiber, M., Hennecke, A. y Helbing, D. (2000). Congested traffic states in empirical observations and microscopic simulations. Physical Review E 62, 1805-1824 (IDM).",
+    "raff_hart_1950": "Raff, M. S. y Hart, J. W. (1950). A volume warrant for urban stop signs. Eno Foundation (hueco crítico).",
+    "mahmassani_sheffi_1981": "Mahmassani, H. y Sheffi, Y. (1981). Using gap sequences to estimate gap acceptance functions. Transportation Research B 15(3), 143-148 (el hueco aceptado baja con la espera).",
+    "weidmann_1993": "Weidmann, U. (1993). Transporttechnik der Fussgänger. ETH Zürich, IVT Schriftenreihe 90 (velocidad libre media del peatón ~1,34 m/s).",
+    "knoblauch_1996": "Knoblauch, R., Pietrucha, M. y Nitzburg, M. (1996). Field studies of pedestrian walking speed and start-up time. Transportation Research Record 1538, 27-38 (los mayores caminan más despacio)."
+  },
+  "porton": {
+    "estado": "ESTIMADO",
+    "nota": "Horario y tiempos de revisión de diseño. Base: los portones se cerraban de noche (práctica general de las plazas fuertes) y la revisión de una carreta cargada de cueros o trigo pedía contar y anotar la carga; a pie casi no se revisaba. Los minutos de revisión son de tiempo físico simulado (como la marcha de los agentes), no del reloj del juego, que corre 18 veces más rápido que los viajes (ia-y-transito.md D3): así la cola es coherente con lo que tarda una carreta en llegar.",
+    "abre": 6.0,
+    "cierra": 21.0,
+    "revision_minutos": {
+      "a_pie": 0.0,
+      "jinete": 0.1,
+      "carro": 0.4,
+      "carreta_vacia": 0.3,
+      "carreta_cargada_min": 0.5,
+      "carreta_cargada_max": 1.5,
+      "arreo_por_cabeza": 0.005
+    },
+    "derecho_reales": {
+      "a_pie": 0.0,
+      "jinete": 0.5,
+      "carro": 1.0,
+      "carreta_vacia": 1.0,
+      "carreta_cargada": 2.0,
+      "arreo_por_cabeza": 0.125
+    },
+    "nota_derecho": "Reales de plata por pasada (8 reales = 1 peso). ESTIMADO: solo para mostrar la recaudación medida en la ficha del portón; el presupuesto mensual sigue con los «Derechos de los portones» de services::works."
+  },
+  "contrabando": {
+    "estado": "ESTIMADO",
+    "nota": "Fracción de carretas que evitan los portones si hay un camino que no pasa por ninguno. Base de diseño: pocos, más con derechos altos.",
+    "fraccion_base": 0.06,
+    "fraccion_por_real_de_derecho": 0.03,
+    "fraccion_maxima": 0.25
+  },
+  "tropas": {
+    "estado": "ESTIMADO",
+    "nota": "Arreos de la estancia a los corrales de extramuros. Velocidad de 2 a 4 km/h (ia-y-transito.md §4.1); 0,6 m de columna por cabeza en una calle de tierra; un tropero a caballo cada 50 cabezas.",
+    "por_semana": 4,
+    "cabezas_min": 40,
+    "cabezas_max": 160,
+    "metros_por_cabeza": 0.6,
+    "velocidad_kmh": 3.0,
+    "cabezas_por_tropero": 50,
+    "hora_min": 6.5,
+    "hora_max": 11.0,
+    "radio_intramuros_m": 450.0,
+    "nota_radio": "Sin muralla, el recinto «intramuros» es el círculo de este radio alrededor de la plaza (la península amurallada medía ~1 km de punta a portón, ver city/arquitectura.rs). Con muralla, el radio es la distancia de la plaza al tramo más cercano."
+  },
+  "horarios": {
+    "estado": "ESTIMADO",
+    "nota": "Hora habitual de salida y de vuelta (horas del reloj) y desvío entre personas. Base de diseño: panaderos y labradores muy temprano, funcionarios y soldados con horario rígido, pulperos de la madrugada a la noche (ia-y-transito.md §3.2). Los oficios son los de poblacion::modelo::Oficio.",
+    "oficios": {
+      "Peon":        {"entrada": 6.2, "salida": 17.5, "desvio": 0.5, "flexible": false},
+      "Labrador":    {"entrada": 5.6, "salida": 17.8, "desvio": 0.4, "flexible": false},
+      "Hacendado":   {"entrada": 7.5, "salida": 16.5, "desvio": 0.8, "flexible": true},
+      "Artesano":    {"entrada": 6.8, "salida": 18.0, "desvio": 0.5, "flexible": true},
+      "Pulpero":     {"entrada": 5.4, "salida": 21.0, "desvio": 0.3, "flexible": false},
+      "Comerciante": {"entrada": 7.6, "salida": 18.5, "desvio": 0.4, "flexible": true},
+      "Marinero":    {"entrada": 6.0, "salida": 17.0, "desvio": 0.9, "flexible": false},
+      "Soldado":     {"entrada": 6.5, "salida": 18.5, "desvio": 0.1, "flexible": false},
+      "Servicio":    {"entrada": 6.0, "salida": 19.0, "desvio": 0.4, "flexible": false},
+      "Clerigo":     {"entrada": 6.5, "salida": 12.5, "desvio": 0.3, "flexible": false},
+      "Funcionario": {"entrada": 8.0, "salida": 14.0, "desvio": 0.15, "flexible": false},
+      "Maestro":     {"entrada": 7.7, "salida": 12.0, "desvio": 0.2, "flexible": false},
+      "Obrero":      {"entrada": 6.0, "salida": 17.0, "desvio": 0.2, "flexible": false},
+      "Empleado":    {"entrada": 8.0, "salida": 17.0, "desvio": 0.2, "flexible": false},
+      "Profesional": {"entrada": 8.5, "salida": 18.0, "desvio": 0.6, "flexible": true}
+    }
+  },
+  "recados": {
+    "estado": "ESTIMADO",
+    "nota": "Probabilidades diarias de diseño. La compra la hace una persona por hogar; la pulpería a la vuelta del trabajo depende de la sociabilidad; la misa de la devoción.",
+    "compra_por_hogar": 0.85,
+    "recova_por_clase": [0.25, 0.35, 0.45, 0.3],
+    "pulperia_tras_trabajo": 0.35,
+    "pulperia_minutos": [20, 70],
+    "recova_minutos": [30, 70],
+    "compra_minutos": [10, 25],
+    "misa_domingo": 0.9,
+    "misa_semana_devocion_minima": 0.8,
+    "misa_semana": 0.5,
+    "paseo_domingo": 0.55,
+    "paseo_hora": [17.0, 19.0],
+    "paseo_minutos": [40, 100],
+    "visita_pariente_domingo": 0.2
+  },
+  "clima": {
+    "estado": "ESTIMADO",
+    "nota": "Con lluvia bajan los viajes optativos según la prudencia; el barro frena a las carretas en la tierra después de dos días seguidos de lluvia (ia-y-transito.md §3.3). Una carreta empantanada queda quieta unos minutos de tiempo físico simulado (hasta que la sacan). Si llueve un día se sortea con los días de lluvia del mes (climate.rs).",
+    "optativos_con_lluvia": 0.45,
+    "optativos_con_lluvia_prudencia": 0.35,
+    "barro_dias": 2,
+    "carreta_en_barro": 0.6,
+    "pie_con_lluvia": 0.9,
+    "empantanarse": 0.08,
+    "empantanado_minutos": [3, 10]
+  },
+  "cruces": {
+    "estado": "DOCUMENTADO",
+    "nota": "Hueco crítico de quien entra desde la calle secundaria (Raff y Hart 1950) que baja con la espera (Mahmassani y Sheffi 1981). Los valores son de diseño para carretas y jinetes; la fórmula de la prudencia es la de ia-y-transito.md §3.2.",
+    "hueco_base_s": 4.0,
+    "hueco_por_prudencia_s": 1.5,
+    "baja_por_espera_s": 0.5,
+    "hueco_minimo_s": 2.0,
+    "peaton_hueco_base_s": 3.0,
+    "peaton_hueco_por_prudencia_s": 2.0
+  },
+  "adelantamiento": {
+    "estado": "ESTIMADO",
+    "nota": "Un jinete adelanta por el carril contrario si es poco prudente (prudencia < 0,6) y el carril contrario está libre 40 + 60 · prudencia metros (ia-y-transito.md §3.2).",
+    "prudencia_maxima": 0.6,
+    "libre_base_m": 40.0,
+    "libre_por_prudencia_m": 60.0
+  }
+}

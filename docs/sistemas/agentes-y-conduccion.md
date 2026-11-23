@@ -1,7 +1,7 @@
 # Agentes y conducción realista
 
 > Documento de sistema. Complementa al [GDD](../GDD.md) (secciones 4.3 y 4.6).
-> Estado: **primera versión implementada en el prototipo 1** (época colonial) y **portada al motor** (ver «En el motor»).
+> Estado: **primera versión implementada en el prototipo 1** (época colonial) y **portada al motor** (ver «En el motor»). Desde el 23 de noviembre de 2026, agenda encadenada, vecinos = personas de la población, perfil de conducta, tiempos con olvido, portones con aduana, arreos, adelantamiento y prioridad en cruces: ver [ia-y-transito.md](ia-y-transito.md), «Estado».
 
 ## Objetivo
 

@@ -660,9 +660,13 @@ impl Game {
             }
             return Some(i);
         }
-        // Un vecino, jinete o carreta justo ahí (a menos de 2,5 m).
-        if let Some((title, lines)) = self.city.agentes.cerca_de(&self.city.net, p, 2.5).and_then(|id| self.city.agentes.describir(id)) {
+        // Un vecino, jinete o carreta justo ahí (a menos de 2,5 m). [ia] Con la persona.
+        if let Some((title, lines)) = self.city.agentes.cerca_de(&self.city.net, p, 2.5).and_then(|id| self.city.agentes.describir(id, self.city.poblacion.fundada.then_some(&self.city.poblacion))) {
             return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Terrain, ..Default::default() });
+        }
+        // [ia] Un portón de la muralla: su cola, la espera y lo que cobra.
+        if let Some((title, lines)) = self.city.agentes.ficha_porton(p) {
+            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Road, ..Default::default() });
         }
         if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
             let ed = &self.city.net.edges[&e.edge];
@@ -890,6 +894,9 @@ impl Game {
                 self.terrain_layer(&mut out, t, layer);
             }
             self.layer_overlay(&mut out, t, layer);
+            if layer == Layer::Portones {
+                self.capa_portones(&mut out, t); // [ia]
+            }
         }
         // Visibilidad: las capas (y el plano de zonas) se marcan según el menú y, si se pide, se
         // concentran alrededor del cursor. Una capa elegida a mano se ve aunque estén apagadas.
@@ -1103,6 +1110,7 @@ impl Game {
                 }
                 // Recursos: los solares no se pintan (se ve el terreno).
                 Layer::Cultivo | Layer::Pasturas | Layer::Piedra | Layer::Arcilla | Layer::Arena | Layer::Cal => continue,
+                Layer::Portones => continue, // [ia]
             };
             quad(out, t, &corners_of(l.c, l.f, W - 1.2, D - 1.2), 0.9, col);
         }
@@ -1123,7 +1131,7 @@ impl Game {
                 Layer::Piedra | Layer::Arena => b.kind == Kind::Cantera,
                 Layer::Arcilla => b.kind == Kind::Horno,
                 Layer::Cal => b.kind == Kind::Calera,
-                Layer::Valor => false,
+                Layer::Valor | Layer::Portones => false, // [ia]
             };
             if show {
                 let r = match layer {
@@ -1145,6 +1153,33 @@ impl Game {
             }
         }
     }
+
+    // [ia]
+    /// Capa «cola en portones»: la muralla, cada portón con un anillo que crece y enrojece con
+    /// la cola (oscuro si está cerrado) y una marca en cada vehículo que espera.
+    fn capa_portones(&self, out: &mut Vec<OverlayVertex>, t: &TerrainGen) {
+        let ag = &self.city.agentes;
+        for tr in &self.city.services.walls.tramos {
+            ribbon(out, t, &line(tr.a, tr.b), 3.0, [0.55, 0.52, 0.48, 0.55]);
+        }
+        let abierto = super::agentes::portones::abierto(ag.e.hora);
+        for g in &ag.portones {
+            let st = ag.e.portones.get(&g.clave).copied().unwrap_or_default();
+            let cola = (st.cola[0] + st.cola[1]) as f32;
+            let x = (cola / 10.0).min(1.0);
+            let col = if abierto { [0.3 + 0.7 * x, 0.85 - 0.6 * x, 0.25, 0.85] } else { [0.35, 0.08, 0.08, 0.9] };
+            circle(out, t, g.pos, 7.0 + 2.0 * cola.min(15.0), col);
+            circle(out, t, g.pos, 3.0, [1.0, 1.0, 1.0, 0.9]);
+        }
+        for a in &ag.e.agentes {
+            if a.en_cola > 0.0 || matches!(a.marcha, super::agentes::Marcha::EnRevision | super::agentes::Marcha::EsperandoElPorton) {
+                let (p, d) = super::agentes::pose(&self.city.net, a);
+                let largo = a.largo().max(1.0);
+                ribbon(out, t, &line(p - d * largo, p), 2.2, if a.marcha == super::agentes::Marcha::EnRevision { [1.0, 0.85, 0.2, 0.95] } else { [0.95, 0.3, 0.2, 0.9] });
+            }
+        }
+    }
+    // [/ia]
 
     /// Capa de recursos o de molestias sobre el terreno: una grilla de 6 × 6 km (celdas de
     /// 50 m) alrededor del cursor (o de la plaza), con el color de la aptitud de cada celda; en

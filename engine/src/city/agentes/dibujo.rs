@@ -190,6 +190,11 @@ pub fn modelo(out: &mut Vec<Caja>, tipo: Tipo, base: glam::Vec3, giro: f32, ropa
             poner(out, &CARRO, base, giro, dz + 0.2, ropa, pelaje);
             poner(out, &CABALLO, base, giro, dz + 1.3, ropa, pelaje);
         }
+        // [ia] La punta del arreo: el capataz a caballo (la tropa la pone `tropa`).
+        Tipo::Arreo => {
+            poner(out, &CABALLO, base, giro, -1.2, ropa, pelaje);
+            poner(out, &JINETE, base, giro, -1.2, ropa, pelaje);
+        }
     }
 }
 
@@ -294,6 +299,17 @@ pub fn detallado(out: &mut Vec<Caja>, tipo: Tipo, base: Vec3, giro: f32, q: &Qui
             // El boyero camina al lado de la yunta.
             persona(out, en(Vec3::new(-1.15, 0.0, -1.0)), dist);
         }
+        // [ia] La punta del arreo: el capataz a caballo (la tropa la pone `tropa`).
+        Tipo::Arreo => {
+            let o = en(Vec3::new(0.0, 0.0, -1.6));
+            let f = anim::fase(dist, anim::CICLO_CABALLO);
+            emitir(out, b.objeto(Id::CaballoEnsillado), &modelos::paleta(Id::CaballoEnsillado, semilla_caballo), o, giro, &anim::cuadrupedo(f, amp), semilla_caballo);
+            sombra(out, o, giro, [0.3, 1.15], 130);
+            let mut pose = anim::caminar(0.0, 0.0, mirar);
+            pose.set(Parte::BrazoI, 0.0, -0.55);
+            pose.set(Parte::BrazoD, 0.0, -0.55);
+            emitir(out, b.persona(at, true), &pal, o + Vec3::Y * (24.0 * VOX), giro, &pose, id);
+        }
         Tipo::Carro => {
             let o = en(Vec3::new(0.0, 0.0, -1.6));
             emitir(out, b.objeto(Id::Caballo), &modelos::paleta(Id::Caballo, semilla_caballo), o, giro, &anim::cuadrupedo(anim::fase(dist, anim::CICLO_CABALLO), amp), semilla_caballo);
@@ -383,6 +399,9 @@ impl Agentes {
             let y = self.perfiles.get(&pata.tramo).map_or(0.0, |pf| altura(pf, ps(a.s)).max(altura(pf, ps(s_medio))));
             let base = Vec3::new(p.x, y, p.y);
             let giro = d.x.atan2(d.y);
+            if a.tipo == Tipo::Arreo {
+                self.tropa(net, a, centro, v, out); // [ia]
+            }
             if dist < CERCA {
                 let q = quien(self, a, v);
                 // Lo recorrido: la posición en la pata (más un corrimiento por pata).
@@ -392,6 +411,69 @@ impl Agentes {
                 modelo(out, a.tipo, base, giro, a.ropa, a.pelaje);
             }
         }
+    }
+
+    // [ia]
+    /// La tropa de un arreo: las cabezas en columnas de tres detrás de la punta, siguiendo el
+    /// camino, y los troperos a caballo a los costados y atrás. Cerca, con los modelos de
+    /// micro-vóxeles; lejos, una caja por cabeza.
+    fn tropa(&self, net: &super::super::roads::RoadNetwork, a: &Agente, centro: Vec2, v: &Vestuario, out: &mut Vec<Caja>) {
+        use crate::detalle::{biblioteca, emitir, modelos, sombra, Id};
+        let paso = super::datos::datos().tropas.metros_por_cabeza * 3.0;
+        let filas = (a.cabezas as f32 / 3.0).ceil() as usize;
+        let b = biblioteca();
+        let altura_en = |li: u16, s: f32| {
+            let pata = a.patas[li as usize];
+            let Some(e) = net.edges.get(&pata.tramo) else { return 0.0 };
+            let ps = if pata.sentido == 0 { s } else { e.len() - s };
+            self.perfiles.get(&pata.tramo).map_or(0.0, |pf| altura(pf, ps))
+        };
+        let tropero = |out: &mut Vec<Caja>, d: f32, lado: f32, n: u32| {
+            let (p, dir, li, s) = super::pose_atras_con(net, a, d);
+            let p = p + Vec2::new(-dir.y, dir.x) * lado;
+            let base = Vec3::new(p.x, altura_en(li, s), p.y);
+            modelo(out, Tipo::Jinete, base + girar(Vec3::Z * 1.3, dir.x.atan2(dir.y)), dir.x.atan2(dir.y), a.ropa.wrapping_add(n as u8), a.pelaje.wrapping_add(n as u8));
+        };
+        for f in 0..filas {
+            let d = 4.0 + f as f32 * paso;
+            let (p, dir, li, s) = super::pose_atras_con(net, a, d);
+            if p.distance(centro) > RADIO {
+                continue;
+            }
+            let giro = dir.x.atan2(dir.y);
+            let lado = Vec2::new(-dir.y, dir.x);
+            let y = altura_en(li, s);
+            for c in 0..3u32 {
+                let k = f as u32 * 3 + c;
+                if k >= a.cabezas as u32 {
+                    break;
+                }
+                // Columnas desparejas (no es un desfile).
+                let h = (k.wrapping_mul(2_654_435_761) >> 16) & 0xFF;
+                let q = p + lado * ((c as f32 - 1.0) * 1.15 + (h as f32 / 255.0 - 0.5) * 0.5) - dir * ((h & 7) as f32 * 0.12);
+                let base = Vec3::new(q.x, y, q.y);
+                let g = giro + ((h >> 3) as f32 / 31.0 - 0.5) * 0.4;
+                let semilla = a.id.wrapping_mul(131).wrapping_add(k);
+                if q.distance(centro) < CERCA {
+                    let id = if h % 3 == 0 { Id::VacaOvera } else { Id::Vaca };
+                    let fase = anim::fase(a.s + a.li as f32 * 53.0 + k as f32 * 0.37, anim::CICLO_VACUNO);
+                    let amp = (a.v / 0.8).clamp(0.0, 1.0);
+                    emitir(out, b.objeto(id), &modelos::paleta(id, semilla), base, g, &anim::cuadrupedo(fase, amp), semilla);
+                    sombra(out, base, g, [0.35, 1.1], 110);
+                } else {
+                    let col = if h % 3 == 0 { [180, 160, 140] } else { [120, 82, 52] };
+                    out.push(Caja::lisa(base + girar(Vec3::new(0.0, 0.55, 0.0), g), g, [0.55, 0.75, 1.6], col));
+                }
+            }
+        }
+        let largo = 4.0 + filas as f32 * paso;
+        let troperos = (a.cabezas as u32).div_ceil(super::datos::datos().tropas.cabezas_por_tropero.max(1)).max(1);
+        for n in 0..troperos {
+            let d = largo * (n + 1) as f32 / (troperos + 1) as f32;
+            tropero(out, d, if n % 2 == 0 { 2.6 } else { -2.6 }, n);
+        }
+        tropero(out, largo + 2.5, 0.0, troperos);
+        let _ = v;
     }
 
     /// Altura de la superficie bajo un agente (calzada o tablero del puente), si se conoce.

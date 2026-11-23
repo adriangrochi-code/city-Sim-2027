@@ -172,6 +172,9 @@ pub fn city_steps() -> Vec<Act> {
     if std::env::var("MOTOR_SOLO_PERSONAJES").is_ok() {
         return pasos_solo_personajes(); // [personajes]
     }
+    if std::env::var("MOTOR_SOLO_IA").is_ok() {
+        return pasos_solo_ia(); // [ia]
+    }
     let c = d::PLAZA;
     let mut pasos = vec![
         Cam([c.x, c.y, 700.0, 200.0, 45.0]),
@@ -677,6 +680,67 @@ fn pasos_solo_arquitectura() -> Vec<Act> {
     v.extend(pasos_arquitectura());
     v
 }
+
+// [ia]
+/// Recorrido corto de la IA de los vecinos y el tránsito (`MOTOR_SOLO_IA=1`): funda, traza,
+/// levanta la muralla, crece, larga la mañana de un día hábil y saca el portón con su cola,
+/// la ficha del portón, la capa «cola en portones», un arreo y la ficha de un vecino con su
+/// agenda; guarda y carga la ciudad.
+fn pasos_solo_ia() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use Act::*;
+    let c = d::PLAZA;
+    vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.0),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("crecer 60 meses", d::grow),
+        Game("unir los pedazos del damero", d::unir_calles),
+        Game("vecinos y vehículos", d::vecinos),
+        Game("portón con cola", d::ia_porton),
+        CamFn(d::view_porton),
+        WaitIdle("portón con cola"),
+        Shot("ia-porton-cola"),
+        UiShot("ia-ui-ficha-porton", ui_ficha_porton),
+        UiShot("ia-ui-capa-portones", |s, u| ui_layer(s, u, crate::city::services::Layer::Portones)),
+        Game("arreo de la estancia a los corrales", d::ia_arreo),
+        CamFn(d::view_arreo),
+        WaitIdle("arreo"),
+        Shot("ia-arreo"),
+        CamFn(|s| d::calle_concurrida(s, 38.0, 30.0)),
+        WaitIdle("vecinos"),
+        UiShot("ia-ui-ficha-vecino", ui_ficha_vecino),
+        SaveLoad("guardar y cargar la ciudad"),
+    ]
+}
+
+/// Ficha del portón de la demostración (con su cola).
+fn ui_ficha_porton(s: &mut Session, u: &mut GameUi) {
+    u.open = None;
+    u.detail = None;
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.layer = None;
+    g.inspected = crate::city::game_demo::PORTON_DEMO.lock().unwrap().map(|x| x.0);
+    g.hover = g.inspected;
+}
+
+/// Ficha de un vecino en la calle: la persona, su carácter, su ruta y su agenda del día.
+fn ui_ficha_vecino(s: &mut Session, u: &mut GameUi) {
+    u.open = None;
+    u.detail = None;
+    let p = crate::city::game_demo::vecino_con_agenda(s);
+    let g = s.game.as_mut().unwrap();
+    g.set_tool(7);
+    g.layer = None;
+    g.inspected = p;
+    g.hover = p;
+}
+// [/ia]
 
 // [personajes]
 /// Recorrido corto para mirar los personajes, los animales y los detalles de cerca

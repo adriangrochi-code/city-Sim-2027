@@ -17,6 +17,9 @@ pub enum Tipo {
     Carreta,
     /// Carro de dos ruedas tirado por un caballo (reparto de mercancías).
     Carro,
+    /// Arreo de ganado (una tropa con sus troperos a caballo): ocupa toda la calzada, nadie lo
+    /// adelanta; su largo depende de las cabezas (ver `Agente::largo`).
+    Arreo,
 }
 
 /// Parámetros del IDM: velocidad deseada `v0` (m/s), aceleración `a` y frenada cómoda `b`
@@ -32,7 +35,7 @@ pub struct Params {
 }
 
 impl Tipo {
-    pub const TODOS: [Tipo; 4] = [Tipo::APie, Tipo::Jinete, Tipo::Carreta, Tipo::Carro];
+    pub const TODOS: [Tipo; 5] = [Tipo::APie, Tipo::Jinete, Tipo::Carreta, Tipo::Carro, Tipo::Arreo];
 
     /// Valores de la época colonial (tabla de `docs/sistemas/agentes-y-conduccion.md`).
     pub fn params(self) -> Params {
@@ -41,6 +44,8 @@ impl Tipo {
             Tipo::Jinete => Params { v0: 3.8, a: 1.3, b: 2.2, t: 1.3, s0: 2.0, largo: 2.6 },
             Tipo::Carreta => Params { v0: 1.1, a: 0.25, b: 0.6, t: 2.4, s0: 3.0, largo: 7.5 },
             Tipo::Carro => Params { v0: 2.0, a: 0.6, b: 1.2, t: 1.8, s0: 2.5, largo: 5.0 },
+            // 3 km/h (datos de tropas); el largo es el de la punta: el resto lo pone cada tropa.
+            Tipo::Arreo => Params { v0: 0.83, a: 0.3, b: 0.8, t: 2.0, s0: 3.0, largo: 6.0 },
         }
     }
     pub fn vehiculo(self) -> bool {
@@ -52,6 +57,7 @@ impl Tipo {
             Tipo::Jinete => "a caballo",
             Tipo::Carreta => "en carreta de bueyes",
             Tipo::Carro => "en carro",
+            Tipo::Arreo => "arreando la tropa",
         }
     }
     /// "3 carretas", "1 jinete", "5 a pie".
@@ -61,6 +67,7 @@ impl Tipo {
             Tipo::Jinete => ("jinete", "jinetes"),
             Tipo::Carreta => ("carreta", "carretas"),
             Tipo::Carro => ("carro", "carros"),
+            Tipo::Arreo => ("arreo", "arreos"),
         };
         format!("{n} {}", if n == 1 { uno } else { varios })
     }

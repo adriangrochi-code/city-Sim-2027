@@ -292,7 +292,7 @@ pub fn vecinos(s: &mut Session) -> String {
     for k in 0..cuadros {
         c.agentes.set_hora(h0 + k as f32 * dt * super::HOURS_PER_SECOND);
         let t0 = Instant::now();
-        c.agentes.tick(&t, &c.net, &c.lots, c.plaza, dt);
+        c.tick_agentes(&t, dt); // [ia]
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         peor = peor.max(ms);
         total += ms;
@@ -314,7 +314,7 @@ pub fn vecinos(s: &mut Session) -> String {
         let carreta = c.agentes.e.agentes.iter().find(|a| a.tipo == Tipo::Carreta && a.proposito == Proposito::Paseo).map(|a| a.id);
         let mid = bridge.unwrap();
         for _ in 0..6000 {
-            c.agentes.tick(&t, &c.net, &c.lots, c.plaza, dt);
+            c.tick_agentes(&t, dt); // [ia]
             if carreta.and_then(|id| c.agentes.posicion(&c.net, id)).is_none_or(|p| p.distance(mid) < 4.0) {
                 break;
             }
@@ -1207,9 +1207,135 @@ pub fn traer_vehiculos(s: &mut Session) -> String {
             n += 1;
         }
         for _ in 0..40 {
-            c.agentes.tick(&t, &c.net, &c.lots, c.plaza, dt);
+            c.tick_agentes(&t, dt); // [ia]
         }
     }
     format!("{n} vehículos de paseo desde ({:.0}, {:.0})", desde.x, desde.y)
 }
 // [/personajes]
+
+// [ia] --- IA de los vecinos y tránsito (docs/sistemas/ia-y-transito.md §4.1) ----------------
+
+/// El portón terminado con más calle del lado de afuera (para la cola), si hay.
+fn porton_para_demo(c: &super::City) -> Option<super::agentes::portones::Porton> {
+    let plaza = c.plaza.map_or(PLAZA, |p| p.0);
+    c.agentes.portones.iter().copied().max_by(|a, b| a.pos.distance(plaza).total_cmp(&b.pos.distance(plaza)))
+}
+
+/// Punto de afuera del portón: sobre la calle del portón, del lado contrario a la plaza.
+fn afuera_del_porton(c: &super::City, g: &super::agentes::portones::Porton) -> Vec2 {
+    let e = &c.net.edges[&g.tramo];
+    let ext = if g.hacia_adentro == 0 { e.pts[0] } else { *e.pts.last().unwrap() };
+    let d = (ext - g.pos).normalize_or_zero();
+    // Hasta 140 m afuera, sobre alguna calle.
+    (1..=7).rev().map(|k| g.pos + d * (k as f32 * 20.0)).find(|p| c.net.nearest_edge(*p, 20.0).is_some()).unwrap_or(ext)
+}
+
+/// Portón con cola: llegan del campo carretas cargadas de cueros (y algún jinete) por el
+/// portón más alejado de la plaza; corre hasta que se forma la cola de la revisión.
+pub fn ia_porton(s: &mut Session) -> String {
+    use super::agentes::{Proposito, Tipo};
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    c.agentes.set_hora(10.5);
+    c.tick_agentes(&t, 0.0);
+    let Some(p) = porton_para_demo(c) else { return "no hay portones terminados".into() };
+    let desde = afuera_del_porton(c, &p);
+    let plaza = c.plaza.map_or(PLAZA, |x| x.0);
+    let dt = 1.0 / 30.0;
+    let mut largadas = 0;
+    for k in 0..9 {
+        let tipo = if k % 4 == 3 { Tipo::Jinete } else { Tipo::Carreta };
+        if c.agentes.lanzar(&c.net, tipo, desde, plaza, None, Proposito::TraeDelCampo, 900 + k, 1, (k as u8, k as u8 + 2)) {
+            let a = c.agentes.e.agentes.last_mut().unwrap();
+            a.cargada = tipo == Tipo::Carreta;
+            largadas += 1;
+        }
+        for _ in 0..40 {
+            c.tick_agentes(&t, dt);
+        }
+    }
+    for _ in 0..240 {
+        c.tick_agentes(&t, dt);
+    }
+    let st = c.agentes.e.portones.get(&p.clave).copied().unwrap_or_default();
+    *PORTON_DEMO.lock().unwrap() = Some((p.pos, desde));
+    format!(
+        "portón en ({:.0}, {:.0}): {largadas} carretas y jinetes del campo · cola {} entrando, {} saliendo · pasaron {} · {:.1} reales cobrados · espera media {:.0} s",
+        p.pos.x,
+        p.pos.y,
+        st.cola[0],
+        st.cola[1],
+        st.pasados_hoy,
+        st.reales_hoy,
+        st.espera_media().unwrap_or(0.0)
+    )
+}
+
+/// Portón de la demostración y el punto de afuera (para la cámara y la ficha).
+pub static PORTON_DEMO: std::sync::Mutex<Option<(Vec2, Vec2)>> = std::sync::Mutex::new(None);
+
+/// Cámara del lado de afuera del portón, mirando la cola hacia la muralla.
+pub fn view_porton(s: &Session) -> Option<[f32; 5]> {
+    let _ = s.game.as_ref()?;
+    let (g, afuera) = (*PORTON_DEMO.lock().unwrap())?;
+    let d = (g - afuera).normalize_or_zero();
+    let m = g - d * 18.0;
+    Some([m.x, m.y, 48.0, d.x.atan2(d.y).to_degrees() + 200.0, 22.0])
+}
+
+/// Un arreo: larga una tropa del campo a los corrales y la corre hasta que está entera en
+/// la calle, lejos del punto de salida.
+pub fn ia_arreo(s: &mut Session) -> String {
+    use super::agentes::Tipo;
+    let t = s.terrain.clone();
+    let g = s.game.as_mut().unwrap();
+    let c = &mut g.city;
+    c.agentes.set_hora(8.0);
+    c.tick_agentes(&t, 0.0);
+    if !c.agentes.lanzar_arreo(&c.net) {
+        return "no hay camino de afuera del campo a los corrales (el campo queda intramuros o no hay corrales)".into();
+    }
+    let id = c.agentes.e.agentes.last().unwrap().id;
+    let dt = 1.0 / 30.0;
+    for _ in 0..1800 {
+        c.tick_agentes(&t, dt);
+        let Some(a) = c.agentes.e.agentes.iter().find(|a| a.id == id) else { break };
+        // Hasta que la cola de la tropa salió del punto de partida.
+        let recorrido: f32 = a.patas[..a.li as usize].iter().map(|p| p.hasta - p.desde).sum::<f32>() + a.s - a.patas[0].desde;
+        if recorrido > a.largo() + 25.0 {
+            break;
+        }
+    }
+    let Some(a) = c.agentes.e.agentes.iter().find(|a| a.id == id) else { return "la tropa llegó antes de verla".into() };
+    let intra = a.patas.iter().filter(|p| c.agentes.intramuros.contains(&p.tramo)).count();
+    *ARREO_DEMO.lock().unwrap() = Some(id);
+    format!("arreo de {} cabezas ({:.0} m), {} tramos de camino, {intra} intramuros · en {}", a.cabezas, a.largo(), a.patas.len(), Tipo::Arreo.nombre())
+}
+
+pub static ARREO_DEMO: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+/// Cámara al costado de la tropa, a la mitad de su largo.
+pub fn view_arreo(s: &Session) -> Option<[f32; 5]> {
+    let c = &s.game.as_ref()?.city;
+    let id = (*ARREO_DEMO.lock().unwrap())?;
+    let a = c.agentes.e.agentes.iter().find(|a| a.id == id)?;
+    let (p, d, _, _) = super::agentes::pose_atras_con(&c.net, a, a.largo() * 0.45);
+    Some([p.x, p.y, 42.0, d.x.atan2(d.y).to_degrees() + 120.0, 26.0])
+}
+
+/// Un vecino de verdad (con persona y agenda) que esté en la calle cerca de la plaza: para
+/// su ficha.
+pub fn vecino_con_agenda(s: &Session) -> Option<Vec2> {
+    let c = &s.game.as_ref()?.city;
+    let plaza = c.plaza.map_or(PLAZA, |p| p.0);
+    c.agentes
+        .e
+        .agentes
+        .iter()
+        .filter(|a| a.persona.is_some() && a.vecino.and_then(|k| c.agentes.e.vecinos.get(&k)).is_some_and(|v| v.plan.len() >= 3))
+        .map(|a| super::agentes::pose(&c.net, a).0)
+        .min_by(|x, y| x.distance(plaza).total_cmp(&y.distance(plaza)))
+}
+// [/ia]

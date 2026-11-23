@@ -290,6 +290,8 @@ pub enum Layer {
     Molestias,
     /// Valor del suelo de cada solar.
     Valor,
+    /// [ia] Cola en los portones de la muralla (y quién espera en ella).
+    Portones,
 }
 
 impl Layer {
