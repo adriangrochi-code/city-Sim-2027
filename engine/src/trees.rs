@@ -31,6 +31,9 @@ pub enum Species {
     Ombu,
     /// Molle (*Schinus longifolius*) y arbustos del matorral costero y serrano.
     Molle,
+    /// [atlas] Chirca (*Eupatorium buniifolium*, *Baccharis* spp.): mata baja y redonda, verde
+    /// grisácea, sin tronco a la vista; forma los chircales (SH01) en manchas de la pradera.
+    Chirca,
 }
 
 /// Variantes de forma por especie.
@@ -113,6 +116,7 @@ pub fn leaf_of(s: Species) -> Mat {
         Species::Canelon => LEAF,
         Species::Espinillo => LEAF_ESPINILLO,
         Species::Ombu => LEAF_OMBU,
+        Species::Chirca => LEAF_TALA, // [atlas]
     }
 }
 
@@ -333,6 +337,26 @@ pub fn shape(t: &TreeSpec) -> Shape {
                 limbs.push(Limb { a: top, b: to, r0: tr * 0.45, r1: tr * 0.2, main: true });
             }
             holes = 22;
+        }
+        Species::Chirca => {
+            // [atlas] Mata baja de varias masas redondas casi a ras del suelo, con tallos finos.
+            // 0: redonda; 1: de cuatro masas; 2: baja y desparramada; 3: chica.
+            let n = [3, 4, 5, 3][v as usize];
+            let (ancho, alto) = match v {
+                2 => (1.35, 0.75),
+                3 => (0.75, 0.7),
+                _ => (1.0, 1.0),
+            };
+            blobs = Vec::new();
+            for k in 0..n {
+                let a = rng.f() * std::f32::consts::TAU + k as f32 * 2.4;
+                let d = r * ancho * if k == 0 { 0.0 } else { rng.range(0.35, 0.6) };
+                let s = r * ancho.min(1.0) * rng.range(0.5, 0.7);
+                let c = Vec3::new(a.cos() * d, h * alto * rng.range(0.45, 0.6), a.sin() * d);
+                limbs.push(Limb { a: Vec3::new(a.cos() * 0.1, 0.0, a.sin() * 0.1), b: c * 0.8, r0: tr, r1: tr * 0.6, main: k == 0 });
+                blobs.push(Blob { c, rh: s, rv: s.min(h * alto * 0.5), droop: false });
+            }
+            holes = 20;
         }
     }
     Shape { limbs, blobs, leaf: leaf_of(t.species), bark, holes, flower }
@@ -719,7 +743,7 @@ mod tests {
 
     #[test]
     fn cada_especie_tiene_variantes_distintas() {
-        for sp in [Species::Sauce, Species::Sarandi, Species::Ceibo, Species::Coronilla, Species::Tala, Species::Canelon, Species::Espinillo, Species::Ombu, Species::Molle] {
+        for sp in [Species::Sauce, Species::Sarandi, Species::Ceibo, Species::Coronilla, Species::Tala, Species::Canelon, Species::Espinillo, Species::Ombu, Species::Molle, Species::Chirca] {
             let shapes: Vec<Shape> = (0..VARIANTS).map(|v| shape(&spec(sp, v, 77))).collect();
             for a in 0..shapes.len() {
                 for b in a + 1..shapes.len() {

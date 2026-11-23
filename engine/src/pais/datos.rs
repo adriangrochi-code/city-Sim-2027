@@ -18,6 +18,8 @@ const HISTORIA_JSON: &str = include_str!("../../../assets/mapas/uruguay/historia
 const GEOLOGIA_BIN: &[u8] = include_bytes!("../../../assets/datos/uruguay/geologia_pais.bin");
 const GEOLOGIA_JSON: &str = include_str!("../../../assets/datos/uruguay/pais.json");
 const TITULOS_JSON: &str = include_str!("../../../assets/datos/uruguay/titulos_mineros.json");
+// [atlas] Ecosistemas del atlas, una capa por período (ver `crate::ecosistemas`).
+const ECOSISTEMAS_BIN: &[u8] = include_bytes!("../../../assets/mapas/uruguay/ecosistemas.bin");
 
 /// Canales de `capas.bin` (8 bytes por celda).
 pub const C_AGUA: usize = 0;
@@ -224,6 +226,8 @@ pub struct Geografia {
     pub geologia: Vec<u8>,
     pub unidades: std::collections::HashMap<u32, Unidad>,
     pub titulos: Vec<Titulo>,
+    /// [atlas] Ecosistemas por celda y por período.
+    pub eco: crate::ecosistemas::Grilla,
 }
 
 static DATOS: OnceLock<Geografia> = OnceLock::new();
@@ -261,7 +265,12 @@ impl Geografia {
             .into_iter()
             .map(|t| Titulo { pos: [((t.lon - g.lon_oeste) / g.dlon) as f32, ((g.lat_norte - t.lat) / g.dlat) as f32], material: t.materiales.into_iter().next() })
             .collect();
+        let eco = crate::ecosistemas::Grilla::leer(ECOSISTEMAS_BIN).map_err(|e| format!("ecosistemas.bin: {e}"))?;
+        if (eco.ancho, eco.alto) != (g.columnas, g.filas) {
+            return Err(format!("ecosistemas.bin: {} × {}", eco.ancho, eco.alto));
+        }
         Ok(Geografia {
+            eco,
             g,
             alt,
             capas,
@@ -361,6 +370,11 @@ impl Geografia {
     /// Longitud y latitud de una celda.
     pub fn lonlat(&self, p: [f32; 2]) -> (f64, f64) {
         (self.g.lon_oeste + p[0] as f64 * self.g.dlon, self.g.lat_norte - p[1] as f64 * self.g.dlat)
+    }
+
+    /// [atlas] Ecosistema de la celda en un año (la capa del período que rige).
+    pub fn ecosistema(&self, c: f32, f: f32, anio: i32) -> Option<crate::ecosistemas::Celda> {
+        self.eco.celda(self.eco.capa_de(anio), c.round() as i64, f.round() as i64)
     }
 
     /// Unidad geológica de la celda.

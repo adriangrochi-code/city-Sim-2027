@@ -56,7 +56,7 @@ struct TourUi {
 /// el relieve, la costa, los médanos y los biomas con el mismo generador que usa el juego.
 pub fn landscape_steps() -> Vec<Act> {
     use Act::*;
-    let views: [(&'static str, [f32; 5]); 39] = [
+    let views: [(&'static str, [f32; 5]); 44] = [
         ("paisaje-general", [14000.0, 12500.0, 7000.0, 200.0, 50.0]),
         // Hidrografía oficial (IDE): la playa de Pocitos y los bañados del Carrasco y el Pantanoso.
         ("paisaje-playa-pocitos", [16500.0, 15000.0, 700.0, 200.0, 28.0]),
@@ -107,6 +107,14 @@ pub fn landscape_steps() -> Vec<Act> {
         ("mundo-general-maximo", [12000.0, 12000.0, 15000.0, 200.0, 45.0]),
         ("mundo-alto-este", [23600.0, 12000.0, 15000.0, 260.0, 14.0]),
         ("mundo-alto-rio-argentina", [2000.0, 23600.0, 15000.0, 135.0, 12.0]),
+        // [atlas] Ecosistemas del atlas: chircal y pastizal ralo en el mapa jugable, monte
+        // serrano en mosaico con roca en las sierras de Maldonado y bosque parque en Colonia
+        // (entorno amplio).
+        ("atlas-chircal-cerca", [13600.0, 7650.0, 45.0, 200.0, 14.0]),
+        ("atlas-pastizal-ralo", [12100.0, 6500.0, 260.0, 200.0, 22.0]),
+        ("atlas-serrano-cerca", [147000.0, -30500.0, 90.0, 200.0, 16.0]),
+        ("atlas-serrano-lejos", [147000.0, -30500.0, 2500.0, 200.0, 20.0]),
+        ("atlas-parque-colonia", [-70000.0, -72000.0, 140.0, 200.0, 16.0]),
     ];
     // `MOTOR_HORA=17.3` saca las vistas a esa hora (para revisar la luz baja).
     let hora = std::env::var("MOTOR_HORA").ok().and_then(|h| h.parse().ok()).unwrap_or(10.5);

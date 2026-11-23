@@ -146,6 +146,12 @@ confirmados con matices (Maldonado 1755-1757).
   1868; Rocha 1880; Artigas, Rivera y Treinta y Tres 1884; Flores 1885), ESTIMADOS: sin
   verificar en esta corrida. Antes de su año el rótulo va entre paréntesis.
 
+## Ecosistemas (capa del atlas)
+
+Capa «Ecosistemas» con la leyenda del *Atlas ecológico e histórico del Uruguay* y una capa por
+período (1750–1800 hasta 1985–2025); la ficha de cada celda dice código, evidencia, confianza y
+fuente. Ver [atlas-ecologico.md](atlas-ecologico.md).
+
 ## Simulación (`engine/src/pais/mod.rs`, `rutas.rs`)
 
 Cada mes de la ciudad (el país sigue su calendario; `Game::update`):

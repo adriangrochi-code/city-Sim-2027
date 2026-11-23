@@ -1176,6 +1176,7 @@ dependencies = [
  "fastnoise-lite",
  "glam",
  "image",
+ "miniz_oxide 0.8.9",
  "pollster",
  "serde",
  "serde_json",

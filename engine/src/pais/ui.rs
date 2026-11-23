@@ -86,6 +86,8 @@ pub struct Capas {
     pub departamentos: bool,
     pub recursos: bool,
     pub cobertura: bool,
+    /// [atlas] Ecosistemas del atlas (capa del período del año).
+    pub ecosistemas: bool,
     pub pueblos: bool,
     pub caminos: bool,
     pub ferrocarril: bool,
@@ -95,7 +97,7 @@ pub struct Capas {
 
 impl Default for Capas {
     fn default() -> Self {
-        Capas { departamentos: false, recursos: false, cobertura: true, pueblos: true, caminos: true, ferrocarril: true, flujos: true, rotulos: true }
+        Capas { departamentos: false, recursos: false, cobertura: true, ecosistemas: false, pueblos: true, caminos: true, ferrocarril: true, flujos: true, rotulos: true }
     }
 }
 
@@ -109,7 +111,7 @@ pub struct PaisUi {
     pub camino_desde: Option<String>,
     pub sel: Option<Sel>,
     pub hover: Option<[f32; 2]>,
-    textura: Option<((bool, bool, u8), egui::TextureHandle)>,
+    textura: Option<((bool, bool, u8, u8), egui::TextureHandle)>,
     /// La vista se ajusta al país la primera vez que se abre.
     ajustada: bool,
 }
@@ -346,13 +348,15 @@ impl PaisUi {
     fn textura(&mut self, ctx: &egui::Context, anio: i32) -> egui::TextureId {
         let g = geo();
         let emb = g.embalses.iter().enumerate().fold(0u8, |m, (k, e)| if anio >= e.anio { m | (1 << k) } else { m });
-        let clave = (self.capas.recursos, self.capas.cobertura, emb);
+        // [atlas] La capa de ecosistemas cambia con el período (255: apagada).
+        let eco = if self.capas.ecosistemas { g.eco.capa_de(anio) as u8 } else { 255 };
+        let clave = (self.capas.recursos, self.capas.cobertura, emb, eco);
         if let Some((k, t)) = &self.textura {
             if *k == clave {
                 return t.id();
             }
         }
-        let img = imagen(anio, self.capas.recursos, self.capas.cobertura);
+        let img = imagen_capas(anio, self.capas.recursos, self.capas.cobertura, self.capas.ecosistemas);
         let t = ctx.load_texture("mapa-pais", img, egui::TextureOptions::LINEAR);
         let id = t.id();
         self.textura = Some((clave, t));
@@ -571,12 +575,22 @@ impl PaisUi {
             ui.checkbox(&mut c.departamentos, "Departamentos");
             ui.checkbox(&mut c.recursos, "Recursos");
             ui.checkbox(&mut c.cobertura, "Monte y bañados");
+            // [atlas]
+            if ui.checkbox(&mut c.ecosistemas, "Ecosistemas").on_hover_text("Leyenda del Atlas ecológico e histórico del Uruguay, con la capa del período del año").changed() && c.ecosistemas {
+                c.recursos = false;
+            }
             ui.checkbox(&mut c.pueblos, "Pueblos");
             ui.checkbox(&mut c.caminos, "Caminos");
             ui.checkbox(&mut c.ferrocarril, "Ferrocarril");
             ui.checkbox(&mut c.flujos, "Carretas");
             ui.checkbox(&mut c.rotulos, "Rótulos");
         });
+        if c.recursos && c.ecosistemas {
+            c.ecosistemas = false;
+        }
+        if c.ecosistemas {
+            leyenda_ecosistemas(ui, anio);
+        }
         if c.recursos {
             // Leyenda de la capa de recursos (material principal de la unidad geológica).
             ui.horizontal_wrapped(|ui| {
@@ -726,6 +740,8 @@ fn celda_info(ui: &mut egui::Ui, c: [f32; 2], anio: i32) {
         t.push_str(" · agua");
     }
     ui.label(RichText::new(t).small());
+    // [atlas]
+    ficha_ecosistema(ui, c, anio);
     ui.label(RichText::new(format!(
         "Pradera {:.0} % · monte {:.0} % · bañado {:.0} %",
         g.pastura(c[0], c[1]) * 100.0,
@@ -743,6 +759,88 @@ fn celda_info(ui: &mut egui::Ui, c: [f32; 2], anio: i32) {
     if let Some((r, _)) = g.rio_cerca(c, 2.0) {
         ui.label(RichText::new(format!("{}{}", r.nombre, if r.navegable { " (navegable)" } else { "" })).small());
     }
+}
+
+/// [atlas] Ecosistema de la celda: código, nombre, mosaico, densidad, evidencia, confianza y fuente
+/// (de la capa del período del año).
+fn ficha_ecosistema(ui: &mut egui::Ui, c: [f32; 2], anio: i32) {
+    use crate::ecosistemas as eco;
+    let g = geo();
+    let Some(e) = g.ecosistema(c[0], c[1], anio) else { return };
+    let Some(cl) = eco::clase(e.prim) else { return };
+    let capa = &eco::info().capas[g.eco.capa_de(anio)];
+    ui.label(RichText::new(format!("{} · {}", cl.codigo, cl.nombre)).strong());
+    if let Some(s) = eco::clase(e.sec) {
+        ui.label(RichText::new(format!("Mosaico con {} ({})", s.nombre.to_lowercase(), s.codigo)).small());
+    }
+    let mut t = format!("Árboles: {}", eco::DENSIDAD[e.densidad.min(5) as usize]);
+    if let Some(h) = e.dosel_m() {
+        t.push_str(&format!(" · dosel ~{h:.0} m"));
+    }
+    ui.label(RichText::new(t).small());
+    let col = match e.evidencia {
+        2 => theme::INK,
+        1 => theme::INK_SOFT,
+        _ => theme::BAD,
+    };
+    ui.label(RichText::new(format!("Evidencia: {} · confianza {}", eco::EVIDENCIA[e.evidencia.min(2) as usize], eco::CONFIANZA[e.confianza.min(2) as usize])).small().color(col));
+    ui.label(RichText::new(format!("Capa {} ({}–{})", capa.periodo, capa.desde, capa.hasta.min(2025))).small());
+    ui.label(RichText::new(format!("Fuente: {}", eco::fuente(e.fuente))).size(11.0).color(theme::INK_SOFT));
+    // Desde 1985, las cifras de MapBiomas del departamento (sin compararlas con las históricas).
+    if anio >= 1985 {
+        let dep = g.nombre_depto(g.depto(c[0], c[1])).unwrap_or("");
+        if let Some(m) = eco::info().mapbiomas_departamentos_km2.as_ref().and_then(|m| m.iter().find(|(k, _)| k.eq_ignore_ascii_case(dep) || quitar_tildes(k) == quitar_tildes(dep)).map(|(_, v)| v)) {
+            let v = |cl: &str| m.get(cl).map(|a| (a.get("1985").copied().unwrap_or(0.0), a.get("2025").copied().unwrap_or(0.0)));
+            let mut partes = Vec::new();
+            for (k, n) in [("Bosque Natural", "bosque natural"), ("Pastizal natural", "pastizal"), ("Agricultura", "agricultura")] {
+                if let Some((a, b)) = v(k) {
+                    partes.push(format!("{n} {a:.0} → {b:.0}"));
+                }
+            }
+            let plant = v("Pino").map_or(0.0, |x| x.1) + v("Eucaliptus").map_or(0.0, |x| x.1);
+            ui.label(RichText::new(format!("{dep}, MapBiomas col. 4 (km², 1985 → 2025): {} · plantaciones 2025: {plant:.0}", partes.join(" · "))).size(11.0).color(theme::INK_SOFT));
+        }
+    }
+}
+
+fn quitar_tildes(s: &str) -> String {
+    s.to_lowercase().chars().map(|c| match c {
+        'á' => 'a',
+        'é' => 'e',
+        'í' => 'i',
+        'ó' => 'o',
+        'ú' => 'u',
+        c => c,
+    }).collect()
+}
+
+/// [atlas] Leyenda de la capa de ecosistemas: las clases que hay en la capa del período.
+fn leyenda_ecosistemas(ui: &mut egui::Ui, anio: i32) {
+    use crate::ecosistemas as eco;
+    let g = geo();
+    let k = g.eco.capa_de(anio);
+    let capa = &eco::info().capas[k];
+    ui.label(RichText::new(format!("Capa {} · {}", capa.periodo, capa.nota)).small().color(theme::INK_SOFT));
+    let mut hay = [false; 64];
+    for f in (0..g.alto()).step_by(2) {
+        for c in (0..g.ancho()).step_by(2) {
+            if let Some(e) = g.eco.celda(k, c as i64, f as i64) {
+                hay[(e.prim as usize).min(63)] = true;
+                hay[(e.sec as usize).min(63)] = true;
+            }
+        }
+    }
+    ui.horizontal_wrapped(|ui| {
+        for cl in eco::LEYENDA.iter().filter(|cl| hay[cl.n as usize]) {
+            // Cuadradito de color y código en un solo rótulo (no se separan al cortar la línea).
+            let mut job = egui::text::LayoutJob::default();
+            let f = FontId::proportional(13.0);
+            job.append("■", 0.0, egui::TextFormat { font_id: FontId::proportional(15.0), color: Color32::from_rgb(cl.color[0], cl.color[1], cl.color[2]), ..Default::default() });
+            job.append(cl.codigo, 2.0, egui::TextFormat { font_id: f, color: theme::INK, ..Default::default() });
+            ui.label(job).on_hover_text(format!("{}{}", cl.nombre, if cl.atlas { "" } else { " (extensión del juego, no está en el atlas)" }));
+        }
+    });
+    ui.label(RichText::new("Puntos: mosaico (código secundario). Rayado: evidencia desconocida. Atlas v1.0 + reglas por gradientes (ver ficha de cada celda).").small().color(theme::INK_SOFT));
 }
 
 /// Color de un material del catálogo (capa de recursos).
@@ -763,10 +861,16 @@ fn color_material(m: &str) -> [f32; 3] {
     }
 }
 
+/// Imagen del mapa sin la capa de ecosistemas (la usan las pruebas y el resto del código).
+pub fn imagen(anio: i32, recursos: bool, cobertura: bool) -> egui::ColorImage {
+    imagen_capas(anio, recursos, cobertura, false)
+}
+
 /// Imagen del mapa: relieve en terrazas (escalones de 15 m con luz del noroeste), agua, monte,
 /// bañados y lo de afuera apagado (los ríos van encima, como líneas). Tres píxeles por celda.
-pub fn imagen(anio: i32, recursos: bool, cobertura: bool) -> egui::ColorImage {
+pub fn imagen_capas(anio: i32, recursos: bool, cobertura: bool, ecosistemas: bool) -> egui::ColorImage {
     let g = geo();
+    let capa_eco = g.eco.capa_de(anio);
     const S: usize = 3;
     let (w, h) = (g.ancho() * S, g.alto() * S);
     let mut px = vec![0u8; w * h * 4];
@@ -808,6 +912,21 @@ pub fn imagen(anio: i32, recursos: bool, cobertura: bool) -> egui::ColorImage {
                 if b[datos::C_DEPTO] == 0 {
                     // Fuera del país (Argentina, Brasil): llano y apagado, sin relieve.
                     col = [168.0, 164.0, 150.0];
+                } else if ecosistemas {
+                    // [atlas] Color de la clase con la luz del relieve; el secundario en un punto
+                    // de cada celda (mosaico) y la evidencia desconocida, rayada.
+                    if let Some(e) = g.eco.celda(capa_eco, ci as i64, fi as i64) {
+                        let luz = (col[0] + col[1] + col[2]) / (118.0 + 146.0 + 86.0 + 0.001) * 1.0;
+                        let (sx, sy) = (x % S, y % S);
+                        let n = if sx == 1 && sy == 1 && e.sec != 0 { e.sec } else { e.prim };
+                        if let Some(cl) = crate::ecosistemas::clase(n) {
+                            let k = (0.75 + 0.25 * luz).clamp(0.6, 1.2);
+                            col = [cl.color[0] as f32 * k, cl.color[1] as f32 * k, cl.color[2] as f32 * k];
+                        }
+                        if e.evidencia == 0 && (x + y) % 4 == 0 {
+                            col = [col[0] * 0.8 + 40.0, col[1] * 0.8 + 40.0, col[2] * 0.8 + 40.0];
+                        }
+                    }
                 } else if recursos {
                     let m = (col[0] + col[1] + col[2]) / 3.0;
                     let gris = [m * 0.75 + 40.0; 3];

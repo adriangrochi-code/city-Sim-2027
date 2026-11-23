@@ -852,5 +852,45 @@
       }
     ],
     "nota": "Argentina (sur del Río de la Plata): Copernicus DEM GLO-90 de la ESA (superficie, no suelo). © DLR e.V. 2010-2014 y © Airbus Defence and Space GmbH 2014-2018, provisto bajo COPERNICUS por la Unión Europea y la ESA. Ver docs/sistemas/mapa-real.md."
+  },
+  "ecosistemas": {
+    "codificacion": "ECO1: u16 ancho, u16 alto, u8 bytes por celda (6), u8 capas; por capa i16 desde, i16 hasta, u32 largo y la grilla zlib. Celda: primario, secundario, densidad (0 ausente..4 alta, 5 sin dato), dosel (dm, 0 = sin fuente), evidencia | confianza << 4, fuente.",
+    "leyenda_y_fuentes": "assets/mapas/uruguay/ecosistemas.json",
+    "entorno": {
+      "archivo": "ecosistemas.bin",
+      "desde_m": -25000.0,
+      "paso_m": 100.0,
+      "muestras": 741,
+      "conteo_1750": {
+        "PR01": 39843,
+        "PR02": 27313,
+        "PR03": 102408,
+        "FO01": 9639,
+        "FO05": 1101,
+        "HU01": 34999,
+        "CO01": 2881,
+        "AN02": 14971
+      },
+      "plantacion_1900_muestras": 0
+    },
+    "amplio": {
+      "archivo": "ecosistemas_amplio.bin",
+      "desde_m": -138000.0,
+      "paso_m": 500.0,
+      "muestras": 601,
+      "conteo_1750": {
+        "PR01": 32715,
+        "PR02": 11583,
+        "PR03": 95637,
+        "PR04": 63,
+        "FO01": 9656,
+        "FO03": 7486,
+        "FO04": 557,
+        "HU01": 2725,
+        "CO01": 682,
+        "AN02": 1763
+      },
+      "plantacion_1900_muestras": 34
+    }
   }
 }

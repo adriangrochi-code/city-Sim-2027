@@ -70,6 +70,19 @@ pub fn pasos() -> Vec<Act> {
         }),
         Game("el país en 1790", |s| avanzar(s, 1790)),
         UiShot("pais-1790-colonial", |_, u| abrir(u, None)),
+        // [atlas] Capa de ecosistemas en el período 1750–1800 (país entero y el este con los
+        // palmares de butiá y los bañados de la Merín).
+        UiShot("pais-1790-ecosistemas", |_, u| {
+            abrir(u, None);
+            u.pais.capas.ecosistemas = true;
+            u.pais.capas.flujos = false;
+        }),
+        UiShot("pais-1790-ecosistemas-este", |_, u| {
+            abrir(u, Some(([425.0, 430.0], 6.0)));
+            u.pais.capas.ecosistemas = true;
+            u.pais.capas.flujos = false;
+            u.pais.sel = Some(super::ui::Sel::Celda([435.0, 461.0]));
+        }),
         UiShot("pais-1790-sur-carretas", |_, u| abrir(u, Some(([215.0, 470.0], 5.0)))),
         Game("otorgar una estancia cerca de Santa Lucía (colonia)", |s| {
             let p = pos_de(s, "santa_lucia");
@@ -133,6 +146,20 @@ pub fn pasos() -> Vec<Act> {
         Game("el país en 1895", |s| avanzar(s, 1895)),
         UiShot("pais-1895-ferrocarril", |_, u| abrir(u, None)),
         UiShot("pais-1895-sur", |_, u| abrir(u, Some(([215.0, 470.0], 5.0)))),
+        // [atlas] 1950: forestación costera de Canelones (plantación, no nativo) y Colonia según
+        // la cartografía de 1966.
+        Game("el país en 1950", |s| avanzar(s, 1950)),
+        UiShot("pais-1950-ecosistemas", |_, u| {
+            abrir(u, None);
+            u.pais.capas.ecosistemas = true;
+            u.pais.capas.flujos = false;
+        }),
+        UiShot("pais-1950-ecosistemas-canelones", |_, u| {
+            abrir(u, Some(([259.0, 521.0], 14.0)));
+            u.pais.capas.ecosistemas = true;
+            u.pais.capas.flujos = false;
+            u.pais.sel = Some(super::ui::Sel::Celda([259.0, 523.0]));
+        }),
         Game("guardar y cargar el país", guardar_y_cargar),
     ]
 }

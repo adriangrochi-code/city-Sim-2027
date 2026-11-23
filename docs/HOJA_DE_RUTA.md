@@ -1,6 +1,6 @@
 # Hoja de ruta
 
-> Estado al 18 de noviembre de 2026. Se actualiza con cada avance.
+> Estado al 23 de noviembre de 2026. Se actualiza con cada avance.
 > Dos líneas de trabajo: el **prototipo de Godot** (para diseñar y probar la jugabilidad) y el
 > **motor de vóxeles en Rust** (donde va a vivir el juego final).
 
@@ -15,6 +15,7 @@
 | Mundo real en el motor | MDT de 30 m de la IDE, hidrografía oficial (arroyos, cañadas, bañados, playas, islas), curvatura, puentes, ríos con corriente, mareas y ciclo lunar, sequías e inundaciones, clima con datos del INUMET, viento |
 | Paisaje de 1726 | Monte nativo calibrado con datos y testimonios (4,2 % del mapa, galerías por clase de cauce), 9 especies de árboles con variantes, flora baja nativa por zona, suelos y afloramientos (CONEAT), costa por tramos (arena, mixta, piedra, restingas) — ver `docs/sistemas/vegetacion-historica.md` y `costa.md` |
 | Entorno amplio | 300 × 300 km de relieve real alrededor del mapa (MDT de la IDE + Copernicus para la costa argentina, monte y bañados), 11 niveles de detalle (la tierra llega al horizonte, ~90 km), sin cortes rectos entre grillas ni contra el agua — ver `docs/sistemas/mapa-real.md#entorno-amplio` |
+| Ecosistemas del atlas | Leyenda del *Atlas ecológico e histórico del Uruguay* (18 clases con códigos estables, más plantación, urbano y transformado) en el país a 1 km (5 capas por período: base 1750–1800, Colonia sin datos 1860, forestación de Canelones desde 1900, Colonia de 1966, observación 1985–2025) y en el entorno de la ciudad; cada celda con evidencia, confianza y fuente; reglas por gradientes con la cartografía de pastizales del MGAP, el monte 2021, CONEAT, geología y relieve; palmares de butiá y yatay en sus núcleos documentados; capa «Ecosistemas» del mapa del país; monte serrano, bosque parque y chircas en el terreno — ver `docs/sistemas/atlas-ecologico.md` |
 | Mapa del país | El Uruguay a 1 km con datos de la IDE, el MTOP, la DGF y DINAMIGE; pueblos, caminos, puertos, estancias y saladeros por fecha; carretas al puerto de Montevideo que alimentan la economía de la ciudad; modo «Mapa del país» (M) — ver `docs/sistemas/mapa-pais.md` |
 | Calidad visual | Vóxel de 0,25 m, flora en micro-vóxeles de 0,125 m, copas con racimos, nivel de detalle del monte, agua sin tapar tierra en ningún nivel, niebla con sol |
 | Personajes y animales | Modelos de detalle de micro-vóxeles de 1/16 m (biblioteca por datos con paletas y partes animadas): vecinos vestidos según su persona, oficio y época (19 atuendos), jinetes, carretas con yunta y boyero, carros; rodeos en las estancias según su rinde, caballos en los palenques de las pulperías, perros, gallinas, botes en el muelle; faroles, toneles, brocales, pozos, letreros (ver `docs/sistemas/personajes-y-animales.md`) |
@@ -76,6 +77,8 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 - [x] Rehabilitación de casas viejas y modernización de edificios coloniales (fachada nueva en el lugar con la misma huella, techo de teja, un piso más; los dueños solos, la ordenanza de fachadas o el jugador desde la ficha)
 
 ## Más adelante
+
+- [ ] Ecosistemas: corregir la base de 1750 fuera de Colonia con planos de agrimensura y relatos (atlas, fase C); ubicar el núcleo de yatay de Santo Domingo y los palmares desaparecidos de Mujica y Porrúa; MapBiomas por píxel para 1985–2025; que el terreno de la ciudad siga los períodos (hoy usa siempre la base)
 
 - [ ] Personajes y animales: sombras proyectadas en las cascadas, más poses (boyero con picana, gente sentada), pedidos de detalle de los edificios (rejas, postigos, macetas, faroles de fachada, cancel; ver `docs/sistemas/modelos-de-detalle.md`)
 

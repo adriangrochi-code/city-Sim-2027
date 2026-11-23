@@ -54,6 +54,18 @@ Lo que dicen las fuentes:
   antes del siglo XX (Carrere, 1990). Ninguna fuente da el ancho del monte del Miguelete en 1726: lo
   que usamos es una reconstrucción a partir del monte que sobrevive hoy en arroyos rurales parecidos.
 
+## Ecosistemas del atlas (noviembre de 2026)
+
+Sobre este monte, el terreno lee ahora la capa de **ecosistemas** con la leyenda del *Atlas
+ecológico e histórico del Uruguay* (ver [`atlas-ecologico.md`](atlas-ecologico.md)): en el
+entorno (100 m) y el entorno amplio (500 m) cada punto tiene una clase (pradera, pastizal ralo
+o denso, chircal, monte ribereño, serrano, parque, psamófilo, bañado, arenal, ecotono) con su
+evidencia y su fuente. En el mapa jugable el monte sigue siendo el de 1726 de este documento;
+se suman **chircas** (especie nueva, mata baja verde grisácea) en manchas donde la clase tiene
+chircal, y la pradera de los suelos superficiales (CONEAT) es más seca. En el entorno amplio,
+las sierras de Maldonado tienen **monte serrano** bajo en bosquecillos entre roca y pasto seco, y
+Colonia, **bosque parque** de árboles separados.
+
 ## Datos usados
 
 | Dato | Fuente | Uso |
@@ -215,7 +227,9 @@ De lejos (2 y 4 m por vóxel) las copas tienen menos huecos para no sumar caras.
   de los de Montevideo.
 - La franja de orilla y la flora baja salen de la bibliografía general, no de un relevamiento de
   Montevideo. La flora no cambia con la estación (el ceibo tiene siempre alguna flor).
-- No hay palmares ni monte serrano en el mapa jugable (no los hay en Montevideo).
+- No hay palmares ni monte serrano en el mapa jugable (no los hay en Montevideo). El monte
+  serrano aparece en el entorno amplio (sierras de Maldonado); los palmares quedan fuera de los
+  300 km del entorno y solo se ven en el mapa del país (ver `atlas-ecologico.md`).
 
 ## Cómo regenerar
 

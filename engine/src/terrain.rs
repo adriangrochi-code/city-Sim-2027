@@ -174,6 +174,20 @@ const META_JSON: &str = include_str!("../../assets/mapas/montevideo/meta.json");
 /// (bañado y monte nativo, un byte cada uno).
 const AMPLIO_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/amplio.bin");
 const AMPLIO_COB_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/amplio_cobertura.bin");
+// [atlas] Ecosistemas del atlas en el entorno (100 m, la grilla de contexto.bin) y en el entorno
+// amplio (500 m). El terreno es el de la época colonial: se usa la capa base (1750–1800).
+const ECO_CTX_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/ecosistemas.bin");
+const ECO_AMPLIO_BIN: &[u8] = include_bytes!("../../assets/mapas/montevideo/ecosistemas_amplio.bin");
+
+/// [atlas] Las dos grillas de ecosistemas de la ciudad (entorno y amplio), leídas una vez.
+fn eco_grillas() -> &'static (crate::ecosistemas::Grilla, crate::ecosistemas::Grilla) {
+    static G: std::sync::OnceLock<(crate::ecosistemas::Grilla, crate::ecosistemas::Grilla)> = std::sync::OnceLock::new();
+    G.get_or_init(|| {
+        let a = crate::ecosistemas::Grilla::leer(ECO_CTX_BIN).expect("ecosistemas.bin del entorno");
+        let b = crate::ecosistemas::Grilla::leer(ECO_AMPLIO_BIN).expect("ecosistemas_amplio.bin");
+        (a, b)
+    })
+}
 /// Transición entre el entorno (grilla de 100 m) y el entorno amplio (500 m): los últimos
 /// metros de la grilla del entorno se mezclan con la amplia, sin escalón ni corte recto.
 pub const WIDE_BLEND: f32 = 3000.0;
@@ -637,6 +651,7 @@ fn species_size(s: Species) -> (f32, f32, f32) {
         Species::Espinillo => (4.0, 2.6, 0.14),
         Species::Ombu => (11.0, 6.2, 1.2),
         Species::Molle => (4.0, 2.0, 0.14),
+        Species::Chirca => (1.5, 1.0, 0.04), // [atlas]
     }
 }
 
@@ -1056,6 +1071,51 @@ impl TerrainGen {
         hashf((x / crate::lod::BASE_VOXEL).floor() as i32, (z / crate::lod::BASE_VOXEL).floor() as i32, 97) - 0.5
     }
 
+    /// [atlas] Ecosistema (capa base, 1750–1800) en un punto: la grilla de 100 m del entorno
+    /// (también dentro del mapa jugable) o la de 500 m del entorno amplio. El punto se corre unos
+    /// metros al azar por vóxel para que el borde entre clases sea una banda y no un escalón.
+    /// `None` en el mapa ficticio, fuera de las grillas y en el agua.
+    pub fn ecosistema(&self, x: f32, z: f32) -> Option<crate::ecosistemas::Celda> {
+        let r = self.real.as_ref()?;
+        let (ctx, amplio) = eco_grillas();
+        let d = self.dither(x, z);
+        let d2 = hashf((x / crate::lod::BASE_VOXEL).floor() as i32, (z / crate::lod::BASE_VOXEL).floor() as i32, 131) - 0.5;
+        let (g, gr) = if r.ctx.inside(x, z) > 60.0 { (&r.ctx, ctx) } else { (&r.wide, amplio) };
+        let (jx, jz) = (x + d * g.step * 0.8, z + d2 * g.step * 0.8);
+        let i = ((jx - g.from) / g.step).round() as i64;
+        let j = ((jz - g.from) / g.step).round() as i64;
+        gr.celda(0, i, j).filter(|c| c.prim != 0)
+    }
+
+    /// [atlas] Probabilidad de un árbol o arbusto suelto por celda de árboles (7 m) según el
+    /// ecosistema, fuera del monte cerrado: parque/espinal con árboles separados, monte serrano
+    /// en bosquecillos redondos entre pasto y roca, chircales en manchas.
+    fn p_ecosistema(&self, e: &crate::ecosistemas::Celda, x: f32, z: f32) -> f32 {
+        use crate::ecosistemas::*;
+        if e.tiene(FO03) {
+            // Bosquecillos más o menos circulares separados por pradera (MGAP, Manual 2018, §3.4).
+            let n = self.n_hills.get_noise_2d(x * 30.0 + 71.0, z * 30.0 - 13.0) * 0.5 + 0.5;
+            let thr = if e.prim == FO03 { 0.55 } else { 0.68 };
+            return if n > thr { 0.55 } else { 0.004 };
+        }
+        if e.prim == FO04 {
+            return 0.035; // árboles separados sobre la matriz herbácea (~1 cada 1.400 m²)
+        }
+        if e.sec == FO04 || e.prim == AN02 {
+            return 0.008;
+        }
+        if e.tiene(SH01) {
+            // Manchas de chirca de decenas de metros.
+            let n = self.n_detail.get_noise_2d(x * 3.0 - 41.0, z * 3.0 + 17.0);
+            return if n > 0.25 {
+                if e.prim == SH01 { 0.25 } else { 0.06 }
+            } else {
+                0.0
+            };
+        }
+        0.0
+    }
+
     pub fn forest_cover(&self, x: f32, z: f32) -> f32 {
         let Some(r) = &self.real else { return 0.0 };
         let edge = x.min(z).min(MAP_SIZE - x).min(MAP_SIZE - z);
@@ -1134,7 +1194,14 @@ impl TerrainGen {
             return 0.0;
         }
         let u = 0.5 + self.n_hills.get_noise_2d(x * 22.0, z * 22.0) * 0.95 + self.n_detail.get_noise_2d(x * 4.0, z * 4.0) * 0.12;
-        smoothstep(-0.08, 0.08, c - u.clamp(0.02, 0.98))
+        let m = smoothstep(-0.08, 0.08, c - u.clamp(0.02, 0.98));
+        // [atlas] El monte serrano no cubre la sierra: bosquecillos separados por pradera y roca
+        // (MGAP, Manual 2018, §3.4). Fuera de los bosquecillos, el monte del raster se ralea.
+        if m > 0.0 && c > 0.05 && self.ecosistema(x, z).is_some_and(|e| e.prim == crate::ecosistemas::FO03) {
+            let n = self.n_hills.get_noise_2d(x * 30.0 + 71.0, z * 30.0 - 13.0) * 0.5 + 0.5;
+            return m * smoothstep(0.5, 0.58, n);
+        }
+        m
     }
 
     /// Franja de la orilla (0..1): sauces, sarandíes y ceibos sueltos pegados al agua, también
@@ -1662,7 +1729,14 @@ impl TerrainGen {
         // laderas y en la franja costera (suelos arenosos y viento salino).
         // Grano fino (metros) para que los bordes de las manchas no sean líneas limpias.
         let coast = (1.0 - sd / 900.0).max(0.0) * 0.35;
-        let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain + coast + slope * 0.6;
+        // [atlas] Pastizal ralo sobre suelos superficiales: más seco; denso o alto: más verde.
+        let eco = match self.ecosistema(x, z).map(|e| e.prim) {
+            Some(crate::ecosistemas::PR02) => 0.3,
+            Some(crate::ecosistemas::PR03) => -0.08,
+            Some(crate::ecosistemas::PR04) => -0.3,
+            _ => 0.0,
+        };
+        let dry = (h - 25.0) / 40.0 + blot * 0.6 + fine * 0.15 + grain + coast + slope * 0.6 + eco;
         if dry > 0.45 + dith * 0.3 {
             GRASS_DRY
         } else if (h < 18.0 && da < 60.0 + hw * 35.0 && grain > -0.05 + dith * 0.3) || dry < -0.45 + dith * 0.3 || dens > 0.2 + dith * 0.2 {
@@ -1699,6 +1773,25 @@ impl TerrainGen {
         }
         if slope > 0.45 + fine * 0.1 || (h > 220.0 && slope > 0.2 + d * 0.1) {
             return ROCK;
+        }
+        // [atlas] Ecosistemas del entorno amplio: mosaicos que se leen de lejos.
+        if let Some(e) = self.ecosistema(x, z) {
+            use crate::ecosistemas::*;
+            let u = d + 0.5; // 0..1 por vóxel
+            match e.prim {
+                // Monte serrano bajo en mosaico con roca y pastizal ralo.
+                FO03 => return if fine > 0.3 + d * 0.2 { ROCK } else if u < 0.5 { FOREST_FLOOR } else { GRASS_DRY },
+                // Pastizal ralo: pasto seco con piedra que asoma.
+                PR02 => return if u > 0.88 { ROCK } else if u > 0.2 { GRASS_DRY } else { GRASS },
+                // Bosque parque: copas separadas sobre la pradera.
+                FO04 => return if u > 0.8 { FOREST_FLOOR } else { GRASS },
+                // Psamófilo: macizos entre la arena.
+                FO05 => return if u > 0.45 { FOREST_FLOOR } else { SAND },
+                CO01 if h < 15.0 => return SAND,
+                HU01 if slope < 0.1 => return if u > 0.8 { GRASS_LUSH } else { MARSH },
+                AN02 => return if u > 0.6 { FOREST_FLOOR } else { GRASS_LUSH },
+                _ => {}
+            }
         }
         let marsh = r.marsh_wide.linear(x, z);
         if marsh > 0.35 + d * 0.4 && slope < 0.08 {
@@ -1756,7 +1849,10 @@ impl TerrainGen {
                 let fringe = if art { 0.0 } else { self.bank_fringe(x, z, edge, hw) };
                 let p_forest = 0.86 * dens;
                 let p_fringe = 0.4 * fringe;
-                if roll >= p_forest.max(p_fringe).max(0.025) {
+                // [atlas] Árboles y arbustos según el ecosistema (parque, serrano, chircal).
+                let eco = if roll < 0.56 && roll >= p_forest.max(p_fringe) { self.ecosistema(x, z) } else { None };
+                let p_eco = eco.map_or(0.0, |e| self.p_ecosistema(&e, x, z));
+                if roll >= p_forest.max(p_fringe).max(0.025).max(p_eco) {
                     continue;
                 }
                 // Ni en la tierra baja que inundan las mareas y las sudestadas junto al río.
@@ -1772,8 +1868,12 @@ impl TerrainGen {
                 // Pendiente aproximada (quebradas y laderas del Cerro).
                 let slope = ((self.height(x + 3.0, z) - self.height(x - 3.0, z)).abs() + (self.height(x, z + 3.0) - self.height(x, z - 3.0)).abs()) / 6.0;
                 use Species::*;
+                // [atlas] El monte de las sierras es monte serrano (también el del raster).
+                let eco = if roll < p_forest { self.ecosistema(x, z) } else { eco };
                 let species = if roll < p_forest {
-                    if edge < 3.0 + hw * 0.6 {
+                    if edge >= 3.0 + hw * 0.6 && eco.is_some_and(|e| e.prim == crate::ecosistemas::FO03) {
+                        pick(u, &[(Coronilla, 3.0), (Molle, 3.5), (Tala, 2.0), (Canelon, 1.0), (Espinillo, 0.5)])
+                    } else if edge < 3.0 + hw * 0.6 {
                         // Pegado al agua: sauce criollo, sarandí y ceibo.
                         pick(u, &[(Sauce, 4.0), (Sarandi, 3.0), (Ceibo, 3.0)])
                     } else if slope > 0.25 {
@@ -1788,6 +1888,17 @@ impl TerrainGen {
                     }
                 } else if roll < p_fringe {
                     pick(u, &[(Sauce, 3.0), (Sarandi, 4.5), (Ceibo, 2.5)])
+                } else if roll < p_eco && edge >= 8.0 + hw && self.sea_distance(x, z) > 110.0 {
+                    // [atlas] Ecosistema: monte serrano, parque/espinal o chircal.
+                    use crate::ecosistemas::*;
+                    let e = eco.unwrap();
+                    if e.tiene(FO03) {
+                        pick(u, &[(Coronilla, 3.0), (Molle, 3.5), (Tala, 2.0), (Canelon, 1.0), (Espinillo, 0.5)])
+                    } else if e.tiene(FO04) || e.prim == AN02 {
+                        pick(u, &[(Espinillo, 5.0), (Tala, 3.0), (Ombu, 0.4)])
+                    } else {
+                        Chirca
+                    }
                 } else {
                     // Lo suelto (pradera, costa, serranía), lejos de las orillas.
                     if edge < 8.0 + hw {
@@ -1825,13 +1936,16 @@ impl TerrainGen {
                 let k = age * (0.82 + 0.36 * r2);
                 // En el borde del monte y en la pradera los árboles son algo más bajos y anchos.
                 let open = if roll < p_forest { 1.0 - 0.15 * (1.0 - dens) } else { 0.9 };
+                // [atlas] El monte serrano es bajo (unos 3 m; fustes cortos y tortuosos).
+                let serrano = !matches!(species, Sauce | Sarandi | Ceibo) && eco.is_some_and(|e| e.tiene(crate::ecosistemas::FO03));
+                let (alto_s, ancho_s) = if serrano { (0.55, 0.85) } else { (1.0, 1.0) };
                 // En el monte cerrado las copas se tocan.
                 let closed = if roll < p_forest { 1.0 + 0.22 * dens } else { 1.0 };
                 out.push(Tree {
                     x,
                     z,
-                    height: bh * k * open * (1.0 + (closed - 1.0) * 0.5),
-                    radius: br * k * (2.0 - open) * closed,
+                    height: bh * k * open * (1.0 + (closed - 1.0) * 0.5) * alto_s,
+                    radius: br * k * (2.0 - open) * closed * ancho_s,
                     trunk: bt * (0.7 + 0.3 * k) * age.sqrt(),
                     species,
                     variant,
@@ -2312,6 +2426,55 @@ mod tests {
         let (a, n) = parse_arroyos(r#"{"arroyos":[[[0,0,2],[10,0,2]],[[5,5]],[[1,1,3],[2,2,3]]],"nombres":["Arroyo \"A\"",null,"Cañada B"]}"#);
         assert_eq!(a.len(), 2);
         assert_eq!(n, vec![Some("Arroyo \"A\"".to_string()), Some("Cañada B".to_string())]);
+    }
+
+    #[test]
+    fn ecosistemas_del_atlas_en_el_terreno() {
+        // [atlas] El terreno lee los ecosistemas del entorno y del entorno amplio, y los tipos
+        // nuevos se ven distintos: monte serrano bajo en las sierras de Maldonado, chircas en
+        // la pradera, pastizal ralo más seco. Todo determinista.
+        use crate::ecosistemas as eco;
+        let t = TerrainGen::montevideo();
+        let ficticio = TerrainGen::new(1726);
+        assert!(ficticio.ecosistema(12000.0, 8000.0).is_none(), "el mapa ficticio no tiene atlas");
+        // Sierras de Maldonado (entorno amplio): monte serrano.
+        let (sx, sz) = (147000.0, -30500.0);
+        let n_fo3 = (-6..=6).flat_map(|a| (-6..=6).map(move |b| (a, b))).filter(|&(a, b)| t.ecosistema(sx + a as f32 * 500.0, sz + b as f32 * 500.0).is_some_and(|e| e.prim == eco::FO03)).count();
+        assert!(n_fo3 > 30, "{n_fo3} muestras de monte serrano");
+        let mut arboles = Vec::new();
+        t.trees_in(sx - 1500.0, sz - 1500.0, sx + 1500.0, sz + 1500.0, &mut arboles);
+        let serranos: Vec<&Tree> = arboles.iter().filter(|a| t.ecosistema(a.x, a.z).is_some_and(|e| e.tiene(eco::FO03)) && matches!(a.species, Species::Coronilla | Species::Molle | Species::Tala | Species::Canelon | Species::Espinillo)).collect();
+        assert!(serranos.len() > 50, "{} árboles en el monte serrano", serranos.len());
+        let alto = serranos.iter().map(|a| a.height).sum::<f32>() / serranos.len() as f32;
+        assert!(alto < 5.0, "monte serrano bajo: {alto:.1} m de media");
+        // Chircas en el mapa jugable (pradera con chircal como mosaico).
+        let mut a2 = Vec::new();
+        t.trees_in(4000.0, 2000.0, 16000.0, 11000.0, &mut a2);
+        let chircas = a2.iter().filter(|a| a.species == Species::Chirca).count();
+        assert!(chircas > 50 && chircas * 4 < a2.len(), "{chircas} chircas de {} plantas", a2.len());
+        for a in a2.iter().filter(|a| a.species == Species::Chirca) {
+            assert!(t.ecosistema(a.x, a.z).is_some_and(|e| e.tiene(eco::SH01)), "chirca fuera del chircal");
+        }
+        // Mismo resultado dos veces.
+        let mut b2 = Vec::new();
+        t.trees_in(4000.0, 2000.0, 16000.0, 11000.0, &mut b2);
+        assert_eq!(a2.len(), b2.len());
+        assert!(a2.iter().zip(&b2).all(|(a, b)| a.x == b.x && a.z == b.z && a.species == b.species && a.seed == b.seed));
+        // El pastizal ralo del entorno amplio (PR02) se pinta más seco y con piedra.
+        let (px, pz) = (72000.0, -108000.0);
+        let mut secos = 0;
+        let mut total = 0;
+        for a in -20..=20 {
+            for b in -20..=20 {
+                let (x, z) = (px + a as f32 * 97.0, pz + b as f32 * 97.0);
+                if t.ecosistema(x, z).is_some_and(|e| e.prim == eco::PR02) {
+                    let h = t.height(x, z);
+                    total += 1;
+                    secos += matches!(t.surface_material(x, z, h, 0.05), GRASS_DRY | ROCK) as usize;
+                }
+            }
+        }
+        assert!(total > 100 && secos * 10 > total * 6, "{secos} de {total} secos");
     }
 
     #[test]

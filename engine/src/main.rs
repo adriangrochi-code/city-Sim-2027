@@ -22,6 +22,7 @@ mod bench;
 mod buildings;
 mod city;
 mod detalle; // [personajes]
+mod ecosistemas; // [atlas]
 mod fxhash;
 mod camera;
 mod lod;

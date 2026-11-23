@@ -1,0 +1,1236 @@
+{
+  "descripcion": "Ecosistemas con la leyenda del Atlas ecológico e histórico del Uruguay (v1.0). Ver docs/sistemas/atlas-ecologico.md.",
+  "grilla": {
+    "lon_oeste": -58.5,
+    "lat_norte": -30.05,
+    "dlon": 0.0107,
+    "dlat": 0.009,
+    "columnas": 510,
+    "filas": 557,
+    "archivo": "ecosistemas.bin"
+  },
+  "formato": "ECO1: u16 ancho, u16 alto, u8 bytes por celda (6), u8 capas; por capa i16 desde, i16 hasta, u32 largo y la grilla zlib. Celda: primario, secundario, densidad (0 ausente..4 alta, 5 sin dato), dosel (dm, 0 = sin fuente), evidencia | confianza << 4, fuente.",
+  "leyenda": [
+    {
+      "n": 1,
+      "codigo": "PR01",
+      "nombre": "Pradera natural",
+      "color": [
+        176,
+        190,
+        112
+      ],
+      "atlas": true
+    },
+    {
+      "n": 2,
+      "codigo": "PR02",
+      "nombre": "Pastizal ralo sobre suelos superficiales",
+      "color": [
+        206,
+        196,
+        132
+      ],
+      "atlas": true
+    },
+    {
+      "n": 3,
+      "codigo": "PR03",
+      "nombre": "Pastizal denso",
+      "color": [
+        140,
+        176,
+        96
+      ],
+      "atlas": true
+    },
+    {
+      "n": 4,
+      "codigo": "PR04",
+      "nombre": "Pastizal alto y denso",
+      "color": [
+        112,
+        156,
+        84
+      ],
+      "atlas": true
+    },
+    {
+      "n": 5,
+      "codigo": "SH01",
+      "nombre": "Chircal y matorral",
+      "color": [
+        160,
+        138,
+        92
+      ],
+      "atlas": true
+    },
+    {
+      "n": 6,
+      "codigo": "FO01",
+      "nombre": "Monte ribereño/fluvial",
+      "color": [
+        40,
+        104,
+        56
+      ],
+      "atlas": true
+    },
+    {
+      "n": 7,
+      "codigo": "FO02",
+      "nombre": "Monte de quebrada",
+      "color": [
+        22,
+        78,
+        46
+      ],
+      "atlas": true
+    },
+    {
+      "n": 8,
+      "codigo": "FO03",
+      "nombre": "Monte serrano",
+      "color": [
+        84,
+        112,
+        66
+      ],
+      "atlas": true
+    },
+    {
+      "n": 9,
+      "codigo": "FO04",
+      "nombre": "Bosque parque / espinal",
+      "color": [
+        148,
+        128,
+        70
+      ],
+      "atlas": true
+    },
+    {
+      "n": 10,
+      "codigo": "FO05",
+      "nombre": "Monte psamófilo/costero",
+      "color": [
+        92,
+        132,
+        104
+      ],
+      "atlas": true
+    },
+    {
+      "n": 11,
+      "codigo": "PA01",
+      "nombre": "Palmar de butiá",
+      "color": [
+        196,
+        150,
+        52
+      ],
+      "atlas": true
+    },
+    {
+      "n": 12,
+      "codigo": "PA02",
+      "nombre": "Palmar de yatay",
+      "color": [
+        210,
+        120,
+        60
+      ],
+      "atlas": true
+    },
+    {
+      "n": 13,
+      "codigo": "HU01",
+      "nombre": "Bañado / pastizal inundable",
+      "color": [
+        84,
+        140,
+        136
+      ],
+      "atlas": true
+    },
+    {
+      "n": 14,
+      "codigo": "AQ01",
+      "nombre": "Vegetación acuática y de orilla",
+      "color": [
+        120,
+        168,
+        186
+      ],
+      "atlas": true
+    },
+    {
+      "n": 15,
+      "codigo": "CO01",
+      "nombre": "Arenales, dunas y costa abierta",
+      "color": [
+        232,
+        218,
+        172
+      ],
+      "atlas": true
+    },
+    {
+      "n": 16,
+      "codigo": "SA01",
+      "nombre": "Blanqueales/suelos alcalinos",
+      "color": [
+        222,
+        214,
+        200
+      ],
+      "atlas": true
+    },
+    {
+      "n": 17,
+      "codigo": "AN01",
+      "nombre": "Sabana arbolada / arbolado disperso",
+      "color": [
+        164,
+        150,
+        86
+      ],
+      "atlas": true
+    },
+    {
+      "n": 18,
+      "codigo": "AN02",
+      "nombre": "Ecotono bosque-pradera",
+      "color": [
+        110,
+        140,
+        76
+      ],
+      "atlas": true
+    },
+    {
+      "n": 40,
+      "codigo": "PL01",
+      "nombre": "Plantación forestal (pinos, acacias, eucaliptos)",
+      "color": [
+        150,
+        60,
+        130
+      ],
+      "atlas": false
+    },
+    {
+      "n": 41,
+      "codigo": "UR01",
+      "nombre": "Área urbana",
+      "color": [
+        120,
+        110,
+        110
+      ],
+      "atlas": false
+    },
+    {
+      "n": 42,
+      "codigo": "TR01",
+      "nombre": "Cobertura transformada (sin dato por celda)",
+      "color": [
+        200,
+        180,
+        170
+      ],
+      "atlas": false
+    }
+  ],
+  "densidad": [
+    "ausente",
+    "muy baja",
+    "baja",
+    "media",
+    "alta",
+    "sin dato"
+  ],
+  "evidencia": [
+    "desconocido",
+    "inferencia ecológica",
+    "documentado"
+  ],
+  "confianza": [
+    "baja",
+    "media",
+    "alta"
+  ],
+  "fuentes": [
+    {
+      "id": "ninguna",
+      "cita": "Sin fuente (fuera del país o del alcance del atlas)."
+    },
+    {
+      "id": "atlas",
+      "cita": "Atlas ecológico e histórico del Uruguay, v1.0 (documento de trabajo, 23/11/2026): leyenda, matriz regional y períodos."
+    },
+    {
+      "id": "dgf2021",
+      "cita": "MGAP-DGF, Cartografía de Bosque Nativo 2021 (SNIG, DGF/Monte_Nativo_2021): presencia de monte observada en 2021."
+    },
+    {
+      "id": "ide_banados",
+      "cita": "IDE Uruguay, hidrografía 1:50.000, hidrografia:banado_a (y area_humeda_a en el entorno amplio)."
+    },
+    {
+      "id": "pastizales",
+      "cita": "MGAP-DGRN, Cartografía de pastizales del Uruguay (raster de 30 m, 5 comunidades; descargas.mgap.gub.uy/DGRN/Comunicaciones/Pastizales del Uruguay.zip)."
+    },
+    {
+      "id": "dinamige",
+      "cita": "DINAMIGE, Mapa de unidades geológicas 2017 (1:500.000)."
+    },
+    {
+      "id": "ide_mdt",
+      "cita": "IDE Uruguay, MDT de 30 m (relieve, pendiente, cursos derivados del relieve)."
+    },
+    {
+      "id": "mgap_manual",
+      "cita": "MGAP-DGF, Actualización del Manual de Manejo de Bosque Nativo en Uruguay, 1.ª ed., abril de 2018, cap. 3 (tipos de bosque)."
+    },
+    {
+      "id": "gautreau2006",
+      "cita": "P. Gautreau, tesis doctoral, Université de Lille 1, 2006 (pepite-depot.univ-lille.fr/LIBRE/Th_Num/2006/50376-2006-Gautreau.pdf)."
+    },
+    {
+      "id": "bortolini",
+      "cita": "S. V. Bortolini y A. Brazeiro, Distribución, abundancia y estado de conservación de los palmares de Butia yatay en Uruguay (IECA, Facultad de Ciencias, UdelaR; presentación publicada por el MGAP, 2020)."
+    },
+    {
+      "id": "rosa_butia",
+      "cita": "Rosa et al., campo natural del palmar de Butia odorata en Castillos (Agrociencia Uruguay; alice.cnptia.embrapa.br/alice/bitstream/doc/1004507): ~70.000 ha en dos áreas, Castillos y San Luis; 50–600 palmas/ha."
+    },
+    {
+      "id": "porcile_atlas",
+      "cita": "Porcile Maderni (2007), Crónicas del desarrollo forestal del Uruguay, citado por el atlas §5: forestación de Mario Ferreira en Las Toscas y Parque del Plata, más de 800 ha de dunas (no se leyó el original)."
+    },
+    {
+      "id": "mapbiomas",
+      "cita": "MapBiomas Uruguay, Colección 4, estadísticas por departamento 1985–2025 (mapbiomas-uruguay-collection-4-lulc.xlsx)."
+    },
+    {
+      "id": "gautreau_atlas",
+      "cita": "Gautreau, citado por el atlas §5: en una zona de Colonia el monte no ribereño pasó de ~271 km² (11,3 %) en planos de 1821–1835 a 107 km² (4,5 %) en 1966 (no se encontró la cifra en la tesis de 2006)."
+    },
+    {
+      "id": "coneat",
+      "cita": "MGAP, grupos de suelos CONEAT (rocosidad e índice de productividad; ver docs/sistemas/suelos-y-roca.md)."
+    },
+    {
+      "id": "bosque1726",
+      "cita": "Reconstrucción del monte de 1726 del juego (bosque_contexto.bin; ver docs/sistemas/vegetacion-historica.md)."
+    },
+    {
+      "id": "ide_biomas",
+      "cita": "IDE Uruguay, hidrografía: playas, bancos de arena, lagunas, bañados (biomas oficiales del mapa)."
+    },
+    {
+      "id": "mtop",
+      "cita": "MTOP, hidrografía (dnv_sgcm:hidro_pg) y localidades (dnv_sgcm:localidades_polig)."
+    }
+  ],
+  "capas": [
+    {
+      "desde": 1700,
+      "hasta": 1859,
+      "periodo": "1750–1800",
+      "nota": "Paisaje colonial (base). Se usa desde el inicio del juego hasta 1859: Gautreau no encuentra cambios radicales en la distribución general antes de mediados del siglo XIX."
+    },
+    {
+      "desde": 1860,
+      "hasta": 1899,
+      "periodo": "1860–1900",
+      "nota": "Transformación rural: sin tasa uniforme de deforestación (atlas §5). Igual a la base salvo el parque agregado en Colonia, que pasa a desconocido."
+    },
+    {
+      "desde": 1900,
+      "hasta": 1949,
+      "periodo": "1900–1950",
+      "nota": "Forestación costera de Canelones (Las Toscas, Parque del Plata): plantación, no nativo."
+    },
+    {
+      "desde": 1950,
+      "hasta": 1984,
+      "periodo": "1950–2000",
+      "nota": "Colonia según la cartografía de 1966; bañados de la cuenca de la Merín sin dato por celda (drenaje y arrozales)."
+    },
+    {
+      "desde": 1985,
+      "hasta": 2100,
+      "periodo": "1985–2025",
+      "nota": "Observación actual: monte nativo 2021, pastizales, palmares, localidades; lo demás, cobertura transformada sin dato por celda."
+    }
+  ],
+  "regiones": [
+    "norte basáltico",
+    "litoral oeste",
+    "Rivera y noreste",
+    "centro",
+    "sur",
+    "sierras del este",
+    "este",
+    "costa platense y atlántica"
+  ],
+  "region_departamento": {
+    "Artigas": "norte basáltico",
+    "Salto": "norte basáltico",
+    "Paysandú": "litoral oeste",
+    "Río Negro": "litoral oeste",
+    "Soriano": "litoral oeste",
+    "Colonia": "litoral oeste",
+    "Rivera": "Rivera y noreste",
+    "Tacuarembó": "Rivera y noreste",
+    "Durazno": "centro",
+    "Florida": "centro",
+    "Flores": "centro",
+    "San José": "sur",
+    "Canelones": "sur",
+    "Montevideo": "sur",
+    "Lavalleja": "sierras del este",
+    "Maldonado": "sierras del este",
+    "Treinta y Tres": "sierras del este",
+    "Rocha": "este",
+    "Cerro Largo": "este"
+  },
+  "dosel": {
+    "FO02": {
+      "dm": 200,
+      "rango": "20–25 m el estrato superior (MGAP, Manual 2018, §3.3, citando a Escudero 2004)",
+      "fuente": "mgap_manual"
+    },
+    "FO05": {
+      "dm": 48,
+      "rango": "3,5–6 m, máximo 8 m (MGAP, Manual 2018, §3.6, citando a Porcile 1988)",
+      "fuente": "mgap_manual"
+    },
+    "PA02": {
+      "dm": 80,
+      "rango": "adultos de 6–10 m (Bortolini y Brazeiro)",
+      "fuente": "bortolini"
+    },
+    "FO03": {
+      "dm": 30,
+      "rango": "unos 3 m (Carrere 1990; ver monte-1726-fuentes.md)",
+      "fuente": "atlas"
+    },
+    "FO01_sur": {
+      "dm": 50,
+      "rango": "unos 5 m de altura media en el sur y el este (Major y Torighelli 1987, en Carrere 1990)",
+      "fuente": "atlas"
+    }
+  },
+  "palmares": {
+    "butia": {
+      "nucleos": {
+        "Castillos": [
+          [
+            -53.855,
+            -34.197
+          ],
+          [
+            -53.782,
+            -34.276
+          ],
+          [
+            -53.794,
+            -34.338
+          ]
+        ],
+        "San Luis": [
+          [
+            -53.718,
+            -33.604
+          ],
+          [
+            -53.554,
+            -33.683
+          ]
+        ]
+      },
+      "ha": 70000
+    },
+    "yatay": {
+      "Quebracho": {
+        "pos": [
+          -57.897,
+          -31.934
+        ],
+        "ha_2013": 1560
+      },
+      "Guichón": {
+        "pos": [
+          -57.2,
+          -32.356
+        ],
+        "ha_2013": 310
+      }
+    },
+    "yatay_no_ubicados": "Santo Domingo (826 ha en 2013) sin ubicación en las fuentes leídas; Mujica y Porrúa (Chebataroff 1960) desaparecidos."
+  },
+  "quebradas_documentadas": {
+    "Valle del Lunarejo": [
+      -55.9,
+      -31.13
+    ],
+    "Valle Edén": [
+      -56.16,
+      -31.82
+    ],
+    "Quebrada de los Cuervos": [
+      -54.46,
+      -32.93
+    ]
+  },
+  "estadisticas_por_capa": {
+    "1700-1859": {
+      "PR01": 23502,
+      "PR02": 17903,
+      "PR03": 107896,
+      "PR04": 3094,
+      "FO01": 9484,
+      "FO02": 1658,
+      "FO03": 1559,
+      "FO04": 2386,
+      "FO05": 46,
+      "PA01": 709,
+      "PA02": 20,
+      "HU01": 4722,
+      "CO01": 630,
+      "AN02": 1858
+    },
+    "1860-1899": {
+      "PR01": 23502,
+      "PR02": 17903,
+      "PR03": 107896,
+      "PR04": 3094,
+      "FO01": 9484,
+      "FO02": 1658,
+      "FO03": 1559,
+      "FO04": 2386,
+      "FO05": 46,
+      "PA01": 709,
+      "PA02": 20,
+      "HU01": 4722,
+      "CO01": 630,
+      "AN02": 1858
+    },
+    "1900-1949": {
+      "PR01": 23500,
+      "PR02": 17903,
+      "PR03": 107896,
+      "PR04": 3094,
+      "FO01": 9484,
+      "FO02": 1658,
+      "FO03": 1559,
+      "FO04": 2386,
+      "FO05": 46,
+      "PA01": 709,
+      "PA02": 20,
+      "HU01": 4722,
+      "CO01": 623,
+      "AN02": 1858,
+      "PL01": 9
+    },
+    "1950-1984": {
+      "PR01": 23801,
+      "PR02": 17909,
+      "PR03": 107996,
+      "PR04": 3094,
+      "FO01": 9484,
+      "FO02": 1658,
+      "FO03": 1559,
+      "FO04": 1979,
+      "FO05": 46,
+      "PA01": 709,
+      "PA02": 20,
+      "HU01": 4722,
+      "CO01": 623,
+      "AN02": 1858,
+      "PL01": 9
+    },
+    "1985-2100": {
+      "PR01": 1335,
+      "PR02": 14763,
+      "PR03": 83317,
+      "PR04": 1415,
+      "FO01": 9390,
+      "FO02": 1657,
+      "FO03": 1557,
+      "FO04": 1970,
+      "FO05": 42,
+      "PA01": 700,
+      "PA02": 20,
+      "HU01": 4700,
+      "CO01": 361,
+      "AN02": 1836,
+      "UR01": 2187,
+      "TR01": 50217
+    }
+  },
+  "otros": {
+    "colonia_monte_no_ribereno_km2": {
+      "hoy_dgf2021": 66.4,
+      "objetivo_1821_35": 168.1,
+      "celdas_agregadas": 407
+    },
+    "forestacion_canelones_celdas": 9,
+    "butia_celdas": 709,
+    "yatay_celdas": 20,
+    "yatay_disperso_celdas": 145
+  },
+  "mapbiomas_departamentos_km2": {
+    "Montevideo": {
+      "Bosque Natural": {
+        "1985": 33.0,
+        "2025": 39.9
+      },
+      "Area humeda natural": {
+        "1985": 20.1,
+        "2025": 18.3
+      },
+      "Pastizal natural": {
+        "1985": 6.2,
+        "2025": 4.8
+      },
+      "Pastura": {
+        "1985": 228.1,
+        "2025": 200.6
+      },
+      "Agricultura": {
+        "1985": 78.6,
+        "2025": 16.8
+      },
+      "Area Urbana": {
+        "1985": 139.2,
+        "2025": 215.9
+      },
+      "Pino": {
+        "1985": 1.3,
+        "2025": 1.5
+      },
+      "Eucaliptus": {
+        "1985": 3.5,
+        "2025": 9.1
+      }
+    },
+    "Artigas": {
+      "Bosque Natural": {
+        "1985": 472.7,
+        "2025": 540.2
+      },
+      "Area humeda natural": {
+        "1985": 111.1,
+        "2025": 139.6
+      },
+      "Pastizal natural": {
+        "1985": 11025.6,
+        "2025": 10383.1
+      },
+      "Pastura": {
+        "1985": 42.1,
+        "2025": 27.5
+      },
+      "Agricultura": {
+        "1985": 385.6,
+        "2025": 863.9
+      },
+      "Area Urbana": {
+        "1985": 7.7,
+        "2025": 15.3
+      },
+      "Pino": {
+        "1985": 0.4,
+        "2025": 0.5
+      },
+      "Eucaliptus": {
+        "1985": 22.1,
+        "2025": 4.0
+      }
+    },
+    "Canelones": {
+      "Bosque Natural": {
+        "1985": 221.5,
+        "2025": 206.7
+      },
+      "Area humeda natural": {
+        "1985": 23.1,
+        "2025": 35.5
+      },
+      "Pastizal natural": {
+        "1985": 1093.8,
+        "2025": 592.4
+      },
+      "Pastura": {
+        "1985": 1415.6,
+        "2025": 2230.5
+      },
+      "Agricultura": {
+        "1985": 1455.2,
+        "2025": 842.5
+      },
+      "Area Urbana": {
+        "1985": 71.0,
+        "2025": 230.2
+      },
+      "Pino": {
+        "1985": 8.4,
+        "2025": 11.3
+      },
+      "Eucaliptus": {
+        "1985": 60.7,
+        "2025": 160.0
+      }
+    },
+    "Cerro Largo": {
+      "Bosque Natural": {
+        "1985": 609.9,
+        "2025": 791.8
+      },
+      "Area humeda natural": {
+        "1985": 315.0,
+        "2025": 357.6
+      },
+      "Pastizal natural": {
+        "1985": 11760.0,
+        "2025": 9463.2
+      },
+      "Pastura": {
+        "1985": 83.4,
+        "2025": 290.1
+      },
+      "Agricultura": {
+        "1985": 705.5,
+        "2025": 1250.6
+      },
+      "Area Urbana": {
+        "1985": 10.5,
+        "2025": 23.6
+      },
+      "Pino": {
+        "1985": 3.0,
+        "2025": 112.6
+      },
+      "Eucaliptus": {
+        "1985": 25.4,
+        "2025": 905.6
+      }
+    },
+    "Colonia": {
+      "Bosque Natural": {
+        "1985": 286.7,
+        "2025": 267.0
+      },
+      "Area humeda natural": {
+        "1985": 20.3,
+        "2025": 11.6
+      },
+      "Pastizal natural": {
+        "1985": 2141.0,
+        "2025": 1119.0
+      },
+      "Pastura": {
+        "1985": 1868.3,
+        "2025": 752.0
+      },
+      "Agricultura": {
+        "1985": 1666.2,
+        "2025": 3658.8
+      },
+      "Area Urbana": {
+        "1985": 24.1,
+        "2025": 62.6
+      },
+      "Pino": {
+        "1985": 2.0,
+        "2025": 6.9
+      },
+      "Eucaliptus": {
+        "1985": 17.8,
+        "2025": 106.7
+      }
+    },
+    "Durazno": {
+      "Bosque Natural": {
+        "1985": 186.0,
+        "2025": 203.7
+      },
+      "Area humeda natural": {
+        "1985": 201.3,
+        "2025": 149.1
+      },
+      "Pastizal natural": {
+        "1985": 10930.3,
+        "2025": 8366.5
+      },
+      "Pastura": {
+        "1985": 79.0,
+        "2025": 281.4
+      },
+      "Agricultura": {
+        "1985": 85.6,
+        "2025": 1325.8
+      },
+      "Area Urbana": {
+        "1985": 9.9,
+        "2025": 21.4
+      },
+      "Pino": {
+        "1985": 2.4,
+        "2025": 12.7
+      },
+      "Eucaliptus": {
+        "1985": 25.6,
+        "2025": 893.8
+      }
+    },
+    "Flores": {
+      "Bosque Natural": {
+        "1985": 57.0,
+        "2025": 63.8
+      },
+      "Area humeda natural": {
+        "1985": 10.6,
+        "2025": 12.2
+      },
+      "Pastizal natural": {
+        "1985": 4508.0,
+        "2025": 2647.4
+      },
+      "Pastura": {
+        "1985": 185.9,
+        "2025": 353.6
+      },
+      "Agricultura": {
+        "1985": 310.5,
+        "2025": 1711.8
+      },
+      "Area Urbana": {
+        "1985": 5.5,
+        "2025": 8.5
+      },
+      "Pino": {
+        "1985": 1.7,
+        "2025": 5.4
+      },
+      "Eucaliptus": {
+        "1985": 7.8,
+        "2025": 231.1
+      }
+    },
+    "Florida": {
+      "Bosque Natural": {
+        "1985": 235.8,
+        "2025": 267.0
+      },
+      "Area humeda natural": {
+        "1985": 16.6,
+        "2025": 29.7
+      },
+      "Pastizal natural": {
+        "1985": 8846.9,
+        "2025": 5920.6
+      },
+      "Pastura": {
+        "1985": 750.8,
+        "2025": 1444.5
+      },
+      "Agricultura": {
+        "1985": 444.6,
+        "2025": 2008.2
+      },
+      "Area Urbana": {
+        "1985": 11.1,
+        "2025": 26.4
+      },
+      "Pino": {
+        "1985": 0.5,
+        "2025": 4.9
+      },
+      "Eucaliptus": {
+        "1985": 11.5,
+        "2025": 396.5
+      }
+    },
+    "Lavalleja": {
+      "Bosque Natural": {
+        "1985": 660.6,
+        "2025": 817.5
+      },
+      "Area humeda natural": {
+        "1985": 241.1,
+        "2025": 198.4
+      },
+      "Pastizal natural": {
+        "1985": 8436.2,
+        "2025": 6691.9
+      },
+      "Pastura": {
+        "1985": 93.9,
+        "2025": 527.3
+      },
+      "Agricultura": {
+        "1985": 435.9,
+        "2025": 648.2
+      },
+      "Area Urbana": {
+        "1985": 9.3,
+        "2025": 17.5
+      },
+      "Pino": {
+        "1985": 6.6,
+        "2025": 24.8
+      },
+      "Eucaliptus": {
+        "1985": 16.5,
+        "2025": 725.5
+      }
+    },
+    "Maldonado": {
+      "Bosque Natural": {
+        "1985": 561.8,
+        "2025": 870.6
+      },
+      "Area humeda natural": {
+        "1985": 39.3,
+        "2025": 63.3
+      },
+      "Pastizal natural": {
+        "1985": 3800.7,
+        "2025": 2895.8
+      },
+      "Pastura": {
+        "1985": 39.1,
+        "2025": 227.4
+      },
+      "Agricultura": {
+        "1985": 50.8,
+        "2025": 101.2
+      },
+      "Area Urbana": {
+        "1985": 35.9,
+        "2025": 98.9
+      },
+      "Pino": {
+        "1985": 18.0,
+        "2025": 37.8
+      },
+      "Eucaliptus": {
+        "1985": 39.1,
+        "2025": 212.9
+      }
+    },
+    "Paysandu": {
+      "Bosque Natural": {
+        "1985": 779.1,
+        "2025": 752.2
+      },
+      "Area humeda natural": {
+        "1985": 29.9,
+        "2025": 69.9
+      },
+      "Pastizal natural": {
+        "1985": 11568.3,
+        "2025": 8912.4
+      },
+      "Pastura": {
+        "1985": 670.4,
+        "2025": 247.3
+      },
+      "Agricultura": {
+        "1985": 698.3,
+        "2025": 2366.0
+      },
+      "Area Urbana": {
+        "1985": 17.0,
+        "2025": 39.0
+      },
+      "Pino": {
+        "1985": 17.8,
+        "2025": 46.9
+      },
+      "Eucaliptus": {
+        "1985": 74.1,
+        "2025": 1185.1
+      }
+    },
+    "Rio Negro": {
+      "Bosque Natural": {
+        "1985": 660.7,
+        "2025": 540.7
+      },
+      "Area humeda natural": {
+        "1985": 80.3,
+        "2025": 110.0
+      },
+      "Pastizal natural": {
+        "1985": 6326.3,
+        "2025": 3735.2
+      },
+      "Pastura": {
+        "1985": 1220.2,
+        "2025": 270.9
+      },
+      "Agricultura": {
+        "1985": 913.9,
+        "2025": 3020.9
+      },
+      "Area Urbana": {
+        "1985": 8.3,
+        "2025": 19.3
+      },
+      "Pino": {
+        "1985": 8.4,
+        "2025": 16.9
+      },
+      "Eucaliptus": {
+        "1985": 33.4,
+        "2025": 1185.1
+      }
+    },
+    "Rivera": {
+      "Bosque Natural": {
+        "1985": 512.8,
+        "2025": 565.1
+      },
+      "Area humeda natural": {
+        "1985": 178.4,
+        "2025": 165.5
+      },
+      "Pastizal natural": {
+        "1985": 8193.0,
+        "2025": 5906.5
+      },
+      "Pastura": {
+        "1985": 66.5,
+        "2025": 132.4
+      },
+      "Agricultura": {
+        "1985": 164.8,
+        "2025": 605.8
+      },
+      "Area Urbana": {
+        "1985": 11.0,
+        "2025": 24.2
+      },
+      "Pino": {
+        "1985": 6.0,
+        "2025": 604.2
+      },
+      "Eucaliptus": {
+        "1985": 38.5,
+        "2025": 908.6
+      }
+    },
+    "Rocha": {
+      "Bosque Natural": {
+        "1985": 623.0,
+        "2025": 782.8
+      },
+      "Area humeda natural": {
+        "1985": 1978.7,
+        "2025": 1614.2
+      },
+      "Pastizal natural": {
+        "1985": 5716.5,
+        "2025": 4653.9
+      },
+      "Pastura": {
+        "1985": 230.6,
+        "2025": 808.7
+      },
+      "Agricultura": {
+        "1985": 1355.4,
+        "2025": 1591.4
+      },
+      "Area Urbana": {
+        "1985": 18.9,
+        "2025": 43.6
+      },
+      "Pino": {
+        "1985": 21.3,
+        "2025": 92.3
+      },
+      "Eucaliptus": {
+        "1985": 43.6,
+        "2025": 343.4
+      }
+    },
+    "Salto": {
+      "Bosque Natural": {
+        "1985": 481.4,
+        "2025": 549.7
+      },
+      "Area humeda natural": {
+        "1985": 16.4,
+        "2025": 41.6
+      },
+      "Pastizal natural": {
+        "1985": 12832.5,
+        "2025": 12511.1
+      },
+      "Pastura": {
+        "1985": 91.0,
+        "2025": 33.3
+      },
+      "Agricultura": {
+        "1985": 384.2,
+        "2025": 640.4
+      },
+      "Area Urbana": {
+        "1985": 14.8,
+        "2025": 31.5
+      },
+      "Pino": {
+        "1985": 0.8,
+        "2025": 1.9
+      },
+      "Eucaliptus": {
+        "1985": 24.6,
+        "2025": 18.0
+      }
+    },
+    "San Jose": {
+      "Bosque Natural": {
+        "1985": 269.1,
+        "2025": 275.9
+      },
+      "Area humeda natural": {
+        "1985": 82.0,
+        "2025": 81.1
+      },
+      "Pastizal natural": {
+        "1985": 1908.1,
+        "2025": 905.8
+      },
+      "Pastura": {
+        "1985": 1627.8,
+        "2025": 994.6
+      },
+      "Agricultura": {
+        "1985": 1018.9,
+        "2025": 2546.5
+      },
+      "Area Urbana": {
+        "1985": 14.2,
+        "2025": 44.3
+      },
+      "Pino": {
+        "1985": 3.0,
+        "2025": 7.2
+      },
+      "Eucaliptus": {
+        "1985": 6.4,
+        "2025": 64.6
+      }
+    },
+    "Soriano": {
+      "Bosque Natural": {
+        "1985": 585.2,
+        "2025": 486.3
+      },
+      "Area humeda natural": {
+        "1985": 21.5,
+        "2025": 44.0
+      },
+      "Pastizal natural": {
+        "1985": 4254.6,
+        "2025": 2233.7
+      },
+      "Pastura": {
+        "1985": 2227.8,
+        "2025": 551.0
+      },
+      "Agricultura": {
+        "1985": 1732.3,
+        "2025": 4947.3
+      },
+      "Area Urbana": {
+        "1985": 12.8,
+        "2025": 26.3
+      },
+      "Pino": {
+        "1985": 1.3,
+        "2025": 3.3
+      },
+      "Eucaliptus": {
+        "1985": 9.1,
+        "2025": 437.3
+      }
+    },
+    "Tacuarembo": {
+      "Bosque Natural": {
+        "1985": 924.3,
+        "2025": 1007.8
+      },
+      "Area humeda natural": {
+        "1985": 464.5,
+        "2025": 394.1
+      },
+      "Pastizal natural": {
+        "1985": 13742.1,
+        "2025": 11230.8
+      },
+      "Pastura": {
+        "1985": 54.1,
+        "2025": 161.3
+      },
+      "Agricultura": {
+        "1985": 133.5,
+        "2025": 719.4
+      },
+      "Area Urbana": {
+        "1985": 11.2,
+        "2025": 24.7
+      },
+      "Pino": {
+        "1985": 9.7,
+        "2025": 467.8
+      },
+      "Eucaliptus": {
+        "1985": 46.9,
+        "2025": 981.8
+      }
+    },
+    "Treinta Y Tres": {
+      "Bosque Natural": {
+        "1985": 541.3,
+        "2025": 669.5
+      },
+      "Area humeda natural": {
+        "1985": 498.4,
+        "2025": 632.1
+      },
+      "Pastizal natural": {
+        "1985": 6384.6,
+        "2025": 5151.5
+      },
+      "Pastura": {
+        "1985": 70.1,
+        "2025": 296.0
+      },
+      "Agricultura": {
+        "1985": 1697.0,
+        "2025": 1838.1
+      },
+      "Area Urbana": {
+        "1985": 5.8,
+        "2025": 15.3
+      },
+      "Pino": {
+        "1985": 1.8,
+        "2025": 55.1
+      },
+      "Eucaliptus": {
+        "1985": 5.1,
+        "2025": 400.2
+      }
+    }
+  },
+  "nota_mapbiomas": "Áreas por departamento y clase de MapBiomas Uruguay (colección 4), 1985 y 2025, en km² (unidad deducida por los totales). No se compara con las capas históricas (métodos distintos)."
+}

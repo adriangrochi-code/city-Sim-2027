@@ -17,6 +17,8 @@ egui-wgpu = { version = "0.29", default-features = false }
 egui-winit = { version = "0.29", default-features = false, features = ["links", "x11", "wayland"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# [atlas] descomprimir las capas de ecosistemas (ya estaba en el árbol por png)
+miniz_oxide = "0.8"
 
 [profile.release]
 opt-level = 3

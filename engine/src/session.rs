@@ -130,8 +130,11 @@ impl Session {
     pub fn update(&mut self, dt: f32) {
         let ground = self.terrain.height(self.cam.target.x, self.cam.target.z).max(0.0);
         self.cam.target.y += (ground - self.cam.target.y) * (dt * 6.0).min(1.0);
-        self.cam.target.x = self.cam.target.x.clamp(0.0, 24000.0);
-        self.cam.target.z = self.cam.target.z.clamp(0.0, 24000.0);
+        // [atlas] En el juego la cámara no sale del mapa; sin partida (paisaje del mapa real) puede
+        // recorrer el entorno amplio (sierras de Maldonado, Colonia).
+        let (lo, hi) = if self.game.is_some() || !self.terrain.is_real() { (0.0, 24000.0) } else { (-130000.0, 154000.0) };
+        self.cam.target.x = self.cam.target.x.clamp(lo, hi);
+        self.cam.target.z = self.cam.target.z.clamp(lo, hi);
         if !self.day_paused {
             // Un día de juego dura 8 minutos reales.
             self.hour = (self.hour + dt * 24.0 / 480.0).rem_euclid(24.0);
