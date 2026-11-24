@@ -162,6 +162,23 @@ fn fog_color(world: vec3<f32>) -> vec3<f32> {
     return mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s * 0.6);
 }
 
+// [render] Niebla de lo que falta (técnicas del mod LOD §2.12): por sector alrededor del centro
+// de los anillos, la distancia a la primera zona sin nada dibujado (`Streamer::sectores_faltan`).
+// Se funde desde un poco antes de esa distancia; entre dos sectores manda el más cercano.
+@group(0) @binding(8) var<storage, read> faltan: array<f32, 64>;
+fn hole_fog(world: vec3<f32>) -> f32 {
+    let d = world.xz - vec2(g.sky_top.w, g.sky_horizon.w);
+    let f = (atan2(d.y, d.x) / 6.2831853 + 0.5) * 64.0 - 0.5;
+    let i0 = i32(floor(f));
+    let a = faltan[u32(((i0 % 64) + 64) % 64)];
+    let b = faltan[u32((((i0 + 1) % 64) + 64) % 64)];
+    let lim = min(a, b);
+    if (lim > 1.0e8) {
+        return 0.0;
+    }
+    return smoothstep(lim - max(40.0, lim * 0.2), lim, length(d));
+}
+
 // [entorno amplio] Fin del terreno dibujado: el círculo de radio sun_color.w alrededor del
 // centro de los anillos de detalle (sky_top.w, sky_horizon.w). Desde el 60 % de ese radio
 // todo se funde con la niebla, así el último anillo (y el agua más allá) no se ve como un
@@ -490,7 +507,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
     let fog = 1.0 - exp(-d * g.params.x);
-    col = mix(col, fog_color(v.world), max(clamp(fog, 0.0, 0.88), reach_fog(v.world)));
+    col = mix(col, fog_color(v.world), max(max(clamp(fog, 0.0, 0.88), reach_fog(v.world)), hole_fog(v.world)));
     return vec4(curva_tonal(col * shadow_debug_tint(v.world)), 1.0);
 }
 

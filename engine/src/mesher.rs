@@ -336,6 +336,37 @@ pub fn mesh_chunk(v: &[Mat], offset: IVec3) -> Mesh {
 /// los escalones daban una normal que saltaba de plana a empinada en cada borde y la ladera
 /// se veía rayada como un mapa de curvas de nivel.
 pub fn mesh_chunk_grad(v: &[Mat], offset: IVec3, grad: Option<&[f32]>) -> Mesh {
+    mesh_chunk_ao(v, offset, grad, AoModo::Todo)
+}
+
+/// [render] Dónde se calcula la oclusión por vértice (técnicas del mod LOD §2.14). La oclusión
+/// es parte de la clave del *greedy*: dos caras vecinas con distinta oclusión no se unen. En los
+/// niveles gruesos el shader casi no la muestra en el terreno (ver `ao_min` en voxel.wgsl), así
+/// que ahí se pagaban caras que no se ven.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AoModo {
+    Todo,
+    /// Sin oclusión en el terreno (sí en las obras y los árboles).
+    SinTerreno,
+    /// Sin oclusión en nada.
+    Nada,
+}
+
+impl AoModo {
+    /// El modo de cada nivel: terreno sin oclusión desde el vóxel de 16 m (nivel 6), nada desde
+    /// el de 64 m (nivel 8, el entorno amplio). Más cerca no: cada anillo tiene vóxeles de 2 a
+    /// 4 píxeles, y en su borde de adentro el shader todavía muestra la oclusión (se probó desde
+    /// el nivel 4: el campo del Cerro se veía más claro y plano, 19 % de píxeles cambiados).
+    pub fn para_nivel(lod: u32) -> AoModo {
+        match lod {
+            0..=5 => AoModo::Todo,
+            6 | 7 => AoModo::SinTerreno,
+            _ => AoModo::Nada,
+        }
+    }
+}
+
+pub fn mesh_chunk_ao(v: &[Mat], offset: IVec3, grad: Option<&[f32]>, ao_modo: AoModo) -> Mesh {
     let mut mesh = Mesh::default();
     let tops = terrain_tops(v);
     // Bits de sólido por fila: rows[y * P + z] tiene el bit x encendido si (x, y, z) no es aire.
@@ -385,7 +416,11 @@ pub fn mesh_chunk_grad(v: &[Mat], offset: IVec3, grad: Option<&[f32]>) -> Mesh {
                             _ => (z - 1, x - 1, y - 1),
                         };
                         let m = at(v, x, y, z);
-                        let ao = face_ao(v, [x + n[0], y + n[1], z + n[2]], u_ax, v_ax);
+                        let ao = match ao_modo {
+                            AoModo::Nada => 0xff,
+                            AoModo::SinTerreno if is_terrain(m) => 0xff,
+                            _ => face_ao(v, [x + n[0], y + n[1], z + n[2]], u_ax, v_ax),
+                        };
                         masks[(slice * N * N + i + j * N) as usize] = m as u32 | (ao << 8) | (1 << 31);
                         counts[slice as usize] += 1;
                     }
@@ -611,6 +646,32 @@ mod tests {
         assert!(!ups.is_empty());
         let avg_x: f32 = ups.iter().map(|q| q.smooth().x).sum::<f32>() / ups.len() as f32;
         assert!(avg_x < -0.08, "la normal suave no se inclina con la pendiente ({avg_x})");
+    }
+
+    /// [render] Sin oclusión en el terreno grueso: las caras de una escalera se unen más (la
+    /// oclusión de los escalones cortaba las uniones) y ninguna lleva oclusión; una obra sobre
+    /// el terreno la conserva salvo con `AoModo::Nada`.
+    #[test]
+    fn sin_oclusion_en_el_terreno_hay_menos_caras() {
+        let mut v = empty();
+        for z in 0..P {
+            for x in 0..P {
+                for y in 0..=((x + z) / 3 + 2).min(P - 1) {
+                    v[(x + z * P + y * P * P) as usize] = palette::GRASS;
+                }
+            }
+        }
+        v[(10 + 10 * P + 9 * P * P) as usize] = palette::CAL;
+        let todo = mesh_chunk_ao(&v, IVec3::ZERO, None, AoModo::Todo);
+        let sin = mesh_chunk_ao(&v, IVec3::ZERO, None, AoModo::SinTerreno);
+        let nada = mesh_chunk_ao(&v, IVec3::ZERO, None, AoModo::Nada);
+        assert!(sin.quad_count() < todo.quad_count(), "{} contra {}", sin.quad_count(), todo.quad_count());
+        assert!(nada.quad_count() <= sin.quad_count());
+        let all: Vec<&Quad> = sin.quads.iter().flatten().collect();
+        assert!(all.iter().filter(|q| is_terrain(q.material())).all(|q| q.ao() == 0xff));
+        assert!(all.iter().any(|q| q.material() == palette::CAL && q.ao() != 0xff), "la obra conserva su oclusión");
+        assert!(nada.quads.iter().flatten().all(|q| q.ao() == 0xff));
+        assert_eq!(AoModo::para_nivel(5), AoModo::Todo);
     }
 
     #[test]

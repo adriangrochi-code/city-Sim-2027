@@ -432,21 +432,50 @@ impl Percentiles {
     }
 }
 
+/// Tiempo de CPU del hilo que llama (ms). Con la máquina cargada (otros procesos
+/// compilando), el tiempo de pared de un cuadro incluye lo que el sistema le quitó al hilo;
+/// el de CPU no.
+pub fn cpu_ms() -> f64 {
+    #[cfg(target_os = "linux")]
+    {
+        #[repr(C)]
+        struct Timespec {
+            s: i64,
+            ns: i64,
+        }
+        extern "C" {
+            fn clock_gettime(clk: i32, t: *mut Timespec) -> i32;
+        }
+        let mut t = Timespec { s: 0, ns: 0 };
+        // CLOCK_THREAD_CPUTIME_ID = 3
+        unsafe {
+            clock_gettime(3, &mut t);
+        }
+        t.s as f64 * 1000.0 + t.ns as f64 / 1.0e6
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        0.0
+    }
+}
+
 /// Ritmo de los cuadros simulados (60 Hz).
 const FRAME: Duration = Duration::from_micros(16_667);
 
 /// Un cuadro como en la ventana: recentrar los anillos según la cámara y subir lo terminado con
 /// el presupuesto de la ventana. Devuelve (trabajo total, subida) en ms y los bytes subidos.
-fn window_step(s: &mut Streamer, r: &mut Renderer, terrain: &TerrainGen, cam: &mut OrbitCamera, view_h: f32) -> (f64, f64, u64) {
+/// [render] También devuelve el tiempo de CPU del hilo en el cuadro (cuarto valor).
+fn window_step(s: &mut Streamer, r: &mut Renderer, terrain: &TerrainGen, cam: &mut OrbitCamera, view_h: f32) -> (f64, f64, u64, f64) {
+    let c0 = cpu_ms();
     let t0 = Instant::now();
     cam.target.y = terrain.height(cam.target.x, cam.target.z).max(0.0);
     crate::session::view_to_streamer(s, cam, view_h);
     let tv = t0.elapsed().as_secs_f64() * 1000.0;
     let up = crate::session::upload_ops(s, r, crate::session::WINDOW_VERTEX_BUDGET);
-    if std::env::var("MOTOR_BANCO_DETALLE").is_ok() && t0.elapsed().as_secs_f64() * 1000.0 > 6.0 {
-        println!("cuadro lento: vista {tv:.2} · poll {:.2} · maintain {:.2} · subir {:.2} ({} órdenes, {} KB)", up.poll_ms, up.maintain_ms, up.ms - up.poll_ms - up.maintain_ms, up.ops, up.bytes / 1024);
+    if std::env::var("MOTOR_BANCO_DETALLE").is_ok() && (t0.elapsed().as_secs_f64() * 1000.0 > 6.0 || cpu_ms() - c0 > 1.0) {
+        println!("cuadro lento (cpu {:.2}): vista {tv:.2} · poll {:.2} · maintain {:.2} · subir {:.2} ({} órdenes, {} KB)", cpu_ms() - c0, up.poll_ms, up.maintain_ms, up.ms - up.poll_ms - up.maintain_ms, up.ops, up.bytes / 1024);
     }
-    (t0.elapsed().as_secs_f64() * 1000.0, up.ms, up.bytes)
+    (t0.elapsed().as_secs_f64() * 1000.0, up.ms, up.bytes, cpu_ms() - c0)
 }
 
 fn pace(t0: Instant) {
@@ -499,6 +528,7 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
     let zoom_frames = (4.0 / dt) as usize;
     let fly_frames = (3000.0 / 40.0 / dt) as usize;
     let t_flight = Instant::now();
+    let mut work_cpu = Vec::new();
     for f in 0..2 * zoom_frames + fly_frames {
         let tf = Instant::now();
         if f < zoom_frames {
@@ -511,8 +541,9 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
             cam.target.x = p.x;
             cam.target.z = p.y;
         }
-        let (w, u, _) = window_step(&mut s, r, terrain, &mut cam, view_h);
+        let (w, u, _, c) = window_step(&mut s, r, terrain, &mut cam, view_h);
         work.push(w);
+        work_cpu.push(c);
         upload_max = upload_max.max(u);
         pace(tf);
     }
@@ -523,13 +554,18 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
     let (hits, hidden) = (s.stats.cache_hits, s.stats.hidden_skipped);
     let (occl_n, occl_max, occl_hilo) = (s.stats.occl_evals, s.stats.occl_ms_max, s.stats.occl_thread_ms_max);
     let p = percentiles(&work);
+    let pc = percentiles(&work_cpu);
     drop(s);
     let _ = writeln!(md, "\n### Streaming: vuelo, zoom de ida y vuelta, teletransporte y salto al recentrar\n");
     let _ = writeln!(md, "Cuadros a 60 Hz sin dibujar: el cuadro es el trabajo de CPU del hilo principal en el streaming (recentrar, recibir y subir mallas con el presupuesto de la ventana). Vuelo: zoom 150 m → 3 km → 150 m (4 s cada tramo) y 3 km hacia el cerro a 40 m/s. Con lavapipe valen las proporciones, no los números absolutos.\n");
     let _ = writeln!(md, "| Prueba | Cuadros | p50 | p95 | p99 | 1 % peor | Peor cuadro | Peor subida | Columnas generadas | De la caché | Ocultas por relieve | Subido | Pendientes al final | Hasta ocioso |");
     let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     let _ = writeln!(md, "| Vuelo ({flight_s:.0} s; primera carga {t_first:.1} s) | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.1} ms | {:.1} ms | {cols} | {hits} | {hidden} | {:.1} MB | {pending_end} | {t_idle:.1} s |", work.len(), p.p50, p.p95, p.p99, p.peor1, p.max, upload_max, bytes as f64 / 1048576.0);
+    // [render] Con otros procesos en la máquina, el tiempo de pared de un cuadro suma lo que el
+    // sistema le quitó al hilo; el de CPU del hilo no.
+    let _ = writeln!(md, "| Vuelo, solo CPU del hilo principal | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.1} ms | — | — | — | — | total {:.0} ms | — | — |", work_cpu.len(), pc.p50, pc.p95, pc.p99, pc.peor1, pc.max, pc.media * work_cpu.len() as f64);
     let mut json = serde_json::json!({
+        "vuelo_cpu_ms": pc.json(),
         "oclusion": { "evaluaciones": occl_n, "peor_ms_principal": occl_max, "peor_ms_hilo": occl_hilo },
         "vuelo": { "cuadros": work.len(), "segundos": flight_s, "primera_carga_s": t_first, "cuadro_ms": p.json(), "peor_subida_ms": upload_max, "columnas_generadas": cols, "de_la_cache": hits, "ocultas": hidden, "bytes_subidos": bytes, "pendientes_al_final": pending_end, "hasta_ocioso_s": t_idle }
     });
@@ -636,6 +672,10 @@ fn new_streamer(o: &Options, terrain: &Arc<TerrainGen>, store: &Arc<RwLock<EditS
         s.set_concurrency(p.hilos(crate::autoajuste::nucleos()));
         s.ritmo.ms = p.subida_ms as f64;
         s.cache.set_presupuesto((p.cache_mb as usize) << 20);
+    }
+    // [render] `MOTOR_SUBIDA_MS=1.0`: presupuesto de streaming por cuadro (para medir).
+    if let Some(ms) = std::env::var("MOTOR_SUBIDA_MS").ok().and_then(|v| v.parse::<f64>().ok()) {
+        s.ritmo.ms = ms;
     }
     s
 }

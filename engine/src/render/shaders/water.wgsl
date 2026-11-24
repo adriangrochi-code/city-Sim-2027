@@ -118,6 +118,23 @@ fn vs_quad(v: VIn) -> VOut {
     return o;
 }
 
+// [render] Niebla de lo que falta (técnicas del mod LOD §2.12): por sector alrededor del centro
+// de los anillos, la distancia a la primera zona sin nada dibujado (`Streamer::sectores_faltan`).
+// Se funde desde un poco antes de esa distancia; entre dos sectores manda el más cercano.
+@group(0) @binding(8) var<storage, read> faltan: array<f32, 64>;
+fn hole_fog(world: vec3<f32>) -> f32 {
+    let d = world.xz - vec2(g.sky_top.w, g.sky_horizon.w);
+    let f = (atan2(d.y, d.x) / 6.2831853 + 0.5) * 64.0 - 0.5;
+    let i0 = i32(floor(f));
+    let a = faltan[u32(((i0 % 64) + 64) % 64)];
+    let b = faltan[u32((((i0 + 1) % 64) + 64) % 64)];
+    let lim = min(a, b);
+    if (lim > 1.0e8) {
+        return 0.0;
+    }
+    return smoothstep(lim - max(40.0, lim * 0.2), lim, length(d));
+}
+
 // [entorno amplio] Fin del terreno dibujado: el círculo de radio sun_color.w alrededor del
 // centro de los anillos de detalle (sky_top.w, sky_horizon.w). Desde el 60 % de ese radio
 // todo se funde con la niebla, así el último anillo (y el agua más allá) no se ve como un
@@ -187,8 +204,19 @@ fn cell_shade(p: vec2<f32>, size: f32, t: f32) -> Celda {
     return Celda(tilt, h, e, ola);
 }
 
+// [render] El plano de respaldo (pipeline sin la niebla de lo que falta: está más allá del
+// último anillo) y las caras del agua de las columnas.
+@fragment
+fn fs_plano(v: VOut) -> @location(0) vec4<f32> {
+    return shade(v, 0.0);
+}
+
 @fragment
 fn fs_main(v: VOut) -> @location(0) vec4<f32> {
+    return shade(v, hole_fog(v.world));
+}
+
+fn shade(v: VOut, hole: f32) -> vec4<f32> {
     let tipo = u32(v.info.z + 0.5);
     // El plano de respaldo solo se ve más allá del último anillo de detalle (ahí ya es niebla).
     if (tipo == 0u && g.sun_color.w > 0.0 && distance(v.world.xz, vec2(g.sky_top.w, g.sky_horizon.w)) < g.sun_color.w * 0.97) {
@@ -250,7 +278,7 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let vdir_f = normalize(v.world - g.cam_pos.xyz);
     let sun_f = pow(max(dot(vdir_f, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
     let fog_c = mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, sun_f * 0.6);
-    let fogk = max(clamp(fog, 0.0, 0.88), reach_fog(v.world));
+    let fogk = max(max(clamp(fog, 0.0, 0.88), reach_fog(v.world)), hole);
     col = mix(col, fog_c, fogk);
     // El río es turbio (agua color león): casi no deja ver el fondo, salvo en la orilla, donde
     // el agua es baja y se ve la arena (la profundidad sale del fondo de cada columna).
