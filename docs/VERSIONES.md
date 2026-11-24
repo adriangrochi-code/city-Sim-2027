@@ -10,6 +10,35 @@ Cómo numerar (mientras el juego esté en desarrollo, 0.x):
 - **0.X.Y**: arreglos y ajustes sobre la anterior (subir Y).
 - Cada versión que se manda a probar se anota acá y lleva una etiqueta de git `vX.Y.Z`.
 
+## v0.13.0 (2026-11-24)
+**Época 3, Inmigración (≈1870–1930), jugable** (`docs/sistemas/arquitectura-epoca3.md`):
+- Paso de época 2 → 3 (3.000 habitantes, teatro, ensanche y la llegada del ferrocarril:
+  concesión o línea propia).
+- Inmigración con oleadas; casas viejas que se vuelven conventillos si falta vivienda
+  (inspección para frenarlo).
+- Usina eléctrica que reemplaza el gas; tranvías a caballo y eléctricos con rieles, postes y
+  cable, que valorizan el suelo.
+- Kit nuevo: casa standard (chorizo), casa de altos, edificio de renta con cúpula o mansarda,
+  almacén y bar de esquina, conventillo, fábrica con chimenea, galpón, estación, usina,
+  cocheras, hotel de inmigrantes y puerto con grúas.
+
+**Vecinos y personajes:**
+- Muchos menos jinetes (11 % en la calle), ficha propia del portón, el paso de la IA con el
+  foco en la plaza de 0,33–0,40 a 0,17–0,21 ms con 3.000 agentes.
+- Aguadores, serenos que encienden faroles y cantan la hora, incendios con curiosos y cadena
+  de baldes, carretas empantanadas que esperan ayuda, salida de misa con corrillos, vuelta de
+  la plaza.
+- Gente sentada (pulpería, poyo, silla en la vereda), boyero con picana; postigos, cancel y
+  poyos en las fachadas.
+- Calles en pendiente con rampas en cada escalón de 25 cm.
+
+**Render:**
+- Fundido entre niveles (desde Medio), cobertura de ediciones lejos, costa lejana sin hundirse,
+  `far_drop` eliminado.
+- SSAO lejano y escala de render opcional (se apaga sola si no gana), en presets y auto-ajuste.
+- Sombras de personajes y animales; ramas colgantes del sauce.
+- Pendiente: medir en placa real; el fundido suma ~0,2 ms de CPU al vuelo.
+
 ## v0.12.0 (2026-11-24)
 **IA de los vecinos y tránsito colonial** (`docs/sistemas/ia-y-transito.md`):
 - Agenda encadenada (nadie en dos lugares a la vez); los agentes son las personas de la
