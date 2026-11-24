@@ -358,6 +358,20 @@ pub struct Settings {
     /// [lod] Auto-ajuste de las perillas según el cuello de botella (CPU o GPU).
     #[serde(default = "si")]
     pub autoajuste: bool,
+    /// [render] Fundido con tramado al cambiar de nivel de detalle (técnicas del mod LOD §2.5).
+    #[serde(default = "si")]
+    pub fundido: bool,
+    /// [render] Oclusión ambiental en pantalla para lo lejano (valles y pies de cerro, §2.13).
+    #[serde(default)]
+    pub ssao: bool,
+    /// [render] Escala de render en % (100, 85, 75 o 67; §2.16): el mundo se dibuja más chico y
+    /// se escala a la ventana; la interfaz queda nítida. Se apaga solo si no gana.
+    #[serde(default = "cien")]
+    pub escala_render: u32,
+}
+
+fn cien() -> u32 {
+    100
 }
 
 fn personalizado() -> Option<crate::autoajuste::Calidad> {
@@ -403,6 +417,9 @@ impl Default for Settings {
             hilos: 0,
             fps_objetivo: 60,
             autoajuste: true,
+            fundido: true,
+            ssao: false,
+            escala_render: 100,
         }
     }
 }
@@ -440,6 +457,7 @@ impl Settings {
         self.subida_ms = if self.subida_ms.is_finite() { self.subida_ms.clamp(0.5, 4.0) } else { 3.0 };
         self.hilos = self.hilos.min(64);
         self.fps_objetivo = self.fps_objetivo.clamp(20, 240);
+        self.escala_render = crate::render::escala::valida(self.escala_render);
         self
     }
 
@@ -456,6 +474,9 @@ impl Settings {
         self.subida_ms = p.subida_ms;
         self.fps_objetivo = p.fps_objetivo;
         self.cache_mb = p.cache_mb;
+        self.fundido = p.fundido;
+        self.ssao = p.ssao;
+        self.escala_render = p.escala;
     }
 
     /// [lod] Hilos de generación con `creados` hilos de trabajo disponibles.
@@ -465,7 +486,7 @@ impl Settings {
 
     /// [lod] Techo de las perillas del auto-ajuste (lo que eligió el jugador o el preset).
     pub fn techo(&self, creados: usize) -> crate::autoajuste::Perillas {
-        crate::autoajuste::Perillas::desde(self.niveles, self.anillo, (self.sombras_cascadas, self.sombras_resolucion), self.hilos_para(creados), self.subida_ms)
+        crate::autoajuste::Perillas::desde(self.niveles, self.anillo, (self.sombras_cascadas, self.sombras_resolucion), self.hilos_para(creados), self.subida_ms).con_efectos(self.ssao, self.escala_render)
     }
 
     pub fn shadow_quality(&self) -> crate::render::ShadowQuality {

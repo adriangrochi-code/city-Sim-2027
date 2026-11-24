@@ -46,10 +46,37 @@ fn shadow_in(i: u32, world: vec3<f32>, n: vec3<f32>, slope: f32) -> vec3<f32> {
     return vec3(shadow_pcf(i, uv, lp.z - bias), e / margin, 1.0);
 }
 
+// [render] Sombra proyectada de los personajes y animales: mapa propio con la matriz de la
+// cascada 0 (misc.w = 1 si hay), rehecho en cada cuadro (las cascadas quedan en caché). PCF de 4
+// lecturas con el texel del mapa (2048²), sesgo de la cascada 0.
+@group(0) @binding(10) var agent_map: texture_depth_2d;
+fn shadow_agentes(world: vec3<f32>, n: vec3<f32>, slope: f32) -> f32 {
+    if (sombras.misc.w < 0.5) {
+        return 1.0;
+    }
+    let info = sombras.info[0];
+    let lp = sombras.vp[0] * vec4(world + n * info.x * 1.5, 1.0);
+    if (max(abs(lp.x), abs(lp.y)) >= 0.999 || lp.z <= 0.0 || lp.z >= 1.0) {
+        return 1.0;
+    }
+    let uv = vec2(lp.x * 0.5 + 0.5, 0.5 - lp.y * 0.5);
+    let z = lp.z - info.x * slope * info.y;
+    let h = 0.5 / 2048.0;
+    var s = textureSampleCompareLevel(agent_map, shadow_sampler, uv + vec2(-h, -h), z);
+    s += textureSampleCompareLevel(agent_map, shadow_sampler, uv + vec2(h, -h), z);
+    s += textureSampleCompareLevel(agent_map, shadow_sampler, uv + vec2(-h, h), z);
+    s += textureSampleCompareLevel(agent_map, shadow_sampler, uv + vec2(h, h), z);
+    return s * 0.25;
+}
+
 fn shadow(world: vec3<f32>, n: vec3<f32>) -> f32 {
     let ndl = clamp(dot(n, g.sun_dir.xyz), 0.05, 1.0);
     // Texels de sesgo: 1 de frente al sol, hasta 6 con luz rasante (tan del ángulo).
     let slope = min(1.0 + 2.0 * sqrt(1.0 - ndl * ndl) / ndl, 6.0);
+    return shadow_estatica(world, n, slope) * shadow_agentes(world, n, slope);
+}
+
+fn shadow_estatica(world: vec3<f32>, n: vec3<f32>, slope: f32) -> f32 {
     let count = u32(sombras.misc.x);
     for (var i = 0u; i < count; i++) {
         let a = shadow_in(i, world, n, slope);

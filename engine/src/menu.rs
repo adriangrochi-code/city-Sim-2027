@@ -891,6 +891,23 @@ impl Menu {
                     }
                 });
                 ui.end_row();
+                // [render] Técnicas del mod LOD: fundido entre niveles, SSAO lejano y escalado.
+                ui.label("Efectos lejanos");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut d.fundido, "Fundido entre niveles").on_hover_text("Al cambiar de nivel de detalle, el terreno se funde con un tramado en 0,4 s en vez de saltar");
+                    ui.checkbox(&mut d.ssao, "Oclusión lejana").on_hover_text("Sombrea valles, pies de cerro y la base de la ciudad a lo lejos (una pasada a media resolución)");
+                });
+                ui.end_row();
+                ui.label("Escala de render");
+                ui.horizontal(|ui| {
+                    for v in crate::render::escala::ESCALAS {
+                        let tip = if v == 100 { "El mundo se dibuja a la resolución de la ventana".to_string() } else { format!("El mundo se dibuja al {v} % y se escala a la ventana (la interfaz queda nítida); se apaga solo si no gana más de un 3 %") };
+                        if ui.selectable_label(d.escala_render == v, format!("{v} %")).on_hover_text(tip).clicked() {
+                            d.escala_render = v;
+                        }
+                    }
+                });
+                ui.end_row();
                 ui.label("Autoguardado");
                 ui.horizontal(|ui| {
                     for (v, name) in [(0, "Nunca"), (6, "6 meses"), (12, "12 meses"), (24, "24 meses")] {
@@ -903,7 +920,7 @@ impl Menu {
             });
             // [lod] Si lo elegido a mano ya no es el preset, la calidad pasa a Personalizado.
             if let Some(p) = d.calidad.and_then(|c| c.preset()) {
-                if (p.niveles, p.sombras, p.msaa) != (d.niveles, (d.sombras_cascadas, d.sombras_resolucion), d.msaa) {
+                if (p.niveles, p.sombras, p.msaa, p.fundido, p.ssao, p.escala) != (d.niveles, (d.sombras_cascadas, d.sombras_resolucion), d.msaa, d.fundido, d.ssao, d.escala_render) {
                     d.calidad = Some(crate::autoajuste::Calidad::Personalizado);
                 }
             }

@@ -366,9 +366,54 @@ impl AoModo {
     }
 }
 
+/// [render] Superficie a la altura real en los niveles gruesos (técnicas del mod LOD §2.1,
+/// `SuperVoxel.relleno` del mod): por cada columna de la copia con borde (`P × P`), el índice del
+/// vóxel de superficie del terreno (`top`, en vóxeles del mundo; `i32::MIN` = sin terreno) y qué
+/// parte de su alto está llena (`fill`, de 0 = 1/16 a 15 = lleno). `y0`: índice del vóxel en la
+/// fila 0 de la copia.
+pub struct Relleno<'a> {
+    pub top: &'a [i32],
+    pub fill: &'a [u8],
+    pub y0: i32,
+}
+
 pub fn mesh_chunk_ao(v: &[Mat], offset: IVec3, grad: Option<&[f32]>, ao_modo: AoModo) -> Mesh {
+    mesh_chunk_relleno(v, offset, grad, ao_modo, None)
+}
+
+/// [render] Igual que [`mesh_chunk_ao`], con la superficie del terreno a la altura real: la cara de
+/// arriba del vóxel de superficie se dibuja `16 − relleno` dieciseisavos más abajo, sus costados
+/// llegan hasta ahí, el costado que da a un vecino más bajo baja hasta la superficie del vecino, y
+/// entre dos vecinos con el vóxel de superficie a la misma altura se dibuja el escalón entre los
+/// dos rellenos (si no, quedaba una grieta). Solo cuenta la superficie que se ve (con aire
+/// encima): bajo un árbol, una obra o una copa el vóxel queda lleno. El recorte y la extensión van
+/// en la clave del *greedy* (solo se unen caras iguales) y en los bits libres de [`Quad`]
+/// (`a` 26–29: recorte de arriba; `b` 26–30: corrimiento del borde de abajo, con signo).
+pub fn mesh_chunk_relleno(v: &[Mat], offset: IVec3, grad: Option<&[f32]>, ao_modo: AoModo, relleno: Option<&Relleno>) -> Mesh {
     let mut mesh = Mesh::default();
     let tops = terrain_tops(v);
+    // [render] Recorte de cada columna (0 = lleno o sin relleno) y su vóxel de superficie (local).
+    let mut cut = vec![0u8; (P * P) as usize];
+    let mut ty = vec![i32::MIN; (P * P) as usize];
+    if let Some(r) = relleno {
+        for z in 0..P {
+            for x in 0..P {
+                let k = (x + z * P) as usize;
+                if r.top[k] == i32::MIN {
+                    continue;
+                }
+                let y = r.top[k] - r.y0;
+                ty[k] = y;
+                if r.fill[k] < 15 && (0..P - 1).contains(&y) && is_terrain(at(v, x, y, z)) && at(v, x, y + 1, z) == AIR {
+                    cut[k] = 15 - r.fill[k];
+                }
+            }
+        }
+    }
+    let col = |x: i32, z: i32| (x + z * P) as usize;
+    // Bits de relleno de una cara: recorte de arriba (4) << 16 y corrimiento de abajo (5, con
+    // signo) << 20.
+    let bits_relleno = |corte: u8, corr: i32| ((corte as u32) << 16) | (((corr as u32) & 31) << 20);
     // Bits de sólido por fila: rows[y * P + z] tiene el bit x encendido si (x, y, z) no es aire.
     let mut rows = vec![0u64; (P * P) as usize];
     for y in 0..P {
@@ -421,7 +466,55 @@ pub fn mesh_chunk_ao(v: &[Mat], offset: IVec3, grad: Option<&[f32]>, ao_modo: Ao
                             AoModo::SinTerreno if is_terrain(m) => 0xff,
                             _ => face_ao(v, [x + n[0], y + n[1], z + n[2]], u_ax, v_ax),
                         };
-                        masks[(slice * N * N + i + j * N) as usize] = m as u32 | (ao << 8) | (1 << 31);
+                        // [render] Relleno: recorte de la superficie y extensión hasta el vecino.
+                        let mut extra = 0;
+                        if relleno.is_some() && (axis != 1 || sign > 0) {
+                            let k = col(x, z);
+                            let corte = if y == ty[k] { cut[k] } else { 0 };
+                            let corr = if axis != 1 {
+                                let kn = col(x + n[0], z + n[2]);
+                                if cut[kn] > 0 && y == ty[kn] + 1 { -(cut[kn] as i32) } else { 0 }
+                            } else {
+                                0
+                            };
+                            extra = bits_relleno(corte, corr);
+                        }
+                        masks[(slice * N * N + i + j * N) as usize] = m as u32 | (ao << 8) | extra | (1 << 31);
+                        counts[slice as usize] += 1;
+                    }
+                }
+            }
+            // [render] Escalones del relleno entre vecinos con el vóxel de superficie a la misma
+            // altura (el vecino es sólido ahí: no había cara).
+            if relleno.is_some() && axis != 1 {
+                for zc in 0..P {
+                    for xc in 0..P {
+                        let kc = col(xc, zc);
+                        let yc = ty[kc];
+                        if cut[kc] == 0 || !(1..=N).contains(&yc) {
+                            continue;
+                        }
+                        // La columna dueña de la cara mira hacia la recortada.
+                        let (x, z) = (xc - n[0], zc - n[2]);
+                        if !(1..=N).contains(&x) || !(1..=N).contains(&z) || at(v, x, yc, z) == AIR {
+                            continue;
+                        }
+                        let k = col(x, z);
+                        let corte = if yc == ty[k] { cut[k] } else { 0 };
+                        if corte >= cut[kc] {
+                            continue;
+                        }
+                        let (slice, i, j) = match axis {
+                            0 => (x - 1, yc - 1, z - 1),
+                            _ => (z - 1, x - 1, yc - 1),
+                        };
+                        let m = at(v, x, yc, z);
+                        let ao = match ao_modo {
+                            AoModo::Nada => 0xff,
+                            AoModo::SinTerreno if is_terrain(m) => 0xff,
+                            _ => face_ao(v, [x + n[0], yc, z + n[2]], u_ax, v_ax),
+                        };
+                        masks[(slice * N * N + i + j * N) as usize] = m as u32 | (ao << 8) | bits_relleno(corte, 16 - cut[kc] as i32) | (1 << 31);
                         counts[slice as usize] += 1;
                     }
                 }
@@ -523,8 +616,13 @@ fn emit_quad(mesh: &mut Mesh, tops: &[i32], grad: Option<&[f32]>, offset: IVec3,
     let b0 = grid(0, 0);
     let (x, y, z) = (b0[0] + offset.x, b0[1] + offset.y, b0[2] + offset.z);
     debug_assert!((0..64).contains(&x) && (0..64).contains(&z) && (0..=MAX_Y).contains(&y), "cara fuera de rango: {x} {y} {z}");
-    let qa = (x as u32 & 63) | ((z as u32 & 63) << 6) | ((y.min(MAX_Y) as u32) << 12) | ((dir as u32) << 23);
-    let qb = (w as u32 - 1) | ((h as u32 - 1) << 5) | (ao << 10) | ((m as u32) << 18);
+    // [render] Relleno (ver `mesh_chunk_relleno`): el borde de abajo puede bajar hasta un vóxel.
+    let (corte, corr) = ((key >> 16) & 15, (key >> 20) & 31);
+    if corr >= 16 {
+        mesh.lo[1] = mesh.lo[1].min((y - 1).max(0) as u16);
+    }
+    let qa = (x as u32 & 63) | ((z as u32 & 63) << 6) | ((y.min(MAX_Y) as u32) << 12) | ((dir as u32) << 23) | (corte << 26);
+    let qb = (w as u32 - 1) | ((h as u32 - 1) << 5) | (ao << 10) | ((m as u32) << 18) | (corr << 26);
     mesh.quads[dir].push(Quad { a: qa, b: qb, smooth, slot: 0 });
 }
 
@@ -606,6 +704,94 @@ mod tests {
 
     fn empty() -> Vec<Mat> {
         vec![AIR; (P * P * P) as usize]
+    }
+
+    /// [render] Relleno (técnicas del mod LOD §2.1): cada columna tiene su cara de arriba a la
+    /// altura de su relleno y entre dos columnas vecinas los costados cubren todo el tramo entre
+    /// sus dos superficies, sin grietas (rayos horizontales al borde de cada par dan con una cara),
+    /// también cuando el vóxel de superficie de las dos está a la misma altura. Sin relleno, la
+    /// malla es la de siempre.
+    #[test]
+    fn el_relleno_no_deja_grietas() {
+        let mut v = empty();
+        let mut top = vec![i32::MIN; (P * P) as usize];
+        let mut fill = vec![15u8; (P * P) as usize];
+        let mut seed = 12345u32;
+        let mut rnd = |n: u32| {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) % n
+        };
+        for z in 0..P {
+            for x in 0..P {
+                let k = (x + z * P) as usize;
+                let t = 10 + rnd(3) as i32;
+                top[k] = t;
+                fill[k] = rnd(16) as u8;
+                for y in 0..=t {
+                    v[(x + z * P + y * P * P) as usize] = palette::GRASS;
+                }
+            }
+        }
+        let r = Relleno { top: &top, fill: &fill, y0: 0 };
+        let m = mesh_chunk_relleno(&v, IVec3::ZERO, None, AoModo::Todo, Some(&r));
+        // En coordenadas de la malla (la copia con borde corrida un vóxel).
+        let sup = |x: i32, z: i32| (top[(x + z * P) as usize] - 1) as f32 + (fill[(x + z * P) as usize] as f32 + 1.0) / 16.0;
+        // Caras decodificadas como las arma el shader: (dir, plano, rango u, rango v, y0, y1).
+        let caras: Vec<(usize, [f32; 3], [f32; 3])> = m
+            .quads
+            .iter()
+            .flatten()
+            .map(|q| {
+                let d = q.dir();
+                let b = q.base();
+                let (w, h) = q.size();
+                let corte = ((q.a >> 26) & 15) as f32 / 16.0;
+                let corr = (((q.b >> 26) << 27) as i32 >> 27) as f32 / 16.0;
+                let mut lo = [b[0] as f32, b[1] as f32, b[2] as f32];
+                let mut hi = lo;
+                let ax = [1usize, 0, 0, 2, 2, 1][d];
+                let (u, vv) = ((ax + 1) % 3, (ax + 2) % 3);
+                hi[u] += w as f32;
+                hi[vv] += h as f32;
+                if d == 0 {
+                    lo[1] -= corte;
+                    hi[1] -= corte;
+                } else if ax != 1 {
+                    lo[1] += corr;
+                    hi[1] -= corte;
+                }
+                (d, lo, hi)
+            })
+            .collect();
+        let hay = |d: usize, p: [f32; 3]| caras.iter().any(|(cd, lo, hi)| *cd == d && (0..3).all(|a| p[a] >= lo[a] - 1e-4 && p[a] <= hi[a] + 1e-4));
+        let mut tramos = 0;
+        for z in 1..=N {
+            for x in 1..=N {
+                let (cx, cz) = ((x - 1) as f32 + 0.5, (z - 1) as f32 + 0.5);
+                assert!(hay(0, [cx, sup(x, z), cz]), "sin cara de arriba en ({x}, {z})");
+                // Vecino en +x y en +z: la más alta de las dos tiene que tapar el tramo.
+                for (dx, dz, d_mas, d_menos) in [(1, 0, 1usize, 2usize), (0, 1, 3, 4)] {
+                    let (xn, zn) = (x + dx, z + dz);
+                    if xn > N || zn > N {
+                        continue;
+                    }
+                    let (a, b) = (sup(x, z), sup(xn, zn));
+                    let (d, borde) = if a > b { (d_mas, [(x - 1 + dx) as f32 + (1 - dx) as f32 * 0.5, 0.0, (z - 1 + dz) as f32 + (1 - dz) as f32 * 0.5]) } else { (d_menos, [(x - 1 + dx) as f32 + (1 - dx) as f32 * 0.5, 0.0, (z - 1 + dz) as f32 + (1 - dz) as f32 * 0.5]) };
+                    let (y0, y1) = (a.min(b), a.max(b));
+                    let mut y = y0 + 1.0 / 64.0;
+                    while y < y1 {
+                        let mut p = borde;
+                        p[1] = y;
+                        assert!(hay(d, p), "grieta entre ({x}, {z}) y ({xn}, {zn}) a y = {y} ({a} / {b})");
+                        tramos += 1;
+                        y += 1.0 / 32.0;
+                    }
+                }
+            }
+        }
+        assert!(tramos > 1000);
+        // Sin relleno, lo de siempre.
+        assert_eq!(mesh_chunk_relleno(&v, IVec3::ZERO, None, AoModo::Todo, None).quads, mesh_chunk_ao(&v, IVec3::ZERO, None, AoModo::Todo).quads);
     }
 
     #[test]

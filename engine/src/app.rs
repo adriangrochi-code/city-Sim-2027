@@ -91,6 +91,9 @@ struct App {
     last_drawn: Option<Instant>,
     skipped_since: bool,
     tope_ms: f64,
+    /// [render] Prueba del escalado de render ("apagar si no gana", `autoajuste::PruebaEscalado`):
+    /// la que corre o la que terminó con las opciones actuales.
+    prueba_escala: Option<crate::autoajuste::PruebaEscalado>,
 }
 
 /// Con la escena quieta solo se redibuja para animar el agua, a este intervalo.
@@ -136,6 +139,7 @@ pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
         last_drawn: None,
         skipped_since: false,
         tope_ms: 0.0,
+        prueba_escala: None,
     };
     app.tuner.activo = app.menu.settings.autoajuste;
     event_loop.run_app(&mut app).map_err(|e| format!("error en el bucle de eventos: {e}"))?;
@@ -306,6 +310,25 @@ impl App {
             }
         }
         apply_knobs(&self.tuner.actual, &mut s.streamer, renderer, self.menu.settings.cache_mb);
+        // [render] Prueba del escalado: con la escala elegida (< 100 %) se alternan cuadros con y
+        // sin escala fuera del menú; si no gana más de un 3 %, se apaga por esta sesión.
+        if self.tuner.techo.escala() < 100 && !muestra.menu {
+            let p = self.prueba_escala.get_or_insert_with(Default::default);
+            if p.resultado.is_none() {
+                if let Some(ok) = p.muestra(muestra.gpu_ms.unwrap_or(muestra.trabajo_ms)) {
+                    println!("Escala de render al {} %: {}", self.tuner.techo.escala(), if ok { "gana más de un 3 %, sigue" } else { "no gana más de un 3 %, se apaga" });
+                    if !ok {
+                        let mut t = self.tuner.techo;
+                        t.escala = crate::autoajuste::ESCALAS_PASOS.len() - 1;
+                        self.tuner.set_techo(t, self.menu.settings.fps_objetivo as f64);
+                        self.menu.status = Some(("La escala de render no ganaba rendimiento en este equipo: se apagó".into(), false));
+                    }
+                }
+                if !p.con_escala() {
+                    renderer.escala = 100;
+                }
+            }
+        }
         let parts = [("simulación", ms_sim), ("subir mallas", ms_upload), ("selección", ms_pick), ("interfaz", cpu_ui as f32), ("dibujo", ms_render)];
         let (who, _) = parts.iter().cloned().fold(("", 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
         if frame_gap > self.worst.0 {
@@ -380,9 +403,11 @@ impl App {
                 }
                 self.tuner.set_techo(self.menu.settings.techo(self.session.streamer.threads()), self.menu.settings.fps_objetivo as f64);
                 self.tuner.activo = self.menu.settings.autoajuste;
+                self.prueba_escala = None; // [render] otra escala: se vuelve a probar
                 if let Some(gpu) = self.gpu.as_mut() {
                     gpu.renderer.set_shadow_quality(self.menu.settings.shadow_quality());
                     gpu.renderer.voxel_terrain = self.menu.settings.terreno_voxeles;
+                    gpu.renderer.aplicar_efectos(&self.menu.settings); // [render]
                     let mode = if self.menu.settings.sincronizacion_vertical { wgpu::PresentMode::AutoVsync } else { wgpu::PresentMode::AutoNoVsync };
                     if gpu.config.present_mode != mode {
                         gpu.config.present_mode = mode;
@@ -526,6 +551,7 @@ impl ApplicationHandler for App {
                 renderer.shadow_budget = crate::render::SHADOW_BUDGET_WINDOW;
                 renderer.set_shadow_quality(self.menu.settings.shadow_quality());
                 renderer.voxel_terrain = self.menu.settings.terreno_voxeles;
+                renderer.aplicar_efectos(&self.menu.settings); // [render]
                 if !self.menu.settings.sincronizacion_vertical {
                     config.present_mode = wgpu::PresentMode::AutoNoVsync;
                     renderer.configure(&surface, &config);
@@ -694,6 +720,12 @@ pub fn apply_knobs(k: &crate::autoajuste::Perillas, streamer: &mut crate::stream
         streamer.set_concurrency(k.hilos);
     }
     streamer.ritmo.ms = k.subida_ms() as f64;
+    // [render] SSAO lejano y escala de render (la prueba del escalado la puede pisar).
+    if r.ssao != (k.ssao == 1) || r.escala != k.escala() {
+        r.scene_version += 1;
+    }
+    r.ssao = k.ssao == 1;
+    r.escala = k.escala();
     let bytes = (cache_mb as usize) << 20;
     if streamer.cache.presupuesto != bytes {
         streamer.cache.set_presupuesto(bytes);

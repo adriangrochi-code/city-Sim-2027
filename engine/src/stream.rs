@@ -96,6 +96,11 @@ struct Shared {
 pub enum Op {
     Set(Key, Mesh),
     Remove(Key),
+    /// [render] Con [`Streamer::fundido`]: columna nueva que reemplaza a otra de otro nivel (entra
+    /// con tramado, ver `Renderer::set_column_fade`) y columna retirada que ya está cubierta (sale
+    /// con tramado, `Renderer::fade_out_column`). Técnicas del mod LOD §2.5.
+    Entra(Key, Mesh),
+    Sale(Key),
 }
 
 #[derive(Default, Clone, Copy)]
@@ -122,6 +127,14 @@ pub struct Streamer {
     ready: FxMap<Key, u32>,
     uploads: Vec<ColumnResult>,
     retired: FxSet<Key>,
+    /// [render] Las retiradas proyectadas a los niveles más gruesos, con cuántas hay: `(l, c)` =
+    /// hay retiradas de nivel < l dentro de la columna `c` del nivel `l` (para saber si una
+    /// columna nueva reemplaza a una retirada). Se lleva al día al retirar y al quitar, sin
+    /// rearmarlo: rearmarlo en cada cuadro del vuelo costaba ~0,1 ms.
+    retired_idx: FxMap<Key, u32>,
+    /// [render] Fundido entre niveles: emitir `Op::Entra`/`Op::Sale` en vez de `Set`/`Remove`
+    /// cuando una columna reemplaza a otra (apagado por omisión: lo prende la ventana).
+    pub fundido: bool,
     /// [render] Estado con el que se miraron las retiradas sin quitar ninguna (ver `poll_budget`).
     retired_mark: Option<(u32, usize, usize, usize, usize, usize, u64)>,
     /// [render] Última niebla de lo que falta, con qué estado y cuándo se calculó.
@@ -269,6 +282,8 @@ impl Streamer {
             ready: FxMap::default(),
             uploads: Vec::new(),
             retired: FxSet::default(),
+            retired_idx: FxMap::default(),
+            fundido: false,
             retired_mark: None,
             faltan: ([SIN_FALTA; SECTORES], None, None),
             next_version: 1,
@@ -507,14 +522,13 @@ impl Streamer {
                     Some((lo, hi)) => {
                         let vs = spec.voxel();
                         // Lo dibujado: la cara de arriba queda a medio vóxel de la altura, la tierra
-                        // firme por lo menos un vóxel sobre el agua (3 m en los niveles con la
-                        // malla bajada, `lod::far_drop`), el agua con la marea, los árboles (hasta
-                        // 4 m por vóxel, mapa real), las copas del monte (un vóxel más en los
-                        // niveles gruesos) y las obras.
+                        // firme por lo menos un vóxel sobre el agua (con relleno, la de la costa a
+                        // 3 m, `superficie`), el agua con la marea, los árboles
+                        // (hasta 4 m por vóxel, mapa real), las copas del monte (un vóxel más en
+                        // los niveles gruesos) y las obras.
                         // La cara de arriba es una función creciente de la altura: la de las
                         // cotas acota la de todo lo de adentro.
-                        let drop = crate::lod::far_drop(key.0);
-                        let face = |h: f32| if drop > 0.0 { (top_from_height_far(h, vs, drop) + 1) as f32 * vs - drop } else { (top_from_height(h, vs) + 1) as f32 * vs };
+                        let face = |h: f32| if con_relleno(key.0) { cara_relleno(h, vs) } else { (top_from_height(h, vs) + 1) as f32 * vs };
                         let mut top = face(hi).max(3.0);
                         if self.terrain.is_real() {
                             if vs <= TREE_MAX_VOXEL {
@@ -694,7 +708,9 @@ impl Streamer {
                 self.hidden.remove(&(lod, *c));
                 self.postpone.remove(&(lod, *c));
                 if self.ready.contains_key(&(lod, *c)) {
-                    self.retired.insert((lod, *c));
+                    if self.retired.insert((lod, *c)) {
+                        self.indice_retirada((lod, *c), true);
+                    }
                 }
             }
             // Las columnas que siguen y tocan el borde cambian de faldón: hay que re-mallarlas.
@@ -710,7 +726,9 @@ impl Streamer {
                 }
             }
             for c in added {
-                self.retired.remove(&(lod, c));
+                if self.retired.remove(&(lod, c)) {
+                    self.indice_retirada((lod, c), false);
+                }
                 self.bump((lod, c));
             }
             for c in border {
@@ -856,10 +874,16 @@ impl Streamer {
             }
             used += r.mesh.quad_count().max(1) * 4;
             bytes += upload_bytes(&r.mesh);
-            self.ready.insert(r.key, r.version);
+            let estaba = self.ready.insert(r.key, r.version).is_some();
             self.stats.uploads += 1;
             self.shown.insert(r.key, r.firma);
-            ops.push(Op::Set(r.key, r.mesh));
+            // [render] Una columna que aparece donde todavía se ve otra de otro nivel (retirada)
+            // entra con fundido; la carga inicial, las ediciones y la que vuelve, no.
+            if self.fundido && !estaba && self.reemplaza_retirada(r.key) {
+                ops.push(Op::Entra(r.key, r.mesh));
+            } else {
+                ops.push(Op::Set(r.key, r.mesh));
+            }
             if used >= vertex_budget || bytes >= byte_budget {
                 break;
             }
@@ -887,17 +911,52 @@ impl Streamer {
             let done: Vec<Key> = self.retired.iter().copied().filter(|k| flush || self.covered_by(&faltan, *k)).collect();
             let quedan = done.is_empty();
             for key in done {
-                self.retired.remove(&key);
+                if self.retired.remove(&key) {
+                    self.indice_retirada(key, false);
+                }
                 self.ready.remove(&key);
                 if let Some(f) = self.shown.remove(&key) {
                     self.cache.tocar(key, f);
                 }
-                ops.push(Op::Remove(key));
+                ops.push(if self.fundido { Op::Sale(key) } else { Op::Remove(key) });
             }
             // Si no se quitó nada, la próxima vez se mira solo si algo cambió.
             self.retired_mark = if quedan { Some(marca) } else { None };
         }
         ops
+    }
+
+    /// [render] Suma o resta una retirada en `retired_idx`.
+    fn indice_retirada(&mut self, (k, c): Key, suma: bool) {
+        for l in k + 1..self.specs.len() as u32 {
+            let f = 1i32 << (l - k);
+            let p = (l, IVec2::new(c.x.div_euclid(f), c.y.div_euclid(f)));
+            if suma {
+                *self.retired_idx.entry(p).or_insert(0) += 1;
+            } else if let Some(v) = self.retired_idx.get_mut(&p) {
+                *v -= 1;
+                if *v == 0 {
+                    self.retired_idx.remove(&p);
+                }
+            }
+        }
+    }
+
+    /// [render] ¿La columna `key` se superpone con alguna retirada (de otro nivel) que todavía
+    /// está en la GPU?
+    fn reemplaza_retirada(&mut self, key: Key) -> bool {
+        if self.retired.is_empty() {
+            return false;
+        }
+        let n = self.specs.len() as u32;
+        let (l, c) = key;
+        if self.retired_idx.contains_key(&key) {
+            return true;
+        }
+        (l + 1..n).any(|k| {
+            let f = 1i32 << (k - l);
+            self.retired.contains(&(k, IVec2::new(c.x.div_euclid(f), c.y.div_euclid(f))))
+        })
     }
 
     /// [render] Lo que falta subir, proyectado a los niveles más gruesos: `(k, l, c)` = el nivel
@@ -1189,6 +1248,9 @@ fn lower_thread_priority() {
     }
 }
 
+/// [render] Los arroyos (agua con nivel propio) se mallan hasta el vóxel de 32 m (nivel 7).
+const ARROYOS_HASTA: u32 = 8;
+
 /// Índice del vóxel de superficie del terreno a partir de la altura (en metros).
 #[inline]
 pub fn top_from_height(h: f32, vs: f32) -> i32 {
@@ -1204,18 +1266,55 @@ pub fn top_from_height(h: f32, vs: f32) -> i32 {
     }
 }
 
-/// Igual que [`top_from_height`] en los niveles gruesos, cuya malla se dibuja `drop` metros
-/// más abajo (ver `lod::far_drop`): la cara de arriba del vóxel `k` queda en `(k + 1)·vs −
-/// drop`. Se elige el vóxel cuya cara queda más cerca de la altura; la tierra firme, por lo
-/// menos en el vóxel 0 (3 m sobre el agua), y el fondo, bajo el agua.
+/// [render] Primer nivel con la superficie del terreno a la altura real (relleno, técnicas del
+/// mod LOD §2.1): desde el vóxel de 2 m. Los niveles 0–2 no cambian.
+pub const RELLENO_DESDE: u32 = 3;
+/// [render] La tierra firme queda por lo menos esto sobre el nivel medio del río (por encima de la
+/// marea; en los vóxeles más chicos, un vóxel como siempre).
+pub const MARGEN_COSTA: f32 = 3.0;
+
+/// [render] ¿El nivel tiene relleno? (`MOTOR_SIN_RELLENO=1` lo apaga para medir y
+/// `MOTOR_RELLENO_DESDE=n` cambia el primer nivel.)
+pub fn con_relleno(lod: u32) -> bool {
+    static DESDE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    let desde = *DESDE.get_or_init(|| if std::env::var("MOTOR_SIN_RELLENO").is_ok() { u32::MAX } else { std::env::var("MOTOR_RELLENO_DESDE").ok().and_then(|v| v.parse().ok()).unwrap_or(RELLENO_DESDE) });
+    lod >= desde
+}
+
+/// [render] Vóxel de superficie y relleno (0 = 1/16 del alto, 15 = lleno) para una altura del
+/// terreno, en los niveles con relleno. Reemplaza al parche `lod::far_drop` (bajar toda la malla
+/// `vóxel − 3 m` desde el vóxel de 64 m): la cara de arriba queda en la altura real redondeada a
+/// 1/16 de vóxel, hacia arriba en tierra firme (nunca a menos de [`MARGEN_COSTA`] sobre el agua,
+/// ni de un vóxel en los de menos de 3 m) y hacia abajo en el fondo (siempre bajo el agua). Así
+/// una costa baja ya no es un acantilado de un vóxel entero (2 a 256 m).
 #[inline]
-pub fn top_from_height_far(h: f32, vs: f32, drop: f32) -> i32 {
-    let k = ((h + drop) / vs).round() as i32 - 1;
-    if h < 0.0 {
-        k.min(((drop / vs).floor() as i32) - 1)
+pub fn top_relleno(h: f32, vs: f32) -> (i32, u8) {
+    let q = if h >= 0.0 { (h.max(vs.min(MARGEN_COSTA)) / vs * 16.0).ceil() as i32 } else { (h / vs * 16.0).floor() as i32 };
+    ((q - 1).div_euclid(16), (q - 1).rem_euclid(16) as u8)
+}
+
+/// [render] Vóxel de superficie y relleno de una columna en los niveles con relleno. El relleno
+/// se usa en la tierra baja de la costa: la que antes quedaba en el primer vóxel (un vóxel
+/// entero, de 4 a 256 m, sobre el agua: un acantilado en cada costa) se dibuja a
+/// [`MARGEN_COSTA`] (redondeado hacia arriba a 1/16 de vóxel). Es la elección más cercana a la
+/// altura real entre "3 m" y los vóxeles enteros. El resto de la tierra y el fondo quedan con la
+/// cara de arriba de siempre (vóxel entero, lleno): con la altura real en todas las columnas
+/// (`top_relleno`, cada una con su recorte) el *greedy* casi no unía caras de arriba (Península
+/// pasaba de 0,51 a 1,17 M caras; solo en los niveles 8–10, a 0,71 M).
+#[inline]
+pub fn superficie(h: f32, vs: f32) -> (i32, u8) {
+    if h >= 0.0 && vs > MARGEN_COSTA && h < 0.5 * (MARGEN_COSTA + vs) {
+        top_relleno(MARGEN_COSTA, vs)
     } else {
-        k.max(0)
+        (top_from_height(h, vs), 15)
     }
+}
+
+/// [render] Altura (m) de la cara de arriba de la superficie en los niveles con relleno.
+#[inline]
+pub fn cara_relleno(h: f32, vs: f32) -> f32 {
+    let (t, f) = superficie(h, vs);
+    t as f32 * vs + (f as f32 + 1.0) / 16.0 * vs
 }
 
 #[inline]
@@ -1300,6 +1399,26 @@ fn leaf_fuzz(pad: &[Mat], lo: IVec3, vs: f32, top: &[i32], out: &mut Vec<crate::
                 }
                 let g = lo + IVec3::new(i, y, j);
                 let ground = (top[(i + j * Q) as usize] + 1) as f32 * vs;
+                // [render] Ramas colgantes del sauce: de la cara de abajo de su copa cuelgan
+                // hebras de micro-vóxeles de 0,5 a 2 m (sin llegar al suelo), que tiemblan con el
+                // viento como las hojas. Antes el sauce era una copa más, sin su forma de llorón.
+                if m == LEAF_SAUCE && at(i, j, y - 1) == AIR {
+                    let h = hash3(g.x * 3 + 1, g.y * 5 + 2, g.z * 7 + 3);
+                    if h % 100 < 60 {
+                        let y_top = g.y * k;
+                        let suelo = ((ground / MICRO).ceil() as i32) + 2;
+                        let largo = (4 + ((h >> 8) % 13) as i32).min(y_top - suelo);
+                        if largo >= 2 {
+                            let (sx, sz) = (((h >> 4) & 1) as i32, ((h >> 5) & 1) as i32);
+                            let y_m = (y_top - largo) as f32 * MICRO;
+                            out.push(crate::trees::Micro {
+                                pos: [(g.x * k + sx * (k - 1)) as f32 * MICRO, y_m, (g.z * k + sz * (k - 1)) as f32 * MICRO],
+                                size: [1, largo as u8, 1, 0],
+                                info: [m, ((h >> 16) & 0xff) as u8, ((y_m - ground) / MICRO).clamp(0.0, 255.0) as u8, 1],
+                            });
+                        }
+                    }
+                }
                 for (f, &(dx, dy, dz)) in FACES.iter().enumerate() {
                     if at(i + dx, j + dz, y + dy) != AIR {
                         continue;
@@ -1595,8 +1714,9 @@ pub fn build_column(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Edit
 
 fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>, mesh_ns: &mut u64) -> Mesh {
     let vs = spec.voxel();
-    // Niveles gruesos (entorno amplio): la malla baja `drop` metros (ver `lod::far_drop`).
-    let drop = crate::lod::far_drop(spec.lod);
+    // [render] Superficie a la altura real (relleno) desde el nivel 3: reemplaza al parche
+    // `far_drop` (bajar la malla de los niveles gruesos).
+    let relleno = con_relleno(spec.lod);
     let ls = &store.levels[spec.lod as usize];
     let p = N + 4;
     let base = col * N;
@@ -1640,6 +1760,7 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
     // Superficie y material de cada columna de vóxeles, con un vóxel de borde.
     let present = |gx: i32, gz: i32| ring.contains(&IVec2::new(gx >> 5, gz >> 5));
     let mut top = vec![i32::MIN; (Q * Q) as usize];
+    let mut fill = vec![15u8; (Q * Q) as usize];
     let mut surf = vec![AIR; (Q * Q) as usize];
     // Columnas de suelo natural (sin calle, plaza ni suelo nivelado): ahí crece la flora baja.
     let mut natural = vec![false; (Q * Q) as usize];
@@ -1657,8 +1778,16 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
             let dz = hi(0, 1) - hi(0, -1);
             let slope = (dx * dx + dz * dz).sqrt() / (2.0 * vs);
             // Donde hay obras (calle, plaza), el suelo nivelado manda sobre el natural.
-            let ty = ls.ground.get(&IVec2::new(gx, gz)).copied().unwrap_or_else(|| if drop > 0.0 { top_from_height_far(h, vs, drop) } else { top_from_height(h, vs) });
             let k = (i + j * Q) as usize;
+            let ty = match ls.ground.get(&IVec2::new(gx, gz)) {
+                Some(&g) => g,
+                None if relleno => {
+                    let (t, f) = superficie(h, vs);
+                    fill[k] = f;
+                    t
+                }
+                None => top_from_height(h, vs),
+            };
             top[k] = ty;
             let x = (gx as f32 + 0.5) * vs;
             let z = (gz as f32 + 0.5) * vs;
@@ -1694,7 +1823,7 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
             }
             let (x, z) = (((base.x + i - 1) as f32 + 0.5) * vs, ((base.y + j - 1) as f32 + 0.5) * vs);
             let h = hs[((i + 1) + (j + 1) * p) as usize];
-            if drop == 0.0 {
+            if spec.lod < ARROYOS_HASTA {
                 if let Some((nivel, corriente)) = arroyos.en(x, z) {
                     let tope = (nivel / vs).round() as i32 - 1;
                     if tope > top[k] {
@@ -1703,7 +1832,7 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
                     }
                 }
             }
-            let cara = (top[k] + 1) as f32 * vs - drop;
+            let cara = top[k] as f32 * vs + (fill[k] as f32 + 1.0) / 16.0 * vs;
             if crate::agua::al_alcance_del_rio(t, x, z, h, cara) {
                 agua[k].tipo = crate::agua::AGUA_RIO;
             }
@@ -1740,7 +1869,7 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
     let y0 = (tmin - 1).div_euclid(N);
     let y1 = tmax.max(edit_top).max(tree_top).div_euclid(N);
     // Origen de la malla de la columna: esquina inferior del chunk más bajo.
-    let mut out = Mesh::new(Vec3::new(base.x as f32, (y0 * N) as f32, base.y as f32) * vs - Vec3::Y * drop, vs);
+    let mut out = Mesh::new(Vec3::new(base.x as f32, (y0 * N) as f32, base.y as f32) * vs, vs);
     let mut pad = vec![AIR; (Q * Q * Q) as usize];
     for cy in y0..=y1 {
         let ck = IVec3::new(col.x, cy, col.y);
@@ -1825,13 +1954,14 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
         }
         CHUNKS.fetch_add(1, AtOrd::Relaxed);
         let tm = std::time::Instant::now();
-        let m = mesher::mesh_chunk_ao(&pad, IVec3::new(0, (cy - y0) * N, 0), Some(&grad), mesher::AoModo::para_nivel(spec.lod)); // [render]
+        let rl = mesher::Relleno { top: &top, fill: &fill, y0: lo.y }; // [render]
+        let m = mesher::mesh_chunk_relleno(&pad, IVec3::new(0, (cy - y0) * N, 0), Some(&grad), mesher::AoModo::para_nivel(spec.lod), relleno.then_some(&rl));
         out.append(&m);
         *mesh_ns += tm.elapsed().as_nanos() as u64;
     }
     out.detail = detail;
     // [agua en vóxeles]
-    crate::agua::mallar(&top, &agua, Q, y0 * N, vs, drop, &mut out);
+    crate::agua::mallar(&top, relleno.then_some(&fill[..]), &agua, Q, y0 * N, vs, &mut out);
     out
 }
 
@@ -1858,18 +1988,28 @@ mod tests {
                 assert!(((top_from_height(-h, vs) + 1) as f32 * vs) < 0.0, "fondo a -{h} m asoma con vóxel de {vs} m");
             }
         }
-        // Niveles gruesos, con la malla bajada: tierra entre 3 m y medio vóxel sobre el agua, el
-        // fondo bajo ella, y las alturas a menos de medio vóxel de la real.
-        for lod in crate::lod::DROP_LOD..crate::lod::LEVELS + 1 {
+        // [render] Niveles con relleno (reemplaza al test de `far_drop`): la tierra firme entre 0 y
+        // 3 m queda a 2–3 m sobre el agua (por encima de la marea, sin acantilados de un vóxel), la
+        // de la franja de la costa (menos de un vóxel) a 1/16 de vóxel de su altura real (nunca más
+        // abajo), la más alta a medio vóxel; el fondo, siempre bajo el agua (el de la franja, a
+        // 1/16 de vóxel).
+        for lod in super::RELLENO_DESDE..crate::lod::LEVELS + 1 {
             let vs = crate::lod::BASE_VOXEL * (1u32 << lod) as f32;
-            let drop = crate::lod::far_drop(lod);
-            let face = |k: i32| (k + 1) as f32 * vs - drop;
             for k in 1..4000 {
                 let h = k as f32 * 0.25;
-                let up = face(super::top_from_height_far(h, vs, drop));
-                assert!(up >= 2.9, "tierra a {h} m tapada con vóxel de {vs} m ({up})");
-                assert!(up - h <= vs * 0.5 + 3.0 && h - up <= vs * 0.5 + 0.01, "tierra a {h} m dibujada a {up} m");
-                assert!(face(super::top_from_height_far(-h, vs, drop)) <= 0.0, "fondo a -{h} m asoma con vóxel de {vs} m");
+                let up = super::cara_relleno(h, vs);
+                let piso = vs.min(super::MARGEN_COSTA);
+                assert!(up >= piso - 1e-3, "tierra a {h} m tapada con vóxel de {vs} m ({up})");
+                if h <= super::MARGEN_COSTA && vs > super::MARGEN_COSTA {
+                    assert!(up <= super::MARGEN_COSTA + vs / 16.0 + 1e-3, "costa a {h} m dibujada a {up} m con vóxel de {vs} m");
+                }
+                assert!((up - h).abs() <= vs * 0.5 + super::MARGEN_COSTA + 1e-3, "tierra a {h} m dibujada a {up} m");
+                let fondo = super::cara_relleno(-h, vs);
+                assert!(fondo < 0.0 && fondo <= -h + 1e-3, "fondo a -{h} m dibujado a {fondo} m con vóxel de {vs} m");
+                // La altura real con relleno (la función general) queda a 1/16 de vóxel.
+                let (t, f) = super::top_relleno(h.max(3.0), vs);
+                let real = t as f32 * vs + (f as f32 + 1.0) / 16.0 * vs;
+                assert!(f < 16 && real >= h.max(3.0) - 1e-3 && real - h.max(3.0) <= vs / 16.0 + 1e-3);
             }
         }
     }
@@ -2073,14 +2213,56 @@ mod tests {
         assert!(f.iter().all(|&d| d > 0.0), "{f:?}");
     }
 
+    /// [render] Fundido entre niveles: la carga inicial entra sin fundido; al hacer zoom, lo nuevo
+    /// que reemplaza a otro nivel entra con fundido, lo retirado sale con fundido y nada más.
+    #[test]
+    fn el_fundido_solo_marca_los_reemplazos() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(5)));
+        let mut s = Streamer::new(t, store, 5, 3);
+        s.fundido = true;
+        let c0 = Vec2::new(13500.0, 16300.0);
+        s.update_with(c0, 0);
+        let t0 = Instant::now();
+        let (mut entra, mut sale, mut set) = (0, 0, 0);
+        let cuenta = |ops: Vec<Op>, entra: &mut usize, sale: &mut usize, set: &mut usize| {
+            for op in ops {
+                match op {
+                    Op::Entra(..) => *entra += 1,
+                    Op::Sale(_) => *sale += 1,
+                    Op::Set(..) => *set += 1,
+                    Op::Remove(_) => panic!("con fundido no hay Remove"),
+                }
+            }
+        };
+        while !s.idle() && t0.elapsed() < Duration::from_secs(120) {
+            cuenta(s.poll(usize::MAX), &mut entra, &mut sale, &mut set);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!((entra, sale), (0, 0), "la carga inicial no se funde");
+        assert!(set > 0);
+        // Zoom: el nivel más fino pasa a ser el 2 (las columnas de 0 y 1 se retiran y el 2
+        // cubre el centro).
+        s.update_with(c0, 2);
+        let t0 = Instant::now();
+        while !s.idle() && t0.elapsed() < Duration::from_secs(120) {
+            cuenta(s.poll(usize::MAX), &mut entra, &mut sale, &mut set);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(entra > 0, "lo que reemplaza al nivel fino entra con fundido");
+        assert!(sale > 0 && s.retired.is_empty(), "lo retirado sale con fundido");
+    }
+
     /// Lo que "ve" la GPU: claves de las columnas subidas, después de aplicar las órdenes.
     fn apply(shown: &mut HashSet<Key>, ops: Vec<Op>) {
         for op in ops {
             match op {
-                Op::Set(k, _) => {
+                Op::Set(k, _) | Op::Entra(k, _) => {
                     shown.insert(k);
                 }
-                Op::Remove(k) => {
+                // [render] La que sale con fundido se sigue viendo hasta liberarla: para los
+                // huecos cuenta como quitada en el acto (el peor caso).
+                Op::Remove(k) | Op::Sale(k) => {
                     shown.remove(&k);
                 }
             }
@@ -2113,6 +2295,7 @@ mod tests {
         let t = Arc::new(TerrainGen::new(1726));
         let store = Arc::new(RwLock::new(EditStore::new(7)));
         let mut s = Streamer::new(t, store, 7, 3);
+        s.fundido = true; // [render]
         let c0 = Vec2::new(13500.0, 16300.0);
         s.update_with(c0, 0);
         let mut shown = HashSet::new();
