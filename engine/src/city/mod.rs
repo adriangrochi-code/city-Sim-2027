@@ -18,6 +18,7 @@ pub mod game;
 pub mod game_demo;
 pub mod game_demo2;
 pub mod game_demo3; // [epoca3]
+pub mod game_demo_ia; // [ia]
 pub mod lots;
 pub mod materiales;
 pub mod poblacion;
@@ -130,6 +131,14 @@ impl DetallesFachadas {
             self.por_solar.remove(&lot);
         } else {
             self.por_solar.insert(lot, (voxeles, d));
+        }
+    }
+
+    /// [ia] Los detalles que pidió un solar (si sigue en pie como cuando los pidió).
+    pub fn de_solar(&self, lot: u32, lots: &Lots) -> &[crate::buildings::PedidoDetalle] {
+        match (self.por_solar.get(&lot), lots.lots.get(&lot)) {
+            (Some((n, d)), Some(l)) if *n == l.voxels.len() => d,
+            _ => &[],
         }
     }
 
@@ -763,7 +772,7 @@ impl City {
         if self.agentes.firma_muralla() != firma {
             self.agentes.set_muralla(firma, self.muralla_trazada(), self.portones_terminados());
         }
-        let ctx = agentes::Contexto { poblacion: self.poblacion.fundada.then_some(&self.poblacion), dias_de_lluvia: self.climate.last.rain_days, epidemia: self.services.epidemic.active() };
+        let ctx = agentes::Contexto { poblacion: self.poblacion.fundada.then_some(&self.poblacion), servicios: Some(&self.services), dias_de_lluvia: self.climate.last.rain_days, epidemia: self.services.epidemic.active() };
         self.agentes.tick_con(t, &self.net, &self.lots, self.plaza, &ctx, dt);
     }
 

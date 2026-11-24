@@ -132,10 +132,19 @@ fn ventana(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1:
             }
         }
         Reja::Postigo => {
-            // Postigos de madera: cerrados, o con una hoja abierta.
-            opening(f, e, u0, u1, y0, y1, 1, es.carpinteria);
-            if hash(f.at(u0, y0, 0), es.seed ^ 0x9051) < 0.4 {
-                f.raw_fill(e, u0, u0 + 1, y0, y1, 1, 2, WINDOW);
+            // Postigos de madera: cerrados, o con una hoja abierta. [ia] En la ciudad, como
+            // modelos de detalle (tableros, ventanillo, bisagras): cerrados en el vano o
+            // abiertos contra el muro, con el vidrio atrás.
+            let abierto = hash(f.at(u0, y0, 0), es.seed ^ 0x9051) < 0.4;
+            if u1 - u0 == 2 && y1 - y0 == 4 && Frame::con_detalles(e) {
+                opening(f, e, u0, u1, y0, y1, 1, WINDOW);
+                let (id, w) = if abierto { (crate::detalle::Id::PostigoAbierto, 0.0) } else { (crate::detalle::Id::Postigo, 1.0) };
+                f.detalle(e, id, (u0 + u1) as f32 * 0.5, y0 as f32, w, 0.0, es.seed as u32 ^ 0x9052);
+            } else {
+                opening(f, e, u0, u1, y0, y1, 1, es.carpinteria);
+                if abierto {
+                    f.raw_fill(e, u0, u0 + 1, y0, y1, 1, 2, WINDOW);
+                }
             }
             if es.ornamento >= 1 {
                 f.fill(e, u0 - 1, u1 + 1, y1, y1 + 1, 0, 1, marco(es));
@@ -175,6 +184,32 @@ pub(super) fn llamador(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, 
     if es.hierro && riqueza(es) >= 1 {
         f.detalle(e, crate::detalle::Id::Llamador, (u0 + u1) as f32 * 0.5, 2.6, w as f32, 0.0, es.seed as u32 ^ 0x11A);
     }
+}
+
+/// [ia] Poyo (banco de piedra o de material) junto a la puerta principal de las casas
+/// modestas: un poco más de un tercio [E], donde haya 1,5 m de muro libre al lado de la
+/// puerta (a la derecha, o si no a la izquierda). Ahí se sientan los vecinos a la tardecita.
+#[allow(clippy::too_many_arguments)]
+fn poyo(t: &TerrainGen, f: &Frame, e: &mut Edits, es: &Estilo, a: i32, b: i32, vanos: &[(i32, i32, Hueco)], u1: i32) {
+    if !Frame::con_detalles(e) || riqueza(es) > 1 || es.neo || hash(f.at(a, 0, 0), es.seed ^ 0x9070) >= 0.38 {
+        return;
+    }
+    let libre_der = vanos.iter().filter(|v| v.0 >= b).map(|v| v.0).min().unwrap_or(u1) - b;
+    let libre_izq = a - vanos.iter().filter(|v| v.1 <= a).map(|v| v.1).max().unwrap_or(0);
+    let u = if libre_der >= 4 {
+        b as f32 + 1.75
+    } else if libre_izq >= 4 {
+        a as f32 - 1.75
+    } else {
+        return;
+    };
+    // Solo si el piso de la casa está a nivel de la vereda (en una cuesta, la casa queda
+    // levantada sobre su cimiento y el poyo quedaría colgado).
+    let p = f.at(u as i32, 0, -1);
+    if crate::buildings::design_top_at(t, p.x, p.z) + 1 < f.base {
+        return;
+    }
+    f.detalle(e, crate::detalle::Id::BancoPiedra, u, 0.0, 0.0, 0.0, es.seed as u32 ^ 0x9071);
 }
 
 /// Puerta (de una o dos hojas) rehundida, con montante de hierro en las casas buenas.
@@ -403,7 +438,13 @@ pub(super) fn ventana_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i3
 #[allow(clippy::too_many_arguments)]
 pub(super) fn puerta_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, zaguan: bool) {
     if zaguan {
-        opening(f, e, u0, u1, 0, hp, 5, if es.cancel { HIERRO_FUNDIDO } else { es.carpinteria });
+        // [ia] En la ciudad, el cancel es un modelo de detalle (hierros, vidrios y abanico) con
+        // el patio claro atrás; si no, el vóxel de hierro fundido de siempre.
+        let cancel_detalle = es.cancel && u1 - u0 == 3 && Frame::con_detalles(e);
+        opening(f, e, u0, u1, 0, hp, 5, if cancel_detalle { WINDOW } else if es.cancel { HIERRO_FUNDIDO } else { es.carpinteria });
+        if cancel_detalle {
+            f.detalle(e, crate::detalle::Id::Cancel, (u0 + u1) as f32 * 0.5, 0.0, 4.95, 0.0, es.seed as u32 ^ 0xCA4C);
+        }
         f.raw_fill(e, u0, u0 + 1, 0, hp - 1, 1, 3, es.carpinteria);
         f.raw_fill(e, u1 - 1, u1, 0, hp - 1, 1, 3, es.carpinteria);
         if es.marmol {
@@ -587,7 +628,7 @@ fn repartir(es: &Estilo, u0: i32, u1: i32, ancho_puerta: i32) -> Vec<(i32, i32, 
 
 /// Fachada de la planta baja entre `u0` y `u1`, con el techo de la planta en `techo`.
 /// Devuelve los vanos (para alinear la planta alta).
-pub(super) fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i32) -> Vec<(i32, i32, Hueco)> {
+pub(super) fn fachada_pb(t: &TerrainGen, f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i32) -> Vec<(i32, i32, Hueco)> {
     if let Some(z) = es.zocalo {
         f.fill(e, u0, u1, 0, es.h_zocalo, 0, 1, z);
     }
@@ -622,6 +663,7 @@ pub(super) fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32
                 if principal {
                     portada(f, e, es, a, b, hp, techo);
                     llamador(f, e, es, a, b, rec);
+                    poyo(t, f, e, es, a, b, &vanos, u1); // [ia]
                     principal = false;
                 }
             }
@@ -737,7 +779,7 @@ pub(super) fn casa_un_piso(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estil
     let g = Frame { seed: f.seed, ..g };
     g.foundation(t, e, x0, x1, 0, fd, if es.piedra { STONE } else { ZOCALO });
     caja(&g, e, x0, x1, 0, h, 0, fd, es.muro);
-    let vanos = fachada_pb(&g, e, es, x0, x1, h);
+    let vanos = fachada_pb(t, &g, e, es, x0, x1, h);
     let mut frente = None;
     if azotea {
         losa(&g, e, x0, x1, 0, fd, h - 1);
@@ -989,7 +1031,7 @@ pub(super) fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo)
         let y = h1 + es.alto_pa * (p - 1);
         g.fill(e, x0 + 1, x1 - 1, y, y + 1, 2, 4, AZOTEA);
     }
-    let vanos = fachada_pb(&g, e, es, x0, x1, h1);
+    let vanos = fachada_pb(t, &g, e, es, x0, x1, h1);
     // Faja de entrepiso (impostas).
     let m = piedra_o_moldura(es);
     for p in 1..es.pisos as i32 {
@@ -1284,7 +1326,7 @@ fn quinta(t: &TerrainGen, e: &mut Edits, f: &Frame, es: &Estilo) -> Option<Frent
     let g = Frame { seed: f.seed, ..g };
     g.foundation(t, e, x0, x1, 0, fd, ZOCALO);
     caja(&g, e, x0, x1, 0, h, 0, fd, es.muro);
-    let _ = fachada_pb(&g, e, es, x0, x1, h);
+    let _ = fachada_pb(t, &g, e, es, x0, x1, h);
     // Galería con pilares encalados (o horcones) al frente; en la quinta italianizante,
     // columnas claras con capitel y piso de mármol en damero.
     let pm = if es.neo { es.moldura } else if es_cal(es.muro) { es.muro } else { WOOD_DARK };

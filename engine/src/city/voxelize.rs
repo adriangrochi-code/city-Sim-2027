@@ -654,3 +654,129 @@ mod tests {
         assert_eq!(perfil(kind, inset, eje, IVec2::ZERO), (1, PLAZA));
     }
 }
+
+// --- [ia] Calles en pendiente sin escalones de 25 cm -----------------------------------------
+//
+// La calzada se arma con vóxeles de 0,25 m: en una calle en pendiente la superficie sube de a
+// escalones de 25 cm (cada 6 m en una cuesta del 4 %). El mallado no tiene medios vóxeles, así
+// que los escalones se suavizan con **rampas de detalle**: delante de cada escalón, una losa
+// inclinada del color del material de la calzada (con el matiz de los micro-vóxeles) que sube
+// de la calzada de abajo al borde de la de arriba en medio metro (o en todo el rellano, si es
+// más corto). El escalón de 25 cm a pique pasa a ser una rampa corta de 27°; el resto de la
+// calzada queda como estaba (con más largo, las losas tapaban el empedrado y la tierra con un
+// color liso). Se dibujan con los vecinos (mismo pipeline que los modelos de detalle), a menos
+// de 140 m de la cámara, y no tocan los vóxeles.
+
+/// Largo máximo de la rampa delante de cada escalón (m).
+pub const RAMPA_ESCALON_M: f32 = 0.5;
+
+/// Color de la rampa: el del material, con las manchas de la calzada (tierra suelta, pasto
+/// seco, charcos) llevadas al material de fondo, para que las rampas de un escalón se junten.
+fn color_rampa(m: Mat) -> [u8; 3] {
+    let c = crate::palette::color(match m {
+        DIRT => DIRT_ROAD,
+        GRASS_DRY => GRASS,
+        STREAM => MUD,
+        x => x,
+    });
+    // El empedrado y la laja se ven más oscuros que su color base (el dibujo de las piedras y
+    // las juntas del shader): la rampa, un poco más oscura para acompañar [E].
+    let k = if matches!(m, COBBLE | STONE | STONE_DARK | PLAZA) { 0.86 } else { 1.0 };
+    c.map(|x| (x as f32 * k) as u8)
+}
+
+/// Las rampas de detalle de los escalones de la calzada de un tramo (vacío si es plano).
+pub fn escalones(t: &TerrainGen, net: &RoadNetwork, eid: u32, plaza: PlazaSquare) -> Vec<crate::detalle::Caja> {
+    let Some(edge) = net.edges.get(&eid) else { return Vec::new() };
+    let hw = edge.kind.width() * 0.5;
+    let spans = water_spans(t, &edge.pts);
+    let decks: Vec<i32> = spans.iter().map(|&sp| deck_top(t, edge, sp)).collect();
+    // Los cruces con otras calles (donde dos tramos escriben la misma columna): se dejan.
+    let cruces: Vec<Vec2> = [edge.a, edge.b].iter().filter(|n| net.node_edges.get(n).is_some_and(|v| v.len() >= 3)).filter_map(|n| net.nodes.get(n).copied()).collect();
+    // Columna → (altura de la calzada sin el perfil, escalón del perfil, material).
+    let puntas = [net.nodes.get(&edge.a).copied(), net.nodes.get(&edge.b).copied()];
+    // La altura de la calzada sale del punto del eje (como en `road_edits`): muchas columnas
+    // comparten el mismo, así que se calcula una vez por punto.
+    let mut alturas: HashMap<(u32, u32), i32> = HashMap::new();
+    let mut col: HashMap<IVec2, (i32, i32, Mat)> = HashMap::new();
+    for (c, (d, p, s)) in edge_columns(edge, hw) {
+        if d > hw || spans.iter().any(|&(a, b)| s >= a - 0.5 && s <= b + 0.5) {
+            continue;
+        }
+        let q = vox_center(c.x, c.y);
+        // La plaza y su banquina (que pisa la calzada de las calles que la rodean).
+        let junto_a_plaza = plaza.is_some_and(|(pc, f)| {
+            let d = q - pc;
+            d.dot(super::lots::side_of(f)).abs().max(d.dot(f).abs()) <= PLAZA_SIZE * 0.5 + SHOULDER + 0.5
+        });
+        if junto_a_plaza || cruces.iter().any(|n| n.distance(q) < hw + 3.0) {
+            continue;
+        }
+        let yr = *alturas.entry((p.x.to_bits(), p.y.to_bits())).or_insert_with(|| top_index(road_height(t, p)));
+        let top = yr.max(rampa(&spans, &decks, s));
+        // El diseño de la calle: el de este tramo, salvo junto a sus puntas (donde puede
+        // mandar la calle que sigue).
+        let junto_a_punta = puntas.iter().flatten().any(|n| n.distance(q) < hw + 1.0);
+        let (inset, kind, eje) = if junto_a_punta { net.deepest(q, 20.0).unwrap_or((hw - d, edge.kind, d)) } else { (hw - d, edge.kind, d) };
+        let (dy, mat) = perfil(kind, inset, eje, c);
+        col.insert(c, (top, dy, mat));
+    }
+    // Escalones: una columna con la vecina un vóxel más arriba (mismo escalón del perfil). La
+    // rampa ocupa el rellano de abajo (hasta RAMPA_ESCALON_M).
+    let max_k = (RAMPA_ESCALON_M / BASE_VOXEL).round() as i32;
+    // (dirección, altura, escalón del perfil, largo, color) → posiciones a lo ancho.
+    let mut grupos: HashMap<(u8, i32, i32, i32, [u8; 3]), Vec<(i32, IVec2, i32)>> = HashMap::new();
+    const DIRS: [IVec2; 4] = [IVec2::new(1, 0), IVec2::new(-1, 0), IVec2::new(0, 1), IVec2::new(0, -1)];
+    for (&c, &(top, dy, mat)) in &col {
+        for (k, &n) in DIRS.iter().enumerate() {
+            let Some(&(t2, dy2, _)) = col.get(&(c + n)) else { continue };
+            if t2 != top + 1 || dy2 != dy {
+                continue;
+            }
+            // Largo del rellano hacia atrás (mismo escalón), hasta el tope.
+            let mut largo = 1;
+            while largo < max_k && col.get(&(c - n * largo)).is_some_and(|&(t3, dy3, _)| t3 == top && dy3 == dy) {
+                largo += 1;
+            }
+            // Lo que corre a lo ancho (perpendicular a la pendiente).
+            let ancho = if n.x != 0 { c.y } else { c.x };
+            grupos.entry((k as u8, top + dy, dy, 0, color_rampa(mat))).or_default().push((ancho, c, largo));
+        }
+    }
+    let mut out = Vec::new();
+    for ((k, nivel, _, _, color), mut cs) in grupos {
+        let n = DIRS[k as usize];
+        cs.sort_unstable_by_key(|x| (if n.x != 0 { x.1.x } else { x.1.y }, x.0));
+        // Corridas contiguas a lo ancho con la misma posición a lo largo.
+        let mut i = 0;
+        while i < cs.len() {
+            let mut j = i + 1;
+            let fila = |c: IVec2| if n.x != 0 { c.x } else { c.y };
+            while j < cs.len() && fila(cs[j].1) == fila(cs[i].1) && cs[j].0 == cs[j - 1].0 + 1 {
+                j += 1;
+            }
+            let (a, b) = (vox_center(cs[i].1.x, cs[i].1.y), vox_center(cs[j - 1].1.x, cs[j - 1].1.y));
+            let medio = (a + b) * 0.5 + n.as_vec2() * (BASE_VOXEL * 0.5);
+            let ancho = (j - i) as f32 * BASE_VOXEL;
+            // El rellano más corto de la corrida.
+            let largo = cs[i..j].iter().map(|x| x.2).min().unwrap_or(1);
+            let l = largo as f32 * BASE_VOXEL;
+            let arriba = (nivel + 2) as f32 * BASE_VOXEL;
+            // La losa: su cara de arriba va del borde del escalón (arriba) a `l` m atrás (abajo).
+            let caida = BASE_VOXEL;
+            let inclina = -(caida / l.hypot(caida)).asin();
+            let semilla = ((cs[i].1.x as u32).wrapping_mul(73_856_093) ^ (cs[i].1.y as u32).wrapping_mul(19_349_663)) % 250 + 1;
+            out.push(crate::detalle::Caja {
+                pos: [medio.x, arriba, medio.y],
+                giro: (n.x as f32).atan2(n.y as f32),
+                desde: [0.0, -BASE_VOXEL, -l.hypot(caida) * 0.5],
+                inclina,
+                tam: [ancho, BASE_VOXEL, l.hypot(caida)],
+                color: [color[0], color[1], color[2], semilla as u8],
+            });
+            i = j;
+        }
+    }
+    out.sort_by(|x, y| x.pos[0].total_cmp(&y.pos[0]).then(x.pos[2].total_cmp(&y.pos[2])).then(x.giro.total_cmp(&y.giro)));
+    out
+}

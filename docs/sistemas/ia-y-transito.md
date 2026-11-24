@@ -18,7 +18,7 @@ que se esfuman cuando se traban).
 
 ---
 
-## Estado de la implementación (23 de noviembre de 2026)
+## Estado de la implementación (23 de noviembre de 2026; oficios y arreglos, 24 de noviembre)
 
 Código en `engine/src/city/agentes/`: `mod.rs` (simulación), `agenda.rs` (agenda encadenada,
 recados y vida social), `perfil.rs` (perfil de conducta y azar por contador), `portones.rs`
@@ -47,14 +47,29 @@ alimenta con `City::tick_agentes` (población, muralla, lluvia del mes, epidemia
 | Clima | **Hecho** | Si llueve se sortea por día con los días de lluvia del mes; con lluvia bajan las salidas optativas (más los prudentes), a pie más lento; con dos días seguidos, barro: carretas más lentas en la tierra y algunas se empantanan unos minutos. Epidemia: salidas optativas a la mitad. Prueba `con_lluvia_salen_menos_a_pasear`. |
 | Vida social | **Hecho** | Compra en la pulpería del barrio (una de las tres más cercanas, con fidelidad), recova, pulpería a la vuelta del trabajo (sociabilidad), misa del domingo y de semana (devoción), paseo de la plaza el domingo, visitas a parientes. |
 | UI | **Hecho** | Ficha del portón (abierto o cerrado, cola por sentido, espera media, pasados, derechos, contrabando); capa «Cola en portones»; ficha del vecino con su persona, carácter, cómo eligió la ruta y la **agenda del día** (lo hecho con sus horas y lo que falta). |
-| Pendiente | — | Aguadores y serenos como agentes; incendios (curiosos y baldes), delito de noche y protestas; carretas empantanadas que esperan ayuda; salida de misa con fuerza social; colas por carril en lugar de ordenar todo (D16, rendimiento); D8–D13 de las épocas con autos. |
+| Quién va a caballo (v0.12.x) | **Hecho** | Arreglo de la v0.12.0 (203 jinetes de 485 en la calle de la demostración, 42 %). Tener caballo de silla es una probabilidad por oficio y clase (datos `caballo.propio`: hacendados 95 %, labradores 45 %, peones de un hogar con ganado 55 %, adultos de familias acomodadas 55 % y principales 85 %, ESTIMADO) y **usarlo depende del viaje** (`Agentes::usa_caballo`): al campo, sí; por menos de 700 m, a pie; con las dos puntas intramuros, solo por más de 1.400 m; a misa, a la compra, a la pulpería, al paseo o de visita, solo por más de 1.500 m; los chicos y los mayores de 70, a pie. En el recorrido de la IA, a las 7:30: **49 jinetes de 464 en la calle (11 %)**; con solo la regla del viaje (sin la probabilidad de tener caballo) eran 100 (22 %). Pruebas `pocos_van_a_caballo` (menos del 15 % en la ciudad de prueba, y la regla). |
+| Ficha del portón | **Hecho** | El portón tiene su propia ficha (`InspectKind::Porton`), sin los botones «Demoler tramo» y «Calle nueva» de la calle; la del vecino o vehículo (`InspectKind::Agente`), sin «Calle recta» ni las líneas del terreno. |
+| Rendimiento con el foco cerca | **Hecho** | Lo que costaba era la pose anterior para el dibujo: se calculaba en cada paso para los 3.000 agentes cerca del foco. Ahora el paso guarda solo la pata, la posición y si adelantaba (`Antes`, tres números) y la pose anterior se calcula al dibujar, solo para los que se dibujan; la cota de distancia al foco se calcula una vez por tramo y paso. Con el foco en la plaza: **0,33–0,40 → 0,20 ms por paso** (igual que sin foco); con el foco lejos, 0,18 → 0,12 ms. Armar las cajas del dibujo pasa de 0,8 a 1,05 ms por cuadro. No hicieron falta las colas por carril (D16): quedan para cuando los autos lo pidan. |
+| Aguadores (v0.12.x) | **Hecho** | `oficios.rs`: cada puesto de aguadores larga sus carros con la pipa (modelo `CarroAguatero`) entre las 7 y las 11:30, uno cada 6 casas abastecidas (tope 4; el domingo no salen); cada carro llena en la aguada (el pozo más cercano a menos de 900 m, o la orilla) y recorre su tramo de casas de las que el puesto abastece (`services.water`: las que no tienen aljibe ni pozo propio), parando en cada puerta, y vuelve. Los tramos rotan con los días. Recorridos con paradas: `Agente::paradas`, `parada_seg`, `en_parada`. Prueba `los_aguadores_reparten_por_las_casas_sin_aljibe`. |
+| Serenos (v0.12.x) | **Hecho** | Al anochecer (19:36) cada sereno enciende los faroles de sebo de su parte del puesto (uno cada 18 faroles, tope 3; para en cada farol) y a las 22:30 y a la 1:30 ronda cantando la hora; llevan el farol de mano y el chuzo (`AparejoSereno`). Prueba `los_serenos_encienden_los_faroles_y_rondan`. |
+| Incendios (v0.12.x) | **Hecho** | Cuando un solar se prende (`services.fires`), se anota (`Estado::incendios`, se guarda) con su fuente de agua (`fire_source`: el pozo, aljibe o aguadores que alcanzan); hasta 14 vecinos de las casas de alrededor (a menos de 170 m) corren a mirar desde el otro lado de la calle, lo miran de frente 2 a 6 min y vuelven; si hay fuente, se dibuja la **cadena de baldes** del pozo a la casa (una persona cada 1,1 m, tope 48; giran de un vecino al otro y el balde avanza). Prueba `un_incendio_junta_curiosos_y_una_cadena_de_baldes`. |
+| Carretas empantanadas (v0.12.x) | **Hecho** | Ya no salen solas a los pocos minutos: esperan 25 a 45 min, salvo que alguien que pasa por la misma calle a menos de 16 m (a pie o a caballo, de 14 a 70 años) se pare a ayudar (con el lazo o a pulso): los dos quedan 3 a 7 min y la carreta sale. La ficha lo cuenta. Prueba `la_carreta_empantanada_espera_ayuda`. |
+| Salida de misa con fuerza social (v0.12.x) | **Hecho** | La misa mayor del domingo termina para todos a las 10:12 (datos); después cada uno se queda 4 a 30 min en el atrio según su sociabilidad y vuelve: la plaza se llena y la salida se ve (en el recorrido de la IA, 310 a 330 personas en el atrio). En el atrio y en la recova la gente que está (sin agente) se dibuja en **corrillos** de 2 a 6 acomodados con una fuerza social (Helbing y Molnár 1995: repulsión exponencial, atracción al círculo del grupo y la fachada como pared), calculada una vez por corrillo; cada uno conserva su lugar mientras se queda. El domingo a la tarde, la vuelta de la plaza de a dos. Pruebas `la_salida_de_misa_llena_el_atrio`, `los_corrillos_no_se_pisan`. |
+| Gente sentada (v0.12.x) | **Hecho** | En la pulpería (la compra de la mañana y la vuelta del trabajo), los dos primeros en el banco de la puerta y los demás parados en el mostrador; a la tardecita (17 a 19:45, sin lluvia), uno de cada cinco mayores de 35 que está en casa sale a la vereda: al poyo de la casa si tiene (pedido de detalle de la fachada) o a una silla de paja. |
+| Pendiente | — | Delito de noche y protestas; colas por carril en lugar de ordenar todo (D16, cuando lleguen los autos); D8–D13 de las épocas con autos; que la escala del reloj (D3) no estire los recorridos con paradas (una ronda de sereno dura horas del reloj). |
 
 **Mediciones** (prueba `rendimiento_con_el_tope_de_agentes`, 3.000 agentes al azar en la
-ciudad de prueba, compilación optimizada, máquina compartida con carga ~8 en 4 núcleos):
-**0,22–0,25 ms por paso** sin foco y 0,22 con el foco lejos (todos de a saltos); con el foco
-en la plaza (todos cerca, con la posición anterior para el dibujo) 0,47–0,52 ms, como antes de
-este cambio (lo que pesa es la pose de cada agente). En la demostración (`--demo-ciudad`,
-~1.950 vecinos-personas, 450 en la calle a las 7:30) la simulación cuesta 0,22–0,27 ms por cuadro de media. Recorrido de la IA: `MOTOR_SOLO_IA=1 motor --demo-ciudad <dir>` (portón con cola, ficha del portón, capa, arreo de 111 cabezas sin tramos intramuros, ficha de un vecino con su agenda; guardar y cargar IGUAL). Capturas en `docs/capturas/ia-*.jpg`.
+ciudad de prueba, compilación optimizada, máquina compartida): antes del arreglo de la
+v0.12.x, 0,17–0,19 ms por paso sin foco, 0,17–0,19 con el foco lejos y **0,33–0,40 ms con el
+foco en la plaza** (en la medición de la v0.12.0, con más carga, 0,47–0,60); después,
+**0,15–0,20 / 0,10–0,12 / 0,17–0,21 ms** (el objetivo era ≤ 0,3). En la demostración
+completa, 55 jinetes de 507 en la calle a las 7:30 (11 %). En la demostración (`--demo-ciudad`,
+~1.950 vecinos-personas, 450 en la calle a las 7:30) la simulación cuesta 0,22–0,27 ms por cuadro de media. Recorrido de la IA: `MOTOR_SOLO_IA=1 motor --demo-ciudad <dir>` (portón con cola, ficha del portón, capa, arreo de 111 cabezas sin tramos intramuros, ficha de un vecino con su agenda; desde la v0.12.x también el aguador en una puerta, el boyero con la picana, el incendio con la cadena de baldes, la pulpería con gente sentada, el sereno en un farol, la salida de misa, los postigos y el poyo de una casa y una calle en pendiente sin y con las rampas de los escalones; guardar y cargar IGUAL). Capturas en `docs/capturas/ia-*.jpg`.
+
+![El aguador para en una puerta con el carro de la pipa](../capturas/ia-aguador.jpg)
+![La salida de misa: la plaza se llena de corrillos](../capturas/ia-salida-de-misa.jpg)
+![Incendio: la cadena de baldes del pozo a la casa y los curiosos](../capturas/ia-incendio-baldes.jpg)
+![El boyero con la picana](../capturas/ia-boyero-picana.jpg)
 
 ## 0. Resumen
 

@@ -27,7 +27,11 @@ fn los_modelos_son_validos() {
             // Nada más grande que una carreta (8 m) ni que un farol de gas (4 m de alto).
             assert!((m.max[2] - m.min[2]) as f32 * VOX < 8.0 && (m.max[1] - m.min[1]) as f32 * VOX < 4.0, "{}", m.nombre);
         }
-        // Las partes que se mueven tienen su pivote dentro (o cerca) del modelo.
+        // Las partes que se mueven tienen su pivote dentro (o cerca) del modelo (salvo lo que
+        // se lleva en la mano, que gira con el hombro de la persona). [ia]
+        if matches!(m.nombre, "picana" | "balde en la mano") {
+            continue;
+        }
         for p in Parte::TODAS.iter().skip(1) {
             if m.cajas.iter().any(|c| c.parte == *p) {
                 let v = m.pivotes[*p as usize];
@@ -71,6 +75,11 @@ fn las_personas_tienen_su_altura() {
         // Montado: las piernas cuelgan a los costados del caballo (fuera de su lomo).
         let mm = b.persona(a, true);
         assert!(mm.cajas.iter().filter(|c| c.b[1] <= 0).all(|c| c.a[0] >= 4 || c.b[0] <= -4), "{a:?} montado: algo dentro del caballo");
+        // [ia] Sentada: el asiento a medio metro, los pies en el suelo y nada debajo.
+        let s = b.sentada(a);
+        let pie = s.cajas.iter().map(|c| c.a[1]).min().unwrap();
+        assert!(pie == -8 || (a.nino() && pie == -5), "{a:?} sentada: los pies a {pie}");
+        assert!(s.cajas.len() < 70, "{a:?} sentada: {} cajas", s.cajas.len());
     }
 }
 
@@ -165,4 +174,22 @@ fn emitir_y_detalles_por_zona() {
         eprintln!("  {}: {} cajas", m.nombre, m.cajas.len());
     }
     assert!(Atuendo::TODOS.iter().all(|a| !a.nombre().is_empty()));
+}
+
+// [ia] Los modelos nuevos de la v0.12.x: livianos, y lo que va en la mano gira con el hombro.
+#[test]
+fn los_oficios_y_las_fachadas_tienen_sus_modelos() {
+    let b = biblioteca();
+    for (id, tope) in [(Id::CarroAguatero, 220), (Id::AparejoSereno, 40), (Id::Picana, 8), (Id::BaldeEnMano, 30), (Id::Silla, 20), (Id::Postigo, 20), (Id::PostigoAbierto, 20), (Id::Cancel, 100), (Id::BancoPiedra, 4)] {
+        let m = b.objeto(id);
+        eprintln!("MODELO {:?}: {} cajas", id, m.cajas.len());
+        assert!(m.cajas.len() <= tope, "{id:?}: {} cajas", m.cajas.len());
+    }
+    // Lo que se lleva en la mano usa los pivotes del hombro de la figura de un hombre adulto.
+    let hombre = b.persona(Atuendo::Peon, false);
+    for id in [Id::Picana, Id::BaldeEnMano, Id::AparejoSereno] {
+        assert_eq!(b.objeto(id).pivotes[Parte::BrazoD as usize], hombre.pivotes[Parte::BrazoD as usize], "{id:?}");
+    }
+    let (n, bytes) = b.medida();
+    eprintln!("BIBLIOTECA {n} cajas, {} KB", bytes / 1024);
 }

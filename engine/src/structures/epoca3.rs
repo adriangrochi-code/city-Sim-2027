@@ -193,7 +193,7 @@ fn casa_standard(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Opti
     let (fd, h) = (es.fondo, es.alto);
     f.foundation(t, e, x0, x1, 0, fd, ZOCALO);
     casas::caja(f, e, x0, x1, 0, h, 0, fd, es.muro);
-    let vanos = casas::fachada_pb(f, e, es, x0, x1, h);
+    let vanos = casas::fachada_pb(t, f, e, es, x0, x1, h);
     casas::losa(f, e, x0, x1, 0, fd, h - 1);
     casas::cornisa_estilo(f, e, es, x0, x1, h - 1);
     casas::pretil(f, e, es, x0, x1, 0, fd, h);
@@ -289,7 +289,7 @@ fn edificio_renta(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Opt
         let y = h1 + es.alto_pa * (p - 1);
         g.fill(e, x0 + 1, x1 - 1, y, y + 1, 2, 4, AZOTEA);
     }
-    let vanos = casas::fachada_pb(&g, e, es, x0, x1, h1);
+    let vanos = casas::fachada_pb(t, &g, e, es, x0, x1, h1);
     let m = es.moldura;
     for p in 1..pisos {
         let y = h1 + es.alto_pa * (p - 1);

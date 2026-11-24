@@ -41,6 +41,9 @@ pub enum Act {
     SaveLoad(&'static str),
     /// Mide el cuadro con y sin los vecinos dibujados.
     MedirVecinos(&'static str),
+    /// [ia] Deja pasar unos cuadros (lo que cambió sin mover la cámara, como las rampas de las
+    /// calles, se sube a la GPU antes de la captura).
+    Cuadros(u32),
 }
 
 /// Interfaz para las capturas sin pantalla: contexto de egui, pintor y estado del juego.
@@ -854,6 +857,7 @@ fn pasos_solo_arquitectura() -> Vec<Act> {
 /// agenda; guarda y carga la ciudad.
 fn pasos_solo_ia() -> Vec<Act> {
     use crate::city::game_demo as d;
+    use crate::city::game_demo_ia as oi; // [ia]
     use Act::*;
     let c = d::PLAZA;
     vec![
@@ -880,6 +884,46 @@ fn pasos_solo_ia() -> Vec<Act> {
         CamFn(|s| d::calle_concurrida(s, 38.0, 30.0)),
         WaitIdle("vecinos"),
         UiShot("ia-ui-ficha-vecino", ui_ficha_vecino),
+        // [ia] Oficios y sucesos de la colonia, poses y detalles (v0.12.x).
+        Game("aguador en una puerta", oi::aguador),
+        CamFn(oi::vista),
+        WaitIdle("aguador"),
+        Shot("ia-aguador"),
+        Game("boyero con la picana", oi::boyero),
+        CamFn(oi::vista),
+        WaitIdle("boyero"),
+        Shot("ia-boyero-picana"),
+        Game("incendio con cadena de baldes", oi::incendio),
+        CamFn(oi::vista),
+        WaitIdle("incendio"),
+        Shot("ia-incendio-baldes"),
+        Game("apagar el incendio", oi::apagar),
+        Game("tardecita en la pulpería", oi::tardecita),
+        CamFn(oi::vista),
+        WaitIdle("pulpería"),
+        Shot("ia-pulperia-sentados"),
+        Game("sereno que enciende los faroles", oi::sereno),
+        CamFn(oi::vista),
+        WaitIdle("sereno"),
+        Shot("ia-sereno-farol"),
+        Game("salida de misa", oi::misa),
+        CamFn(oi::vista),
+        WaitIdle("misa"),
+        Shot("ia-salida-de-misa"),
+        Game("postigos y poyo", oi::fachada),
+        CamFn(oi::vista),
+        WaitIdle("fachada"),
+        Shot("ia-fachada-postigos-poyo"),
+        Game("calle en pendiente", oi::calle_en_pendiente),
+        CamFn(oi::vista),
+        Game("sin rampas", oi::sin_rampas),
+        WaitIdle("calle en pendiente"),
+        Cuadros(3),
+        Shot("ia-pendiente-antes"),
+        Game("con rampas", oi::con_rampas),
+        Cuadros(3),
+        WaitIdle("calle en pendiente"),
+        Shot("ia-pendiente-despues"),
         SaveLoad("guardar y cargar la ciudad"),
     ]
 }
@@ -1673,6 +1717,17 @@ impl Tour {
                         self.next();
                     } else {
                         self.travel = Some((from, to, k + 1, n));
+                    }
+                    return false;
+                }
+                // [ia]
+                Act::Cuadros(n) => {
+                    let (a, b, k, m) = *self.travel.get_or_insert((Vec2::ZERO, Vec2::ZERO, 0, *n));
+                    if k + 1 >= m {
+                        self.travel = None;
+                        self.next();
+                    } else {
+                        self.travel = Some((a, b, k + 1, m));
                     }
                     return false;
                 }

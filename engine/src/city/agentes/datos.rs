@@ -18,6 +18,63 @@ pub struct Datos {
     pub clima: Clima,
     pub cruces: Cruces,
     pub adelantamiento: Adelantamiento,
+    pub caballo: Caballo,
+    pub oficios: Oficios,
+}
+
+/// [ia] Aguadores, serenos, incendios, carretas empantanadas y la salida de misa (ver el
+/// archivo de datos).
+#[derive(Deserialize, Debug, Clone)]
+pub struct Oficios {
+    pub aguador_casas_por_viaje: u32,
+    pub aguador_viajes_max: u32,
+    pub aguador_hora: [f32; 2],
+    pub aguador_parada_s: f32,
+    pub aguador_llenar_s: f32,
+    pub aguada_max_m: f32,
+    pub sereno_faroles_por_sereno: u32,
+    pub serenos_max: u32,
+    pub sereno_enciende_hora: f32,
+    pub sereno_rondas: Vec<f32>,
+    pub sereno_paradas_max: usize,
+    pub sereno_parada_enciende_s: f32,
+    pub sereno_parada_ronda_s: f32,
+    pub incendio_curiosos_max: u32,
+    pub incendio_radio_m: f32,
+    pub incendio_mirar_s: [f32; 2],
+    pub incendio_dura_s: f32,
+    pub cadena_separacion_m: f32,
+    pub cadena_max: usize,
+    pub barro_espera_sin_ayuda_min: [f32; 2],
+    pub barro_ayuda_min: [f32; 2],
+    pub barro_radio_ayuda_m: f32,
+    pub misa_fin_domingo: f32,
+    pub atrio_minutos: [f32; 2],
+    pub vereda_hora: [f32; 2],
+    pub vereda_fraccion: f32,
+}
+
+/// Quién va a caballo (ver el archivo de datos).
+#[derive(Deserialize, Debug, Clone)]
+pub struct Caballo {
+    /// Por menos de esto, todos caminan (aunque tengan caballo).
+    pub distancia_minima_m: f32,
+    /// Si las dos puntas están intramuros, solo por más de esto.
+    pub intramuros_minima_m: f32,
+    /// Misa, paseo, compra, pulpería, visitas: solo por más de esto.
+    pub social_minima_m: f32,
+    pub edad_maxima: u8,
+    pub propio: CaballoPropio,
+}
+
+/// Probabilidad de tener caballo de silla propio, por oficio o clase.
+#[derive(Deserialize, Debug, Clone)]
+pub struct CaballoPropio {
+    pub hacendado: f32,
+    pub labrador: f32,
+    pub peon_con_ganado: f32,
+    pub acomodada: f32,
+    pub principal: f32,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -107,6 +164,9 @@ pub struct Clima {
     pub carreta_en_barro: f32,
     pub pie_con_lluvia: f32,
     pub empantanarse: f32,
+    /// Lo que quedaba quieta una carreta empantanada antes de la v0.12.x (hoy espera ayuda:
+    /// ver `Oficios::barro_espera_sin_ayuda_min`).
+    #[allow(dead_code)]
     pub empantanado_minutos: [f32; 2],
 }
 

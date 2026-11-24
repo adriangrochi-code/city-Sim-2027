@@ -34,6 +34,12 @@ pub enum Motivo {
     Empantanar,
     Visita,
     Rasgo,
+    // [ia] Oficios y sucesos (al final: no corren a los demás).
+    Oficio,
+    Curioso,
+    Vereda,
+    Atrio,
+    Ayuda,
 }
 
 /// Azar por contador: un número en [0, 1) que solo depende de sus cuatro argumentos
@@ -153,9 +159,19 @@ impl Perfil {
         let llegada = p.historial.iter().find_map(|e| matches!(e.tipo, TipoEvento::Llego(_)).then_some(e.mes)).unwrap_or(p.nacimiento);
         let anios = ((mes - llegada) / 12).max(0) as f32;
         let conocimiento = (anios / 15.0).min(1.0);
-        // Caballo propio: las familias acomodadas, y quienes trabajan en el campo (los peones,
-        // si el hogar tiene ganado).
-        let caballo = clase >= Clase::Acomodada || matches!(p.oficio, Oficio::Hacendado | Oficio::Labrador) || (ganado > 0 && p.oficio == Oficio::Peon);
+        // Caballo propio: casi todos los hacendados, parte de los labradores y de los peones de
+        // un hogar con ganado, y los adultos de las familias acomodadas (datos `caballo.propio`;
+        // arreglo de la v0.12.0: antes lo tenían todos ellos y la calle se llenaba de jinetes).
+        let cp = &datos().caballo.propio;
+        let p_caballo = match p.oficio {
+            Oficio::Hacendado => cp.hacendado,
+            Oficio::Labrador => cp.labrador,
+            Oficio::Peon if ganado > 0 => cp.peon_con_ganado,
+            _ if edad >= 16 && clase == Clase::Principal => cp.principal,
+            _ if edad >= 16 && clase == Clase::Acomodada => cp.acomodada,
+            _ => 0.0,
+        };
+        let caballo = azar(semilla, p.id as u64, 2, Motivo::Perfil) < p_caballo;
         // Social: la sociabilidad, menos para los infelices (que igual van a la pulpería).
         let social = r.sociabilidad();
         Perfil {

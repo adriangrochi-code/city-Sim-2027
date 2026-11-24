@@ -14,6 +14,14 @@
   de bueyes con el yugo y el boyero caminando al costado.
 - **Carros**: carro de dos ruedas con la carga, el caballo en las varas y el carrero en el
   pescante.
+- **Oficios y sucesos** (v0.12.x, ver `ia-y-transito.md`): el **aguador** con el carro de la
+  pipa, parado en las puertas; el **sereno** con el farol de sebo encendido en la izquierda y el
+  chuzo en la derecha; el **boyero** con la picana levantada (pica a los bueyes de a ratos); la
+  **cadena de baldes** de un incendio (gente en fila del pozo a la casa, que gira de un vecino
+  al otro mientras el balde avanza) y los curiosos que miran el fuego de frente; los
+  **corrillos** de la salida de misa y de la recova (de 2 a 6, mirándose, acomodados con una
+  fuerza social) y la vuelta de la plaza del domingo de a dos; **gente sentada** en el banco de
+  la pulpería y, a la tardecita, en el poyo de su casa o en una silla de paja en la vereda.
 - **Animales**: el rodeo de cada estancia pastando en su potrero (vacas, overas, algún buey),
   la tropilla, ovejas desde 1840, la yunta de la chacra, caballos ensillados atados al palenque
   de las pulperías, perros en las calles y en las estancias, gallinas en el fondo de los
@@ -58,6 +66,13 @@ blancas; casacas azules, granates, verdes…). Cada persona elige con su semilla
 Con eso, `ropa::vestir(quien, año)` da el atuendo y la paleta: **función pura**, la misma
 persona en el mismo año viste siempre igual (prueba
 `la_ropa_sale_de_la_persona_y_es_siempre_la_misma`). Los mayores de 55 tienen canas.
+
+**Poses nuevas** (v0.12.x): la persona **sentada** es una figura más por atuendo
+(`ropa::figura_sentada`, `Biblioteca::sentada`): el origen es el asiento, a 0,5 m; los muslos
+hacia adelante y las canillas hasta el suelo (las polleras caen hasta los pies); los brazos
+sobre las piernas y de a ratos uno que gesticula. Lo que se lleva **en la mano** es un modelo
+aparte cuyas partes son los brazos de un hombre adulto (los mismos pivotes del hombro): se emite
+con la misma pose que la persona y sigue al brazo (`Picana`, `AparejoSereno`, `BaldeEnMano`).
 
 ## Animación
 
@@ -132,13 +147,22 @@ muestra de modelos de detalle y saca `personajes-calle`, `-gente-cerca`, `-carre
 `-carro`, `-pulperia`, `-muestra`, `-muestra-cerca`, `-estancia`, `-rodeo`, `-muelle`; mide el
 dibujo y guarda y carga la ciudad (tiene que dar IGUAL: nada de esto se guarda).
 
+Los oficios, las poses y la gente sentada se ven en el recorrido de la IA
+(`MOTOR_SOLO_IA=1`, ver `ia-y-transito.md`):
+
+![Dos sentados en el banco de la pulpería y los demás en el mostrador](../capturas/ia-pulperia-sentados.jpg)
+![El boyero con la picana junto a la yunta](../capturas/ia-boyero-picana.jpg)
+
 ## Pendiente
 
 - Sombras proyectadas en los mapas de cascadas (hoy, sombra de contacto).
 - Que la demografía asigne personas a los vecinos (`asignar_trabajo` con `persona`): el
   vestuario ya las usa si están.
-- Más poses: el boyero con la picana, la lavandera con el atado en las manos, gente sentada en
-  los bancos, perros que siguen a los jinetes.
-- Lanchas a vela en el puerto y carretas paradas en las barracas; pedidos de detalle de los
-  edificios (rejas, postigos, macetas, faroles de fachada, cancel: ver `modelos-de-detalle.md`).
+- Más poses: la lavandera con el atado en las manos, perros que siguen a los jinetes (hechos en
+  la v0.12.x: el boyero con la picana, gente sentada en bancos, poyos y sillas, el sereno, el
+  aguador y la cadena de baldes). Las rodillas no se doblan al caminar (las piernas son una
+  pieza): la figura sentada es un modelo propio.
+- Lanchas a vela en el puerto y carretas paradas en las barracas; las rejas de hierro fundido de
+  la época 2 como modelos (rejas, postigos, macetas, faroles de fachada, cancel y poyos ya están:
+  ver `modelos-de-detalle.md`).
 - Uniformes y ropa de trabajo de las épocas 3 a 6 más allá de traje y obrero.

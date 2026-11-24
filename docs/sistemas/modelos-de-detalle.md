@@ -69,9 +69,13 @@ x (piernas, patas, la cabeza que baja a pastar, las ruedas).
 | Pozo con roldana | 42 | brocal de piedra, horcones, travesaño, roldana, soga y balde |
 | Letrero de pulpería | 20 | tabla pintada colgada de un brazo |
 | Rejas, faroles de fachada, macetas, llamadores | 5 – 44 | los piden las casas (ver abajo) |
-| Personas (19 atuendos × de pie / montado) | 13 – 66 | ver `personajes-y-animales.md` |
+| Carro aguatero | 131 | [ia] la pipa acostada a lo largo con aros de hierro, canilla atrás y un balde colgado; dos ruedas y las varas |
+| Aparejo del sereno | 13 | [ia] farol de mano encendido (izquierda) y chuzo con moharra (derecha): partes de los brazos de un hombre adulto |
+| Picana, balde en la mano | 4, 13 | [ia] en la mano derecha (sigue al brazo) |
+| Silla de paja | 9 | [ia] asiento a 0,5 m y respaldo |
+| Personas (19 atuendos × de pie / montado / sentado) | 13 – 66 | ver `personajes-y-animales.md`; sentada desde la v0.12.x |
 
-Toda la biblioteca: **2432 cajas, 47 KB** (con los detalles de las fachadas), armada una vez al primer uso (`detalle::biblioteca()`).
+Toda la biblioteca: **3161 cajas, 61 KB** (con los detalles de las fachadas, los oficios y las 19 personas sentadas; antes 2432 cajas, 47 KB), armada una vez al primer uso (`detalle::biblioteca()`).
 
 ## Dibujo
 
@@ -154,5 +158,43 @@ la ciudad crecida tiene ~110 rejas, 60 faroles, 212 macetas y 111 llamadores.
 ![Rejas planas y llamadores en una calle de 1805](../capturas/fachadas-rejas-1805.jpg)
 ![Farol de gas de brazo y llamador en la Ciudad Nueva](../capturas/fachadas-farol-gas-1862.jpg)
 
-Pendiente: postigos, cancel de hierro del zaguán y bancos de piedra junto a la puerta como
-modelos; las rejas de hierro fundido de la Ciudad Nueva (de alto variable) como modelos.
+**Desde la v0.12.x** (`[ia]` en `structures/casas.rs`):
+
+| Modelo | Dónde y cuándo |
+|---|---|
+| Postigos (cerrados, 10 cajas) | Ventanas de 1 m × 2 m con postigo (`Reja::Postigo`, las casas sin reja): dos hojas con tableros en relieve, ventanillo y falleba en el vano, con el vidrio atrás; pintados de verde, azul, pardo o con la madera aceitada [E] |
+| Postigos abiertos (10) | La misma ventana con las dos hojas abiertas contra el muro, a los lados (40 % [E], como la hoja abierta de vóxeles de antes) |
+| Cancel (86) | Al fondo del zaguán de las casas de la Ciudad Nueva con cancel (`Estilo::cancel`), en puertas de 1,5 m: hierros, vidrios claros y el abanico de arriba, con el patio claro detrás (antes, un vóxel de hierro fundido) |
+| Poyo (2) | Banco de piedra o de material de 1,25 m junto a la puerta principal de las casas modestas (38 % [E]), donde hay 1,5 m de muro libre al lado y el piso de la casa está a nivel de la vereda: ahí se sientan los vecinos a la tardecita |
+
+Pendiente: las rejas de hierro fundido de la Ciudad Nueva (de alto variable) como modelos; el
+cancel de las casas coloniales con zaguán (la puerta de calle queda cerrada: no se vería).
+
+## Rampas de los escalones de las calles (v0.12.x)
+
+La calzada se arma con vóxeles de 0,25 m: en una calle en pendiente la superficie sube de a
+escalones de 25 cm (uno cada 6 m en una cuesta del 4 %, uno por metro en las rampas de los
+puentes). El mallado no tiene medios vóxeles (y es de otra línea de trabajo), así que los
+escalones se suavizan con **rampas de detalle** (`voxelize::escalones`): delante de cada
+escalón, una caja inclinada del color del material de la calzada, con el matiz de los
+micro-vóxeles, cuya cara de arriba baja del borde del escalón a la calzada de abajo en medio
+metro (o en todo el rellano, si es más corto). El escalón a pique pasa a ser una rampa corta;
+el resto de la calzada (el empedrado, las huellas, los charcos) queda como estaba. Una primera
+versión de 1 m tapaba demasiado empedrado con un color liso y se acortó. En los caminos de
+tierra, lo que más se ve de cerca no son los escalones de la cuesta sino las huellas de las
+carretas (hundidas un vóxel, con pasto en el medio): son diseño y no llevan rampa.
+
+- Se calculan como `road_edits` (misma altura de la calzada por el punto del eje, mismo perfil
+  de veredas, cordones y cunetas), sin los cruces (donde dos tramos escriben la misma columna),
+  la plaza con su banquina ni los puentes; las de un mismo escalón a lo ancho se juntan en una
+  sola caja.
+- Se arman por tramo la primera vez que el tramo queda a menos de 140 m de la vista (tres
+  tramos por cuadro como mucho; ~5 ms por tramo) y se dibujan con los vecinos. No se guardan
+  ni tocan los vóxeles.
+- Pruebas `las_calles_en_pendiente_tienen_rampas_en_cada_escalon` (el damero de prueba: ~400
+  rampas en 39 tramos, 186 ms), `las_rampas_apoyan_en_la_calzada_de_vóxeles` (la cara de arriba
+  empalma con la superficie que deja `road_edits` en 53 de 56 escalones del tramo más empinado;
+  los otros, junto a las puntas, donde manda otra calle) y `las_rampas_se_dibujan_cerca_de_la_vista`.
+
+![Calle en pendiente: antes (escalones de 25 cm)](../capturas/ia-pendiente-antes.jpg)
+![Calle en pendiente: después (rampas en cada escalón)](../capturas/ia-pendiente-despues.jpg)
