@@ -15,6 +15,7 @@
 pub mod casas;
 pub mod colonial;
 pub mod epoca2;
+pub mod epoca3; // [epoca3]
 pub mod estilo;
 pub mod scenes;
 

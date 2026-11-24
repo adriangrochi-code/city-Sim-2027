@@ -1,5 +1,6 @@
 //! Pruebas de las épocas: transición, contenido bloqueado antes de tiempo, ensanche,
-//! rehabilitación, gas, agua corriente, colectores y guardar/cargar.
+//! rehabilitación, gas, agua corriente, colectores y guardar/cargar; y la época 3 (paso con el
+//! ferrocarril, alumbrado eléctrico, tranvías, conventillos, casas de la época).
 
 use super::super::lots::{zone_code, Density, ZoneKind, D};
 use super::super::materiales::{Obra, Pared, Techo};
@@ -106,7 +107,7 @@ fn transicion_con_requisitos_nuevo_orden_y_resumen() {
     // La población sigue en la época de la ciudad aunque el calendario diga otra cosa.
     city.fast_forward(&t, 2);
     assert_eq!(city.poblacion.epoca, Epoca::CiudadNueva);
-    assert!(city.pasar_epoca(&t, Muralla::Derribar, true).is_err(), "la época 3 no se juega todavía");
+    assert!(city.pasar_epoca(&t, Muralla::Derribar, true).is_err(), "a la época 3 se pasa con el ferrocarril");
 }
 
 #[test]
@@ -336,4 +337,227 @@ impl City {
         self.refresh_barrio();
         self.services.barrio.delito.clone()
     }
+}
+
+// --- [epoca3] Época 3, Inmigración ----------------------------------------------------------
+
+/// Ciudad de prueba ya en la Ciudad Nueva.
+fn ciudad_nueva(t: &TerrainGen) -> City {
+    let mut city = ciudad(t);
+    city.pasar_epoca(t, Muralla::Conservar, true).unwrap();
+    city
+}
+
+#[test]
+fn transicion_a_la_epoca3_con_el_ferrocarril() {
+    use super::epoca3::*;
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    assert_eq!(city.epoca_siguiente(), Some(Epoca::Inmigracion));
+    let req = city.requisitos_epoca();
+    assert_eq!(req.len(), 4);
+    assert!(!city.puede_pasar_epoca());
+    assert!(city.pasar_epoca3(&t, Ferrocarril::Propio, false).is_err(), "sin requisitos no se pasa");
+    // Modo fiel: el ferrocarril llega a más tardar en 1869.
+    let mut e = crate::buildings::Edits::default();
+    city.month = (1850 - 1726) * 12;
+    city.epoca_mes(&t, &mut e);
+    assert!(city.epoca.ferrocarril.is_none(), "en 1850 no hay ferrocarril");
+    city.month = (FERROCARRIL_HASTA - 1726) * 12;
+    let news = city.epoca_mes(&t, &mut e);
+    assert!(city.epoca.ferrocarril.is_some() && news.iter().any(|n| n.contains("ferrocarril")), "{news:?}");
+    assert!(city.requisitos_epoca()[3].cumplido);
+    // Con la muralla no se pasa a la época 3: se decide el ferrocarril.
+    assert!(city.pasar_epoca(&t, Muralla::Derribar, true).is_err());
+    let dinero = city.money;
+    let (_, aviso) = city.pasar_epoca3(&t, Ferrocarril::Concesion, true).unwrap();
+    assert!(aviso.contains("Inmigración"), "{aviso}");
+    assert_eq!(city.epoca.actual, Epoca::Inmigracion);
+    assert_eq!(city.poblacion.epoca, Epoca::Inmigracion);
+    assert_eq!(city.money, dinero + CANON_CONCESION, "la compañía paga el canon");
+    assert_eq!(city.epoca.concesion, Some(Ferrocarril::Concesion));
+    assert_eq!(city.costo_servicio(Kind::Estacion), 0, "con la concesión la estación la paga la compañía");
+    assert_eq!(city.epoca.resumenes.len(), 2);
+    assert_eq!(city.epoca.resumenes[1].epoca, Epoca::CiudadNueva);
+    assert!(city.epoca.resumenes[1].lineas.iter().any(|l| l.contains("ferrocarril")));
+    // La población sigue en la época de la ciudad y no hay otra época jugable.
+    city.fast_forward(&t, 2);
+    assert_eq!(city.poblacion.epoca, Epoca::Inmigracion);
+    assert!(city.epoca_siguiente().is_none());
+    assert!(city.pasar_epoca3(&t, Ferrocarril::Propio, true).is_err());
+}
+
+#[test]
+fn nada_de_la_epoca3_antes_de_la_transicion() {
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    for k in [Kind::Estacion, Kind::UsinaElectrica, Kind::CocherasTranvia, Kind::HotelInmigrantes, Kind::PuertoModerno] {
+        let (c, f) = city.service_site(k, C + Vec2::new(300.0, 0.0));
+        assert!(city.service_problem(&t, k, c, f).is_some_and(|m| m.contains("época")), "{k:?}");
+    }
+    let casa = city.lots.lots.values().find(|l| l.level >= 1).unwrap().id;
+    assert_eq!(city.contexto_solar(casa, 2).epoca, 1, "en la Ciudad Nueva, el kit de la época 2");
+    city.pool = 500;
+    let mut e = crate::buildings::Edits::default();
+    city.epoca_mes(&t, &mut e);
+    assert_eq!(city.conventillos(), 0, "sin época 3 no hay conventillos");
+    assert!(city.epoca.faroles_electricos.is_empty() && city.epoca.tranvias.is_empty());
+}
+
+#[test]
+fn alumbrado_electrico_reemplaza_al_gas() {
+    use super::epoca3::Ferrocarril;
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    let (c, fr) = sitio_servicio(&city, &t, Kind::UsinaGas);
+    city.place_service(&t, Kind::UsinaGas, c, fr).unwrap();
+    let gas0 = city.epoca.faroles_gas.len();
+    assert!(gas0 > 20);
+    city.pasar_epoca3(&t, Ferrocarril::Propio, true).unwrap();
+    city.money += 100_000;
+    let (c, fr) = sitio_servicio(&city, &t, Kind::UsinaElectrica);
+    city.place_service(&t, Kind::UsinaElectrica, c, fr).expect("usina eléctrica");
+    let n = city.epoca.faroles_electricos.len();
+    assert!(n > 15, "faroles eléctricos: {n}");
+    assert!(city.epoca.faroles_gas.len() < gas0 / 2, "el gas queda donde no llega la luz eléctrica: {} de {gas0}", city.epoca.faroles_gas.len());
+    // Luces más fuertes que las de gas, por la misma vía del render.
+    let luces = city.luces_cerca(C, 400.0, 256);
+    assert!(luces.iter().any(|l| l[4] > 1.5 && l[3] > 12.0));
+    // El mes siguiente no repone el gas que se sacó.
+    let gas1 = city.epoca.faroles_gas.len();
+    city.fast_forward(&t, 2);
+    assert!(city.epoca.faroles_gas.len() <= gas1);
+}
+
+#[test]
+fn tranvias_a_caballo_y_electricos_suben_el_valor() {
+    use super::epoca3::Ferrocarril;
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    city.pasar_epoca3(&t, Ferrocarril::Propio, true).unwrap();
+    city.money += 200_000;
+    let (c, fr) = sitio_servicio(&city, &t, Kind::CocherasTranvia);
+    city.place_service(&t, Kind::CocherasTranvia, c, fr).expect("cocheras");
+    assert!(!city.epoca.tranvias.is_empty(), "sin líneas");
+    let l = city.epoca.tranvias[0].clone();
+    assert!(l.largo() > 100.0 && !l.electrica, "línea a caballo de {} m", l.largo());
+    // Una línea llega a la plaza mayor.
+    let plaza = city.lots.plaza_center.unwrap();
+    assert!(city.distancia_tranvia(plaza).unwrap() < 60.0);
+    assert!(city.solares_con_tranvia() > 10);
+    // Sube el valor del suelo junto a la línea, no lejos.
+    let p = Vec2::from(l.pts[l.pts.len() / 2]);
+    assert!(city.valor_epoca3(p) > 0.03);
+    assert!(city.valor_epoca3(p + Vec2::new(5000.0, 0.0)) < 1e-3);
+    // Con la usina, eléctricas.
+    let (c, fr) = sitio_servicio(&city, &t, Kind::UsinaElectrica);
+    city.place_service(&t, Kind::UsinaElectrica, c, fr).unwrap();
+    assert!(city.epoca.tranvias.iter().all(|l| l.electrica));
+    // Los rieles están en los vóxeles al regenerar la ciudad.
+    let e = city.rebuild_edits(&t);
+    assert!(e.voxels.values().any(|&m| m == crate::palette::HIERRO_FUNDIDO), "rieles");
+}
+
+#[test]
+fn conventillos_cuando_falta_vivienda() {
+    use super::epoca3::*;
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    city.pasar_epoca3(&t, Ferrocarril::Propio, true).unwrap();
+    // Casas viejas de familias modestas.
+    let ids: Vec<u32> = city.lots.lots.values().filter(|l| l.level >= 1 && l.kind() == Some(ZoneKind::Residencial)).map(|l| l.id).take(12).collect();
+    assert!(ids.len() >= 4);
+    for &id in &ids {
+        let l = city.lots.lots.get_mut(&id).unwrap();
+        let mut o = l.obra.unwrap_or_else(|| Obra::nueva(Pared::Ladrillo, Techo::Azotea, true, true));
+        o.contexto.clase = 1;
+        o.contexto.epoca = 0;
+        o.contexto.anio = 1790;
+        l.obra = Some(o);
+        l.level = 2;
+        l.zone = zone_code(ZoneKind::Residencial, Density::Media);
+    }
+    let mut e = crate::buildings::Edits::default();
+    city.poblacion.fundada = false;
+    city.pool = 10;
+    assert!(city.conventillos_mes(&t, &mut e).is_empty() && city.conventillos() == 0, "con vivienda no hay conventillos");
+    city.pool = 300;
+    let news = city.conventillos_mes(&t, &mut e);
+    assert!(city.conventillos() >= 1 && !news.is_empty(), "{news:?}");
+    let id = city.lots.lots.values().find(|l| l.obra.is_some_and(|o| o.contexto.conventillo > 0)).unwrap().id;
+    let l = &city.lots.lots[&id];
+    assert_eq!(crate::city::lots::zone_of(l.zone).map(|z| z.1), Some(Density::Alta), "más familias");
+    assert!(city.lineas_estilo(l)[0].contains("onventillo"), "{:?}", city.lineas_estilo(l));
+    // Con la inspección, menos (y cuesta).
+    city.epoca.inspeccion = true;
+    let n0 = city.conventillos();
+    for _ in 0..4 {
+        city.conventillos_mes(&t, &mut e);
+        city.month += 1;
+    }
+    assert!(city.conventillos() <= n0 + 4);
+    let dinero = city.money;
+    city.epoca3_mes(&t, &mut e);
+    assert!(city.money < dinero);
+}
+
+#[test]
+fn casas_de_la_epoca3_y_oleadas() {
+    use super::epoca3::Ferrocarril;
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    city.pasar_epoca3(&t, Ferrocarril::Propio, true).unwrap();
+    let casa = city.lots.lots.values().find(|l| l.level >= 1).unwrap().id;
+    assert_eq!(city.contexto_solar(casa, 2).epoca, 2, "lo nuevo, con el kit de la época 3");
+    // Zonas nuevas: crecen con casas de la época 3.
+    city.paint(C, 450.0, zone_code(ZoneKind::Residencial, Density::Media));
+    city.materiales.ex[crate::city::materiales::Material::Cal.idx()].cantidad += 3000.0;
+    city.money += 200_000;
+    city.fast_forward(&t, 24);
+    let nuevas = city.lots.lots.values().filter_map(|l| l.obra).filter(|o| o.contexto.epoca == 2).count();
+    assert!(nuevas > 0, "casas de la época 3: {nuevas}");
+    // Una oleada multiplica las llegadas unos meses.
+    city.epoca.oleada_hasta = Some(city.month + 3);
+    assert!(city.factor_inmigracion() > 1.5);
+    city.month += 4;
+    assert_eq!(city.factor_inmigracion(), 1.0);
+}
+
+#[test]
+fn guardar_y_cargar_la_epoca3() {
+    use super::epoca3::Ferrocarril;
+    let t = TerrainGen::new(1726);
+    let mut city = ciudad_nueva(&t);
+    city.pasar_epoca3(&t, Ferrocarril::Propio, true).unwrap();
+    city.money += 300_000;
+    for k in [Kind::UsinaElectrica, Kind::CocherasTranvia] {
+        let (c, fr) = sitio_servicio(&city, &t, k);
+        city.place_service(&t, k, c, fr).unwrap();
+    }
+    let id = city.lots.lots.values().find(|l| l.level >= 1 && l.kind() == Some(ZoneKind::Residencial) && l.obra.is_some()).unwrap().id;
+    city.lots.lots.get_mut(&id).unwrap().level = 2;
+    let mut e = crate::buildings::Edits::default();
+    city.convertir_conventillo(&t, id, &mut e);
+    city.fast_forward(&t, 3);
+    let data = crate::city::save::CityData::from_city(&city);
+    let json = serde_json::to_string(&data).unwrap();
+    let back: crate::city::save::CityData = serde_json::from_str(&json).unwrap();
+    let mut c2 = back.to_city().unwrap();
+    c2.rebuild_edits(&t);
+    assert_eq!(c2.epoca, city.epoca);
+    assert_eq!(c2.poblacion.epoca, Epoca::Inmigracion);
+    for (id, l) in &city.lots.lots {
+        assert_eq!(l.obra, c2.lots.lots[id].obra);
+    }
+    // Una partida de la v0.12 (sin lo de la época 3) carga como Ciudad Nueva.
+    let mut v: serde_json::Value = serde_json::to_value(&data).unwrap();
+    let ep = v.get_mut("epoca").unwrap().as_object_mut().unwrap();
+    for k in ["ferrocarril", "concesion", "faroles_electricos", "electrica_firma", "tranvias", "tranvia_firma", "conventillos", "inspeccion", "oleada_hasta", "avisada3"] {
+        ep.remove(k);
+    }
+    ep.insert("actual".into(), serde_json::json!("CiudadNueva"));
+    let vieja: crate::city::save::CityData = serde_json::from_value(v).unwrap();
+    let c3 = vieja.to_city().unwrap();
+    assert_eq!(c3.epoca.actual, Epoca::CiudadNueva);
+    assert!(c3.epoca.tranvias.is_empty() && c3.epoca.concesion.is_none());
 }

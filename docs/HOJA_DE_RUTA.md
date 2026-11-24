@@ -1,6 +1,6 @@
 # Hoja de ruta
 
-> Estado al 23 de noviembre de 2026. Se actualiza con cada avance.
+> Estado al 24 de noviembre de 2026. Se actualiza con cada avance.
 > Dos líneas de trabajo: el **prototipo de Godot** (para diseñar y probar la jugabilidad) y el
 > **motor de vóxeles en Rust** (donde va a vivir el juego final).
 
@@ -35,8 +35,8 @@
 - [x] Mapa por defecto con la geografía real de Montevideo (24 km, ver `docs/sistemas/mapa-real.md`)
 - [x] Casas y calles a tamaño real (cuadra de 100 varas, calles de 10 y 12 varas)
 - [x] Uruguay a escala país; las calles y solares deben esquivar los arroyos — mapa del país en el motor (relieve de la IDE a 1 km, agua, 19 departamentos, ríos, monte, bañados, 33 pueblos con su año de fundación verificado, caminos reales, ferrocarril por año, recursos; estancias, saladeros y carretas que llevan cueros, sebo y tasajo al puerto) y solares fuera de cauces, orillas y bañados, damero cortado en los arroyos y aviso de puentes al trazar (ver [sistemas/mapa-pais.md](sistemas/mapa-pais.md))
-- [ ] Alcantarillas y saneamiento por épocas (diseñado; **en parte**: la versión colonial —letrinas y pozos negros por tipo de casa, pozos de agua que se contaminan, basurales, recolección con carretilla y basurero— y la de la época 2 —colectores por la red de calles (Arteaga, 1856) y agua corriente (1871), ver `epocas::redes`— ya están en el motor; faltan las de las épocas 3 a 6, que figuran como datos)
-- [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (**en parte**: sebo de los serenos y gas de la época 2 —usina, faroles cada 25 m por la red, luz de noche en el shader, menos delito, carbón importado— en el motor; eléctrico, sodio y LED como datos)
+- [ ] Alcantarillas y saneamiento por épocas (diseñado; **en parte**: la versión colonial —letrinas y pozos negros por tipo de casa, pozos de agua que se contaminan, basurales, recolección con carretilla y basurero— y la de la época 2 —colectores por la red de calles (Arteaga, 1856) y agua corriente (1871), ver `epocas::redes`— ya están en el motor; en la época 3 siguen esas redes y los conventillos suman insalubridad; faltan la planta potabilizadora y la ampliación de 1913, y las épocas 4 a 6, que figuran como datos)
+- [ ] Alumbrado por épocas: gas, eléctrico, sodio, LED (**en parte**: sebo de los serenos, gas de la época 2 —usina, faroles cada 25 m por la red, luz de noche en el shader, menos delito, carbón importado— y eléctrico de la época 3 —usina eléctrica (1886), faroles cada 35 m por su red que reemplazan al gas, más luz por la misma vía del shader— en el motor; sodio y LED como datos)
 
 ## Fase 2: el juego sobre el motor de vóxeles
 
@@ -70,13 +70,17 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 ## Fase 3: diseño de todas las épocas
 
 - [x] Épocas 4, 5 y 6 en detalle (Art Déco y la Rambla, Modernismo, Contemporánea): borradores v0.1
-- [ ] Kits de vóxeles por época (estética de estructuras de la época 2 en adelante) — **hecho el de la época 2** (v0.10.0): casa neoclásica de patio, casa de altos con balcón corrido de hierro fundido, quinta italianizante, almacén de esquina, usina de gas, teatro, agua corriente, colector, plazas y alamedas del ensanche; 9 materiales nuevos (ver [sistemas/arquitectura-epoca2.md](sistemas/arquitectura-epoca2.md)). Faltan las épocas 3 a 6
+- [ ] Kits de vóxeles por época (estética de estructuras de la época 2 en adelante) — **hecho el de la época 2** (v0.10.0): casa neoclásica de patio, casa de altos con balcón corrido de hierro fundido, quinta italianizante, almacén de esquina, usina de gas, teatro, agua corriente, colector, plazas y alamedas del ensanche; 9 materiales nuevos (ver [sistemas/arquitectura-epoca2.md](sistemas/arquitectura-epoca2.md)). **Hecho el de la época 3** (v0.12.x): casa standard (casa chorizo), casa de altos italianizante, edificio de renta de 3–4 plantas con cúpula o mansarda, almacén y bar de esquina con toldo, conventillo, fábrica con chimenea y galpón de chapa, estación de ferrocarril, usina eléctrica, cocheras de tranvía, hotel de inmigrantes y puerto moderno con grúas; 4 materiales y 2 modelos de detalle nuevos (ver [sistemas/arquitectura-epoca3.md](sistemas/arquitectura-epoca3.md)). Faltan las épocas 4 a 6
 - [x] Mapa del país (escala país) en detalle: datos, fuentes, simulación agregada, obras por época y su modo en el motor ([sistemas/mapa-pais.md](sistemas/mapa-pais.md)). Falta: ciudades secundarias jugables, ferrocarril del jugador, represas y rutas (épocas 3-6)
 
 ## Fase 4: época 2, Ciudad Nueva
 
 - [ ] Ensanche planificado sobre el ejido, gas, teatro, mapa del país con pueblos y caminos — **hecho en el motor** (v0.10.0; desde la v0.11.x el ensanche se empalma solo con la red vieja y la boca del colector con todas las calles cercanas: en la demostración pasa de 0 a todos los solares con colector): época explícita en la ciudad con requisitos, nuevo orden (fiel u alternativo), decisión de la muralla y pantalla de resumen; ensanche con bulevar y plazas; gas; teatro; agua corriente y colectores; llegadas y tecnologías de la época 2 activas después del paso (ver [epocas/02-ciudad-nueva.md](epocas/02-ciudad-nueva.md) §14). Falta el mapa del país (otra línea de trabajo) y el resto de los edificios de la época; el mapa del país (otra línea de trabajo) ya deja fundar pueblos, trazar caminos con puentes y abrir puertos desde la Ciudad Nueva; faltan diligencias y postas
 - [x] Rehabilitación de casas viejas y modernización de edificios coloniales (fachada nueva en el lugar con la misma huella, techo de teja, un piso más; los dueños solos, la ordenanza de fachadas o el jugador desde la ficha)
+
+## Fase 5: época 3, Inmigración
+
+- [ ] Inmigración, ferrocarril, tranvías, electricidad y el puerto moderno — **jugable en el motor** (v0.12.x): paso desde la Ciudad Nueva con requisitos (3.000 habitantes, teatro, ensanche y la llegada del ferrocarril: 1867–1869 en el modo fiel), la decisión de la concesión o la línea propia, resumen y crónica; llegadas de la época 3 con oleadas y el hotel de inmigrantes; conventillos cuando falta vivienda (con inspección); alumbrado eléctrico; tranvías a caballo y eléctricos por la red de calles que suben el valor del suelo; estación, puerto moderno y fábricas; recorrido `MOTOR_EPOCA3=1 --demo-ciudad` (ver [epocas/03-inmigracion.md](epocas/03-inmigracion.md) §14). Faltan: coches de tranvía y trenes como agentes, el puerto por fases, escuela pública, bomberos y policía, frigoríficos, acontecimientos (huelga, gripe, exposición, crac) y la transición a la época 4
 
 ## Más adelante
 
@@ -85,4 +89,4 @@ El paso clave: dejar de depender del prototipo y jugar directamente sobre los v�
 - [ ] Personajes y animales: sombras proyectadas en las cascadas, más poses (boyero con picana, gente sentada), pedidos de detalle de los edificios — **hechos** las rejas (planas y voladas), los faroles de fachada (de aceite y de gas), las macetas y los llamadores, según la época y la riqueza de la casa; faltan postigos, cancel y bancos de piedra, y las rejas de hierro fundido de la época 2 como modelos (ver `docs/sistemas/modelos-de-detalle.md`)
 - [ ] Calles en pendiente sin escalones de 25 cm (rampas o medios pasos en la calzada y las veredas, sin romper la estética de vóxeles): pendiente; el mallado no tiene medios vóxeles, así que hace falta otra técnica (modelos de detalle en cada escalón o una capa de micro-vóxeles para la calzada)
 
-- Épocas 3 a 6 jugables, escala país, cooperativo asíncrono, modding, nombre definitivo.
+- Épocas 4 a 6 jugables, escala país, cooperativo asíncrono, modding, nombre definitivo.

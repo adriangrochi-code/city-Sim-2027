@@ -34,6 +34,7 @@ use crate::lod::{BASE_VOXEL, DESIGN_VOXEL};
 use crate::palette::AIR;
 use crate::structures::colonial;
 use crate::structures::epoca2;
+use crate::structures::epoca3; // [epoca3]
 use crate::structures::Frame;
 use crate::terrain::TerrainGen;
 use glam::{IVec2, IVec3, Vec2};
@@ -77,6 +78,12 @@ pub enum Kind {
     Teatro,
     AguaCorriente,
     Colector,
+    // --- [epoca3] Época 3, Inmigración (ver `city::epocas::epoca3`) ---
+    Estacion,
+    UsinaElectrica,
+    CocherasTranvia,
+    HotelInmigrantes,
+    PuertoModerno,
 }
 
 /// Época desde la que se puede levantar cada servicio.
@@ -84,6 +91,7 @@ pub fn epoca_de(k: Kind) -> super::poblacion::Epoca {
     use super::poblacion::Epoca;
     match k {
         Kind::UsinaGas | Kind::Teatro | Kind::AguaCorriente | Kind::Colector => Epoca::CiudadNueva,
+        Kind::Estacion | Kind::UsinaElectrica | Kind::CocherasTranvia | Kind::HotelInmigrantes | Kind::PuertoModerno => Epoca::Inmigracion, // [epoca3]
         _ => Epoca::Colonial,
     }
 }
@@ -147,7 +155,7 @@ pub struct Info {
     pub plazas: i32,
 }
 
-pub const CATALOG: [Info; 29] = [
+pub const CATALOG: [Info; 34] = [
     Info { kind: Kind::Pozo, name: "Pozo de balde", key: "pozo", desc: "Agua de pozo para unas 60 personas cercanas. Calidad regular; los talleres cercanos la ensucian.", cost: 400, ladrillos: 0.0, piedra: 20.0, upkeep: 4, cap: 60, quality: 0.7, radius: 110.0, fire_reach: 140.0, size: (5.0, 5.0), frame: (10, 10), builder: colonial::pozo, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aljibe, name: "Aljibe público", key: "aljibe", desc: "Junta el agua de lluvia de los techos en una cisterna. Buena agua para unas 160 personas; en la sequía rinde menos.", cost: 1500, ladrillos: 60.0, piedra: 20.0, upkeep: 12, cap: 160, quality: 1.0, radius: 170.0, fire_reach: 180.0, size: (10.0, 10.0), frame: (20, 20), builder: colonial::aljibe_publico, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Aguadores, name: "Puesto de aguadores", key: "aguadores", desc: "Los aguadores llenan sus pipas en un arroyo o manantial y las reparten en carro por las calles: llegan lejos, pero solo a donde llega la calle.", cost: 2500, ladrillos: 30.0, piedra: 0.0, upkeep: 30, cap: 360, quality: 0.9, radius: 1100.0, fire_reach: 450.0, size: (14.0, 18.0), frame: (28, 36), builder: colonial::puesto_aguadores, grupo: Grupo::Agua, plazas: 0 },
@@ -185,6 +193,12 @@ pub const CATALOG: [Info; 29] = [
     Info { kind: Kind::Teatro, name: "Teatro", key: "teatro", desc: "Época 2. El gran proyecto de la Ciudad Nueva: pórtico de columnas, sala y caja escénica. Atrae a las familias ricas, sube el valor del suelo alrededor y la felicidad de la ciudad. Uno por ciudad. (El Solís se inauguró el 25 de agosto de 1856.)", cost: 22000, ladrillos: 600.0, piedra: 200.0, upkeep: 90, cap: 0, quality: 0.0, radius: 600.0, fire_reach: 0.0, size: (40.0, 48.0), frame: (80, 96), builder: epoca2::teatro, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::AguaCorriente, name: "Usina de agua corriente", key: "agua_corriente", desc: "Época 2. Bombas a vapor y un tanque elevado: agua buena por cañería a todos los solares de su red de calles, hasta 3 km. Las fiebres y diarreas bajan mucho. (En Montevideo, el agua del Santa Lucía llegó el 18 de julio de 1871.)", cost: 15000, ladrillos: 300.0, piedra: 80.0, upkeep: 80, cap: 20000, quality: 1.0, radius: 3000.0, fire_reach: 400.0, size: (24.0, 22.0), frame: (48, 44), builder: epoca2::agua_corriente, grupo: Grupo::Agua, plazas: 0 },
     Info { kind: Kind::Colector, name: "Colector y desagüe", key: "colector", desc: "Época 2. La boca de un colector en la costa: caños maestros bajo las calles de su red (hasta 1,5 km) se llevan las aguas servidas al río. Los pozos negros de esos solares dejan de ensuciar el agua y baja la insalubridad. (La red de Arteaga, de 1856, fue la primera de América Latina.)", cost: 7000, ladrillos: 200.0, piedra: 40.0, upkeep: 35, cap: 0, quality: 0.0, radius: 1500.0, fire_reach: 0.0, size: (12.0, 12.0), frame: (24, 24), builder: epoca2::colector, grupo: Grupo::Saneamiento, plazas: 0 },
+    // [epoca3] Época 3, Inmigración (ver `city::epocas::epoca3` y docs/epocas/03-inmigracion.md).
+    Info { kind: Kind::Estacion, name: "Estación de ferrocarril", key: "estacion", desc: "Época 3. El edificio de pasajeros y el galpón de andenes de hierro y vidrio: une la ciudad con el país. Sube el valor del suelo y el tránsito alrededor, atrae familias y comercio; con la concesión, la compañía la paga y se queda con los pasajes. Una por ciudad. (En Montevideo, el tren corre desde 1869; la Estación Central de Luis Andreoni es de 1897.)", cost: 30000, ladrillos: 700.0, piedra: 200.0, upkeep: 80, cap: 0, quality: 0.0, radius: 700.0, fire_reach: 0.0, size: (50.0, 36.0), frame: (100, 72), builder: epoca3::estacion, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::UsinaElectrica, name: "Usina eléctrica", key: "usina_electrica", desc: "Época 3. Calderas a carbón y dínamos: alumbrado eléctrico por las calles de su red (hasta 2 km), más fuerte que el gas, que lo reemplaza; y la corriente para el tranvía eléctrico. (En Montevideo, la luz incandescente de la usina del Yerbal es de 1886.)", cost: 24000, ladrillos: 500.0, piedra: 100.0, upkeep: 120, cap: 0, quality: 0.0, radius: 2000.0, fire_reach: 0.0, size: (36.0, 30.0), frame: (72, 60), builder: epoca3::usina_electrica, grupo: Grupo::Seguridad, plazas: 0 },
+    Info { kind: Kind::CocherasTranvia, name: "Cocheras de tranvía", key: "cocheras_tranvia", desc: "Época 3. Base de una línea de tranvías por las calles: primero de caballos, y eléctrica cuando hay usina. La gente quiere vivir cerca de la línea: sube el valor del suelo a lo largo y la ciudad crece hacia donde llega. (En Montevideo, el tranvía a caballo es de 1868 y el eléctrico, de 1906.)", cost: 12000, ladrillos: 300.0, piedra: 40.0, upkeep: 50, cap: 0, quality: 0.0, radius: 2500.0, fire_reach: 0.0, size: (40.0, 30.0), frame: (80, 60), builder: epoca3::cocheras_tranvia, grupo: Grupo::Otros, plazas: 0 },
+    Info { kind: Kind::HotelInmigrantes, name: "Hotel de inmigrantes", key: "hotel_inmigrantes", desc: "Época 3. Recibe a los recién llegados mientras buscan casa y trabajo: llegan más familias por el puerto y hay menos gente sin techo (y menos conventillos). Uno por ciudad, cerca del puerto. (En Montevideo abrió en 1908.)", cost: 9000, ladrillos: 300.0, piedra: 40.0, upkeep: 60, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (36.0, 24.0), frame: (72, 48), builder: epoca3::hotel_inmigrantes, grupo: Grupo::Otros, plazas: 300 },
+    Info { kind: Kind::PuertoModerno, name: "Puerto moderno", key: "puerto_moderno", desc: "Época 3. El gran proyecto de la época: muelle de piedra, grúas de pórtico, vías y depósitos de chapa. Los barcos grandes atracan sin lanchas: más comercio, más llegadas y frigoríficos. Uno por ciudad, sobre la costa. (El puerto de Montevideo se inauguró el 25 de agosto de 1909.)", cost: 60000, ladrillos: 400.0, piedra: 900.0, upkeep: 150, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (60.0, 40.0), frame: (120, 80), builder: epoca3::puerto_moderno, grupo: Grupo::Otros, plazas: 0 },
     Info { kind: Kind::Imprenta, name: "Imprenta", key: "imprenta", desc: "Prensa de madera, tipos y papel para bandos, almanaques, cartillas y una gaceta con los precios corrientes. Una por ciudad, cerca de la plaza.", cost: 3000, ladrillos: 50.0, piedra: 0.0, upkeep: 0, cap: 0, quality: 0.0, radius: 0.0, fire_reach: 0.0, size: (10.0, 14.0), frame: (20, 28), builder: colonial::imprenta, grupo: Grupo::Otros, plazas: 0 },
 ];
 
@@ -252,6 +266,8 @@ pub enum Order {
     Demolish(u32),
     /// Pasar a la época siguiente con la decisión de la muralla (ver `epocas`).
     PasarEpoca(super::epocas::Muralla),
+    /// [epoca3] Pasar a la época 3 con la decisión del ferrocarril.
+    PasarEpoca3(super::epocas::epoca3::Ferrocarril),
     /// Reformar una casa vieja (pagado por la ciudad; ver `epocas::rehabilitar`).
     Reforma(u32, super::epocas::rehabilitar::Reforma),
 }
@@ -426,6 +442,10 @@ impl Services {
     pub fn attraction(&self) -> f32 {
         // El teatro (época 2) atrae a las familias de afuera.
         self.church.attraction() * if self.epidemic.active() { 0.5 } else { 1.0 } * if self.count(Kind::Teatro) > 0 { 1.1 } else { 1.0 }
+            // [epoca3] La estación, el hotel de inmigrantes y el puerto moderno traen gente.
+            * if self.count(Kind::Estacion) > 0 { 1.1 } else { 1.0 }
+            * if self.count(Kind::HotelInmigrantes) > 0 { 1.2 } else { 1.0 }
+            * if self.count(Kind::PuertoModerno) > 0 { 1.25 } else { 1.0 }
     }
 
     /// Mantenimiento mensual de los servicios, el muelle y la muralla.
@@ -666,10 +686,18 @@ impl City {
             Kind::Teatro if !far(900.0) => return Some("El teatro va en la ciudad, a menos de 900 m de la plaza".into()),
             Kind::UsinaGas if far(250.0) => return Some("La usina de gas echa humo y olor: a más de 250 m de la plaza".into()),
             Kind::Colector if !near_coast(t, c, 200.0) => return Some("El colector desagua en el río: junto a la costa (a menos de 200 m)".into()),
+            // [epoca3]
+            Kind::Estacion | Kind::HotelInmigrantes | Kind::PuertoModerno if self.services.count(k) > 0 => return Some(format!("La ciudad ya tiene {}", inf.name.to_lowercase())),
+            Kind::UsinaElectrica if far(250.0) => return Some("La usina eléctrica echa humo de carbón: a más de 250 m de la plaza".into()),
+            Kind::PuertoModerno if !near_coast(t, c, 120.0) => return Some("El puerto moderno va sobre la costa (a menos de 120 m)".into()),
+            // El muelle (el fondo del puerto) tiene que dar al agua.
+            Kind::PuertoModerno if !near_coast(t, c - f * (inf.size.1 * 0.5 + 6.0), 100.0) => return Some("El muelle del puerto tiene que dar al agua: la calle del lado de tierra".into()),
+            Kind::HotelInmigrantes if !self.services.port.pier.as_ref().is_some_and(|p| p.land.distance(c) < 1200.0) && self.services.count(Kind::PuertoModerno) == 0 => return Some("El hotel de inmigrantes va cerca del puerto (a menos de 1,2 km del muelle)".into()),
             _ => {}
         }
-        if inf.cost > self.money {
-            return Some(format!("Fondos insuficientes: hacen falta {} pesos", super::game::fmt_thousands(inf.cost)));
+        if self.costo_servicio(k) > self.money {
+            // [epoca3] `costo_servicio`: con la concesión, la estación la paga la compañía.
+            return Some(format!("Fondos insuficientes: hacen falta {} pesos", super::game::fmt_thousands(self.costo_servicio(k))));
         }
         // Los materiales no frenan la obra: si faltan, se levanta con lo que hay (ver
         // `materiales`).
@@ -682,7 +710,7 @@ impl City {
             return Err(p);
         }
         let inf = info(k);
-        self.money -= inf.cost;
+        self.money -= self.costo_servicio(k); // [epoca3]
         // Con lo que hay: si faltan ladrillos, de adobe o de tablas (ver `materiales`).
         let obra = (!super::materiales::ciudad::servicio_sin_obra(k)).then(|| self.construir_obra(&super::materiales::ciudad::plan_servicio(k)));
         let mut e = Edits::default();
@@ -705,6 +733,7 @@ impl City {
         if k == Kind::UsinaGas {
             self.refresh_gas(t, &mut e);
         }
+        self.servicio_epoca3(t, k, &mut e); // [epoca3] alumbrado eléctrico, tranvías
         self.refresh_redes();
         self.refresh_barrio();
         self.refresh_suelo(t);
@@ -727,6 +756,7 @@ impl City {
         if b.kind == Kind::UsinaGas {
             self.refresh_gas(t, &mut e);
         }
+        self.servicio_epoca3(t, b.kind, &mut e); // [epoca3]
         self.refresh_redes();
         self.refresh_barrio();
         self.refresh_suelo(t);
@@ -888,7 +918,8 @@ impl City {
         }
         // Los faroles tal como se guardaron (no recalculados): si las calles cambiaron después
         // del último reparto, el mes siguiente los pone al día igual que en la partida original.
-        if self.services.lamps.is_empty() && self.services.count(Kind::Serenos) > 0 {
+        // [epoca3] Con faroles de gas o eléctricos, que no quede ninguno de sebo es lo esperado.
+        if self.services.lamps.is_empty() && self.services.count(Kind::Serenos) > 0 && self.epoca.faroles_gas.is_empty() && self.epoca.faroles_electricos.is_empty() {
             // Partidas viejas, sin los faroles guardados.
             self.refresh_lamps(t, e);
         }
@@ -900,6 +931,7 @@ impl City {
             super::epocas::redes::farol_gas(e, IVec2::new(v[0], v[1]), b);
         }
         self.ensanche_rebuild(t, e);
+        self.epoca3_rebuild(t, e); // [epoca3] faroles eléctricos, rieles y postes del tranvía
         self.port_rebuild(t, e);
         self.walls_rebuild(t, e);
         // Escuelas, salud y delito de cada solar (derivados: no se guardan); recursos,
@@ -964,6 +996,7 @@ impl City {
                 out.push(format!("Red: las calles conectadas hasta {} m", inf.radius as i32));
             }
             Kind::Teatro => out.push("Sube el valor del suelo alrededor y atrae a las familias ricas".into()),
+            Kind::Estacion | Kind::UsinaElectrica | Kind::CocherasTranvia | Kind::HotelInmigrantes | Kind::PuertoModerno => out.extend(self.lineas_epoca3(b.kind)), // [epoca3]
             Kind::Lazareto => out.push(format!("En cuarentena: {} personas", self.services.epidemic.quarantined_now())),
             Kind::Chacra => out.push(format!("Trigo y maíz: {} raciones al año (año normal)", (CHACRA_GRAIN_YEAR * b.rinde.max(0.0)) as i32)),
             Kind::Estancia => {

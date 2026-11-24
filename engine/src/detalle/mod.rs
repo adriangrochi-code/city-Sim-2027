@@ -431,10 +431,15 @@ pub enum Id {
     Maceta,
     /// Aldaba o llamador de la puerta de calle.
     Llamador,
+    // [epoca3] Época 3, Inmigración.
+    /// Toldo de lona a rayas sobre la puerta de un almacén o un café (3 m de ancho).
+    Toldo,
+    /// Ropa tendida en una cuerda entre dos palos (patio de conventillo).
+    RopaTendida,
 }
 
 impl Id {
-    pub const TODOS: [Id; 31] = [
+    pub const TODOS: [Id; 33] = [
         Id::Caballo,
         Id::CaballoEnsillado,
         Id::Vaca,
@@ -466,6 +471,8 @@ impl Id {
         Id::FarolGasBrazo,
         Id::Maceta,
         Id::Llamador,
+        Id::Toldo, // [epoca3]
+        Id::RopaTendida,
     ];
 }
 

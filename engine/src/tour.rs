@@ -194,6 +194,9 @@ pub fn city_steps() -> Vec<Act> {
     if std::env::var("MOTOR_SOLO_ARQ").is_ok() {
         return pasos_solo_arquitectura();
     }
+    if std::env::var("MOTOR_EPOCA3").is_ok() {
+        return pasos_epoca3(); // [epoca3]
+    }
     if std::env::var("MOTOR_EPOCA2").is_ok() {
         return pasos_epoca2();
     }
@@ -695,6 +698,131 @@ fn pasos_epoca2() -> Vec<Act> {
         CamFn(|s| d2::view_ensanche(s, 0.5, 420.0, 40.0)),
         WaitIdle("Ciudad Nueva cargada"),
         Shot("epoca2-16-cargada"),
+    ]
+}
+
+// [epoca3]
+/// Recorrido de la época 3, Inmigración (`MOTOR_EPOCA3=1`): la ciudad colonial y la Ciudad
+/// Nueva de las demostraciones anteriores (sin capturas), el paso a la época 3 con el
+/// ferrocarril propio, la estación, la usina eléctrica, los tranvías, el hotel de inmigrantes y
+/// el puerto moderno, cuatro años de crecimiento, calles de muestra con el kit de la época,
+/// capturas de día y de noche, y guardar y cargar.
+fn pasos_epoca3() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use crate::city::game_demo2 as d2;
+    use crate::city::game_demo3 as d3;
+    use crate::city::services::Kind;
+    use Act::*;
+    let c = d::PLAZA;
+    vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.5),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("escuelas, salud, seguridad y saneamiento", d::barrio),
+        Game("crecer 60 meses", d::grow),
+        Game("iglesia matriz", d::iglesia),
+        Game("pasar a la Ciudad Nueva", d2::pasar),
+        Game("ensanche sobre el ejido", d2::ensanche),
+        Game("zonificar el ensanche", d2::zonificar),
+        Game("usina de gas, teatro, agua corriente y colector", d2::servicios),
+        Game("cuatro años de Ciudad Nueva", d2::crecer),
+        Hour(10.0),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        WaitIdle("la Ciudad Nueva"),
+        Shot("epoca3-00-ciudad-nueva"),
+        Game("pasar a la época de la inmigración", d3::pasar),
+        UiShot("epoca3-ui-resumen", |s, u| ui_detail(s, u, ui::Detail::Epoca(1))),
+        Game("estación, usina eléctrica, tranvías, hotel de inmigrantes y puerto", d3::servicios),
+        Game("barrio de fábricas", d3::zonificar),
+        Game("cuatro años de inmigración", d3::crecer),
+        Game("calles de muestra de la época 3", d3::muestras),
+        Game("medir los edificios de los solares", d::medir),
+        Hour(10.0),
+        Hour(10.0),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        WaitIdle("la ciudad de la inmigración"),
+        Shot("epoca3-01-general"),
+        Hour(10.0),
+        CamFn(|_| d3::view_muestra(0, 21.0, 40.0, 50.0, 26.0)),
+        WaitIdle("casas standard"),
+        Shot("epoca3-02-casas-standard"),
+        Hour(10.0),
+        CamFn(|_| d3::view_muestra(1, 21.0, 55.0, 50.0, 24.0)),
+        WaitIdle("edificios de renta"),
+        Shot("epoca3-03-edificios-de-renta"),
+        Hour(10.0),
+        CamFn(|_| d3::view_muestra(2, 18.0, 30.0, 40.0, 20.0)),
+        WaitIdle("almacenes y bares de esquina"),
+        Shot("epoca3-04-almacen-bar"),
+        Hour(10.0),
+        CamFn(|_| d3::view_muestra(3, 21.0, 46.0, 50.0, 26.0)),
+        WaitIdle("casas de altos"),
+        Shot("epoca3-05-casas-de-altos"),
+        Hour(10.0),
+        CamFn(|_| d3::view_muestra(4, 10.0, 48.0, 20.0, 50.0)),
+        WaitIdle("conventillos"),
+        Shot("epoca3-06-conventillos"),
+        Hour(10.0),
+        CamFn(|_| d3::view_muestra(5, 21.0, 60.0, 50.0, 30.0)),
+        WaitIdle("fábricas"),
+        Shot("epoca3-07-fabricas"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::Estacion, 110.0, 28.0)),
+        WaitIdle("estación"),
+        Shot("epoca3-08-estacion"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::UsinaElectrica, 90.0, 28.0)),
+        WaitIdle("usina eléctrica"),
+        Shot("epoca3-09-usina-electrica"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::CocherasTranvia, 90.0, 30.0)),
+        WaitIdle("cocheras de tranvía"),
+        Shot("epoca3-10-cocheras"),
+        Hour(10.0),
+        CamFn(|s| d3::view_tranvia(s, 0.3, 75.0, 30.0)),
+        WaitIdle("línea de tranvía"),
+        Shot("epoca3-11-tranvia"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::HotelInmigrantes, 90.0, 30.0)),
+        WaitIdle("hotel de inmigrantes"),
+        Shot("epoca3-12-hotel-inmigrantes"),
+        Hour(10.0),
+        CamFn(|s| d2::view_servicio(s, Kind::PuertoModerno, 130.0, 30.0)),
+        WaitIdle("puerto moderno"),
+        Shot("epoca3-13-puerto"),
+        // De noche: la luz eléctrica.
+        Hour(21.5),
+        Hour(21.5),
+        CamFn(|s| d3::view_tranvia(s, 0.3, 90.0, 32.0)),
+        WaitIdle("tranvía de noche"),
+        Shot("epoca3-14-noche-tranvia"),
+        Hour(21.5),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        WaitIdle("la ciudad de noche"),
+        Shot("epoca3-15-noche-general"),
+        Hour(10.5),
+        UiShot("epoca3-ui-epoca", |s, u| ui_detail(s, u, ui::Detail::Epoca(0))),
+        UiShot("epoca3-ui-ficha-conventillo", |s, u| {
+            u.open = None;
+            u.detail = None;
+            let g = s.game.as_mut().unwrap();
+            g.set_tool(7);
+            g.inspected = None;
+            if let Some(p) = d3::solar_conventillo(s) {
+                let g = s.game.as_mut().unwrap();
+                g.inspected = Some(p);
+                g.hover = Some(p);
+            }
+        }),
+        UiShot("epoca3-ui-servicios-otros", |s, u| ui_grupo(s, u, crate::city::services::Grupo::Otros)),
+        Cam([c.x + 60.0, c.y + 40.0, 620.0, 215.0, 42.0]),
+        SaveLoad("guardar y cargar la ciudad de la inmigración"),
+        WaitIdle("época 3 cargada"),
+        Shot("epoca3-16-cargada"),
     ]
 }
 

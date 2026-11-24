@@ -18,10 +18,17 @@
 //! En la Ciudad Nueva: casas con fachada neoclásica e italianizante (`structures::estilo`),
 //! rehabilitación de las casas viejas en el lugar ([`rehabilitar`]), usina y faroles de gas,
 //! agua corriente y colectores ([`redes`]), teatro, y las llegadas de la época 2.
+//!
+//! La tercera, **Inmigración y Belle Époque** (1870–1930), sigue a la Ciudad Nueva con la
+//! llegada del ferrocarril y la decisión de la concesión ([`epoca3`]): estación, usina
+//! eléctrica y tranvías ([`tranvias`]), hotel de inmigrantes, puerto moderno, conventillos y el
+//! kit de vóxeles de la época (`structures::epoca3`).
 
 pub mod ensanche;
+pub mod epoca3; // [epoca3]
 pub mod redes;
 pub mod rehabilitar;
+pub mod tranvias; // [epoca3]
 #[cfg(test)]
 mod tests;
 
@@ -110,6 +117,35 @@ pub struct EstadoEpoca {
     pub agua_red: BTreeSet<u32>,
     #[serde(skip)]
     pub cloaca: BTreeSet<u32>,
+    // --- [epoca3] Época 3, Inmigración (las partidas viejas no lo tienen) ---------------
+    /// Mes de la llegada del ferrocarril (el acontecimiento del paso a la época 3).
+    #[serde(default)]
+    pub ferrocarril: Option<u32>,
+    /// Lo que se decidió con el ferrocarril.
+    #[serde(default)]
+    pub concesion: Option<epoca3::Ferrocarril>,
+    /// Faroles eléctricos: columna de diseño y base.
+    #[serde(default)]
+    pub faroles_electricos: Vec<([i32; 2], i32)>,
+    #[serde(default)]
+    pub electrica_firma: (usize, i64, usize),
+    /// Líneas de tranvía.
+    #[serde(default)]
+    pub tranvias: Vec<tranvias::LineaTranvia>,
+    #[serde(default)]
+    pub tranvia_firma: (usize, i64, usize, usize),
+    /// Casas viejas que se dividieron en piezas desde el comienzo de la época 3.
+    #[serde(default)]
+    pub conventillos: u32,
+    /// Inspección de conventillos (menos conversiones, un costo por mes).
+    #[serde(default)]
+    pub inspeccion: bool,
+    /// Fin de la oleada de inmigrantes en curso (mes).
+    #[serde(default)]
+    pub oleada_hasta: Option<u32>,
+    /// Ya se avisó que se puede pasar a la época 3.
+    #[serde(default)]
+    pub avisada3: bool,
 }
 
 /// Un requisito para pasar de época.
@@ -142,6 +178,7 @@ impl City {
     pub fn epoca_siguiente(&self) -> Option<Epoca> {
         match self.epoca.actual {
             Epoca::Colonial => Some(Epoca::CiudadNueva),
+            Epoca::CiudadNueva => Some(Epoca::Inmigracion), // [epoca3]
             _ => None,
         }
     }
@@ -166,7 +203,8 @@ impl City {
                     },
                 ]
             }
-            _ => vec![Requisito { texto: "La época 3 (inmigración) todavía no se juega en el motor".into(), cumplido: false }],
+            Epoca::CiudadNueva => self.requisitos_epoca3(), // [epoca3]
+            _ => vec![Requisito { texto: "La época 4 (Art Déco y Rambla) todavía no se juega en el motor".into(), cumplido: false }],
         }
     }
 
@@ -195,9 +233,18 @@ impl City {
             self.epoca.avisada = true;
             news.push("La ciudad está lista para la Ciudad Nueva: decidí qué hacer con la muralla en el panel de la época".into());
         }
+        // [epoca3] La llegada del ferrocarril y el aviso de que se puede pasar a la época 3.
+        news.extend(self.ferrocarril_mes());
+        if self.epoca.actual == Epoca::CiudadNueva && !self.epoca.avisada3 && self.puede_pasar_epoca() {
+            self.epoca.avisada3 = true;
+            news.push("La ciudad está lista para la época de la inmigración: decidí qué hacer con el ferrocarril en el panel de la época".into());
+        }
         if self.en_epoca(Epoca::CiudadNueva) {
             news.extend(self.redes_mes(t, e));
             news.extend(self.rehabilitar_mes(t, e));
+        }
+        if self.en_epoca(Epoca::Inmigracion) {
+            news.extend(self.epoca3_mes(t, e));
         }
         news
     }
@@ -239,6 +286,10 @@ impl City {
     /// requisitos (demostración y pruebas). Devuelve los vóxeles que cambian y el aviso.
     pub fn pasar_epoca(&mut self, t: &TerrainGen, muralla: Muralla, forzar: bool) -> Result<(Edits, String), String> {
         let Some(sig) = self.epoca_siguiente() else { return Err("No hay otra época jugable todavía".into()) };
+        // [epoca3] A la época 3 se pasa con la decisión del ferrocarril (`pasar_epoca3`).
+        if sig != Epoca::CiudadNueva {
+            return Err("A la época 3 se pasa decidiendo qué hacer con el ferrocarril".into());
+        }
         if self.plaza.is_none() {
             return Err("Primero funda la plaza mayor".into());
         }

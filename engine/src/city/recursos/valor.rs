@@ -238,7 +238,7 @@ impl City {
         // ensanche, el de su manzana [E].
         let teatro = self.services.of_kind(super::super::services::Kind::Teatro).map(|b| 0.14 * (-l.c.distance(b.c) / 350.0).exp()).fold(0.0f32, f32::max);
         let plaza_e = if self.epoca.ensanche.plazas.iter().any(|(c, _)| glam::Vec2::from(*c).distance(l.c) < 110.0) { 0.04 } else { 0.0 };
-        let costa = costa + teatro + plaza_e;
+        let costa = costa + teatro + plaza_e + self.valor_epoca3(l.c); // [epoca3] estación y tranvías
         let (acceso, comodidades, castigo, zona) = match l.kind() {
             Some(ZoneKind::Industrial) => {
                 // Talleres juntos (proveedores, oficiales, carretas), el puerto y la materia

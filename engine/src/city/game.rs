@@ -788,6 +788,11 @@ impl Game {
                     e.extend(ed);
                     aviso
                 }),
+                // [epoca3]
+                Order::PasarEpoca3(fc) => self.city.pasar_epoca3(t, fc, false).map(|(ed, aviso)| {
+                    e.extend(ed);
+                    aviso
+                }),
                 Order::Reforma(id, r) => self.city.rehabilitar(t, id, r, true).map(|ed| {
                     e.extend(ed);
                     format!("{}: hecho", r.nombre())

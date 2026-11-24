@@ -153,6 +153,19 @@ del prototipo.
 
 Se suman a la producción de base del entorno rural. Cantidades: **estimaciones de diseño**.
 
+## 8b. Servicios de las épocas siguientes
+
+Cada servicio tiene su época (`services::epoca_de`); antes de ella la tarjeta dice "Época N" y
+colocarlo responde "Llega con la época …".
+
+| Época | Servicios | Dónde está |
+|---|---|---|
+| 2, Ciudad Nueva | Usina de gas, teatro, usina de agua corriente, colector y desagüe | [arquitectura-epoca2.md](arquitectura-epoca2.md) |
+| 3, Inmigración | **Estación de ferrocarril** (una por ciudad; con la concesión la paga la compañía: `City::costo_servicio`), **usina eléctrica** (faroles eléctricos por su red, a más de 250 m de la plaza), **cocheras de tranvía** (líneas por la red de calles), **hotel de inmigrantes** (uno, cerca del muelle o del puerto moderno) y **puerto moderno** (uno, sobre la costa, con el muelle del lado del agua) | [arquitectura-epoca3.md](arquitectura-epoca3.md) |
+
+La estación (×1,1), el hotel de inmigrantes (×1,2) y el puerto moderno (×1,25) multiplican las
+llegadas (`Services::attraction`) [E].
+
 ## 9. Interfaz
 
 - **Servicios**: pestañas de agua (pozo, aljibe, aguadores), educación, salud (con el lazareto),

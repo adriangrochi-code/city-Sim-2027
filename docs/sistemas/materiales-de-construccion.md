@@ -147,6 +147,14 @@ cualquier otro techo, la casa a dos aguas. La paleta pasó de 64 a 70 materiales
 el render); el shader dibuja las tablas (juntas y veta), las pajitas del barro y las juntas de
 la mampostería.
 
+**Época 3.** Cuatro revoques y cubiertas nuevos (`ROSA_VIEJO`, `AMARILLO_PALIDO`,
+`CELESTE_GASTADO`, `COBRE_VERDE`; la paleta queda en 95 de los 96 lugares del render). Las
+fábricas y galpones de la época 3 son de ladrillo visto y chapa: no se les aplica el cambio de
+cal del catálogo. Los edificios de renta piden ladrillo o piedra (con adobe o tablas no hay
+edificio de renta: queda casa de altos) y, como todas las fachadas nuevas desde la época 2, cal
+para el revoque y hierro para balcones y galerías (ver
+[arquitectura-epoca3.md](arquitectura-epoca3.md)).
+
 ## Interfaz
 
 - **Ficha de un solar**: «Paredes de adobe, techo de teja · Arde poco, húmeda; dura ~30 años sin

@@ -123,7 +123,16 @@ pub const MARMOL: Mat = 88;
 pub const MARMOL_GRIS: Mat = 89;
 /// Vidrio del farol de gas: de noche brilla ámbar (#F2B862).
 pub const LUZ_GAS: Mat = 90;
-pub const COUNT: usize = 91;
+// [epoca3] Época 3, Inmigración (paleta de `docs/epocas/03-inmigracion.md` §11).
+/// Revoque rosa viejo de las fachadas italianizantes (#D4A79A).
+pub const ROSA_VIEJO: Mat = 91;
+/// Revoque amarillo pálido (#E6D49E).
+pub const AMARILLO_PALIDO: Mat = 92;
+/// Revoque celeste gastado (#A9C1C9).
+pub const CELESTE_GASTADO: Mat = 93;
+/// Cúpulas y mansardas de pizarra o cobre verde (#5E8C7E).
+pub const COBRE_VERDE: Mat = 94;
+pub const COUNT: usize = 95;
 
 /// Color base (sRGB) de cada material. El agua no es un vóxel: es una superficie aparte.
 pub const COLORS: [[u8; 3]; COUNT] = [
@@ -218,6 +227,10 @@ pub const COLORS: [[u8; 3]; COUNT] = [
     [228, 225, 218], // mármol blanco
     [142, 140, 136], // mármol gris
     [242, 184, 98],  // vidrio del farol de gas
+    [212, 167, 154], // [epoca3] rosa viejo
+    [230, 212, 158], // [epoca3] amarillo pálido
+    [169, 193, 201], // [epoca3] celeste gastado
+    [94, 140, 126],  // [epoca3] cobre verde / pizarra
 ];
 
 /// ¿El material deja ver la luz de una vela de noche? (reservado para el ciclo día/noche)

@@ -15,23 +15,26 @@ use super::colonial::letrina;
 use crate::buildings::Rng;
 
 /// Frente principal de una casa (para las manchas de las gárgolas): marco, tramo y altura.
-struct Frente {
-    g: Frame,
-    u0: i32,
-    u1: i32,
+pub(super) struct Frente {
+    pub(super) g: Frame,
+    pub(super) u0: i32,
+    pub(super) u1: i32,
     /// Altura de la losa de la azotea (donde desaguan las gárgolas); 0 = sin gárgolas.
-    h: i32,
+    pub(super) h: i32,
 }
 
 /// Dibuja la casa de un solar con su estilo. Llamar con el marco del solar (24 × 76).
 pub fn construir(t: &TerrainGen, e: &mut Edits, f: &Frame, es: &Estilo) {
     let frente = match es.tipo {
+        // [epoca3] Los tipos propios de la época 3 (casa standard, edificio de renta).
+        _ if super::epoca3::propio(es) => super::epoca3::construir3(t, e, f, es),
         Tipo::RanchoCuero => rancho_cuero(t, e, f, es),
         Tipo::Rancho => rancho(t, e, f, es),
         Tipo::CasaTeja | Tipo::CasaAzotea | Tipo::Cuartos => casa_un_piso(t, e, f, es),
         Tipo::CasaAltos => casa_altos(t, e, f, es),
         Tipo::Quinta => quinta(t, e, f, es),
     };
+    super::epoca3::detalles3(e, f, es); // [epoca3] toldos, letreros y ropa tendida
     envejecer(e, f, es);
     if let Some(fr) = frente {
         manchas_gargolas(e, es, &fr);
@@ -39,7 +42,7 @@ pub fn construir(t: &TerrainGen, e: &mut Edits, f: &Frame, es: &Estilo) {
     recortar(e, f);
 }
 
-fn rng(es: &Estilo, salt: u64) -> Rng {
+pub(super) fn rng(es: &Estilo, salt: u64) -> Rng {
     Rng::new(es.seed ^ salt.wrapping_mul(0x2545_F491_4F6C_DD1D))
 }
 
@@ -47,13 +50,13 @@ fn rng(es: &Estilo, salt: u64) -> Rng {
 
 /// Caja hueca: muros de un vóxel y el frente (w0) de dos, de y0 a y1.
 #[allow(clippy::too_many_arguments)]
-fn caja(f: &Frame, e: &mut Edits, u0: i32, u1: i32, y0: i32, y1: i32, w0: i32, w1: i32, m: Mat) {
+pub(super) fn caja(f: &Frame, e: &mut Edits, u0: i32, u1: i32, y0: i32, y1: i32, w0: i32, w1: i32, m: Mat) {
     ring(f, e, u0, u1, y0, y1, w0, w1, m);
     f.fill(e, u0, u1, y0, y1, w0 + 1, w0 + 2, m);
 }
 
 /// Azotea: losa de ladrillo bajo el borde del muro (en `y`).
-fn losa(f: &Frame, e: &mut Edits, u0: i32, u1: i32, w0: i32, w1: i32, y: i32) {
+pub(super) fn losa(f: &Frame, e: &mut Edits, u0: i32, u1: i32, w0: i32, w1: i32, y: i32) {
     f.fill(e, u0 + 1, u1 - 1, y, y + 1, w0 + 1, w1 - 1, AZOTEA);
 }
 
@@ -77,7 +80,7 @@ fn media_agua(f: &Frame, e: &mut Edits, u0: i32, u1: i32, w0: i32, w1: i32, y: i
 
 /// Material de molduras, alféizares y losas de balcón: sillería si hay piedra, si no la cal
 /// de las molduras (o ladrillo, en una casa sin revoque).
-fn piedra_o_moldura(es: &Estilo) -> Mat {
+pub(super) fn piedra_o_moldura(es: &Estilo) -> Mat {
     if es.piedra {
         STONE
     } else if es.muro == BRICK {
@@ -162,13 +165,13 @@ fn reja_detalle(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32
 }
 
 /// [ciudad] Riqueza de la casa para los detalles de la fachada: 0 pobre … 3 rica.
-fn riqueza(es: &Estilo) -> u8 {
+pub(super) fn riqueza(es: &Estilo) -> u8 {
     es.clase.min(3).max(u8::from(es.ornamento >= 2))
 }
 
 /// [ciudad] Aldaba o llamador en la puerta principal (casas con hierro de clase media para
 /// arriba) [E]: en el plano de la hoja (`w`), a 1,5 m del suelo.
-fn llamador(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w: i32) {
+pub(super) fn llamador(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w: i32) {
     if es.hierro && riqueza(es) >= 1 {
         f.detalle(e, crate::detalle::Id::Llamador, (u0 + u1) as f32 * 0.5, 2.6, w as f32, 0.0, es.seed as u32 ^ 0x11A);
     }
@@ -188,7 +191,7 @@ fn puerta(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, rece
 
 /// Portada de la puerta principal (guía §3): 1 marco, 2 pilastras y cornisa, 3 con frontón.
 #[allow(clippy::too_many_arguments)]
-fn portada(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, techo: i32) {
+pub(super) fn portada(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, techo: i32) {
     let m = if es.portada >= 2 { piedra_o_moldura(es) } else { marco(es) };
     match es.portada {
         0 => {}
@@ -213,7 +216,7 @@ fn portada(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, tec
 }
 
 /// Cornisa bajo el pretil o el alero: 1 faja, 2 dos molduras, 3 con dentículos.
-fn cornisa_estilo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i32) {
+pub(super) fn cornisa_estilo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i32) {
     let m = piedra_o_moldura(es);
     match es.cornisa {
         0 => {}
@@ -234,7 +237,7 @@ fn cornisa_estilo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i3
 /// Pretil sobre la azotea: liso, con pilarcitos (y macetones en las casas más ricas) o
 /// balaustrado.
 #[allow(clippy::too_many_arguments)]
-fn pretil(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w0: i32, w1: i32, h: i32) {
+pub(super) fn pretil(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w0: i32, w1: i32, h: i32) {
     let p = es.pretil.max(1);
     ring(f, e, u0, u1, h, h + p, w0, w1, es.muro);
     let m = piedra_o_moldura(es);
@@ -290,7 +293,7 @@ fn pretil(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, w0: i32, w1: 
 }
 
 /// Gárgolas: caños de teja o de hojalata que vuelan 0,5 m sobre la vereda.
-fn gargolas(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, h: i32) {
+pub(super) fn gargolas(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, h: i32) {
     let n = es.gargolas as i32;
     for k in 0..n {
         let u = u0 + (k + 1) * (u1 - u0) / (n + 1);
@@ -321,7 +324,7 @@ fn manchas_gargolas(e: &mut Edits, es: &Estilo, fr: &Frente) {
 }
 
 /// Aljibe o pozo con brocal en un patio.
-fn agua_patio(f: &Frame, e: &mut Edits, es: &Estilo, u: i32, w: i32) {
+pub(super) fn agua_patio(f: &Frame, e: &mut Edits, es: &Estilo, u: i32, w: i32) {
     if es.aljibe {
         aljibe(f, e, u, w);
     } else if es.pozo {
@@ -368,7 +371,7 @@ fn frutal(f: &Frame, e: &mut Edits, u: i32, w: i32, seed: u64) {
 /// fundido, plana o volada sobre una losita de mármol, con el guardapolvo de moldura arriba y
 /// un frontoncito en las casas más ornamentadas.
 #[allow(clippy::too_many_arguments)]
-fn ventana_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1: i32) {
+pub(super) fn ventana_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32, y1: i32) {
     let abierta = hash(f.at(u0, y0, 0), es.seed ^ 0x9E0) < 0.45;
     opening(f, e, u0, u1, y0, y1, 2, if abierta { WINDOW } else { es.carpinteria });
     if abierta {
@@ -398,7 +401,7 @@ fn ventana_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y0: i32,
 /// puerta de calle abierta contra las jambas, el zaguán de mármol y el cancel de hierro y
 /// vidrio al fondo. Escalón de mármol sobre la vereda.
 #[allow(clippy::too_many_arguments)]
-fn puerta_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, zaguan: bool) {
+pub(super) fn puerta_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, zaguan: bool) {
     if zaguan {
         opening(f, e, u0, u1, 0, hp, 5, if es.cancel { HIERRO_FUNDIDO } else { es.carpinteria });
         f.raw_fill(e, u0, u0 + 1, 0, hp - 1, 1, 3, es.carpinteria);
@@ -423,7 +426,7 @@ fn puerta_neo(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hp: i32, 
 }
 
 /// Pilastras de la fachada: en los extremos y, con `pilastras == 2`, entre los vanos.
-fn pilastras(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, vanos: &[(i32, i32, Hueco)], y0: i32, y1: i32) {
+pub(super) fn pilastras(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, vanos: &[(i32, i32, Hueco)], y0: i32, y1: i32) {
     if es.pilastras == 0 {
         return;
     }
@@ -463,7 +466,7 @@ pub fn palmera(f: &Frame, e: &mut Edits, u: i32, w: i32, alto: i32, seed: u64) {
 /// Farol de hierro con brazo, colgado de la fachada. [ciudad] En la ciudad es el modelo de
 /// detalle (de aceite; de gas en la Ciudad Nueva desde 1853, cuando se enciende la usina de los
 /// Ísola [F, ver `docs/sistemas/arquitectura-epoca2.md`]); si no, dos vóxeles.
-fn farol_fachada(f: &Frame, e: &mut Edits, es: &Estilo, u: i32) {
+pub(super) fn farol_fachada(f: &Frame, e: &mut Edits, es: &Estilo, u: i32) {
     let id = if es.neo && es.anio >= 1853 { crate::detalle::Id::FarolGasBrazo } else { crate::detalle::Id::FarolBrazo };
     if !f.detalle(e, id, u as f32 + 0.5, 6.0, 0.0, 0.0, es.seed as u32 ^ 0xFA0) {
         f.raw(e, u, 8, -1, IRON);
@@ -480,7 +483,7 @@ fn farol_neo(es: &Estilo) -> bool {
 // --- Fachada ------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Hueco {
+pub(super) enum Hueco {
     Puerta,
     Tienda,
     Ventana,
@@ -584,7 +587,7 @@ fn repartir(es: &Estilo, u0: i32, u1: i32, ancho_puerta: i32) -> Vec<(i32, i32, 
 
 /// Fachada de la planta baja entre `u0` y `u1`, con el techo de la planta en `techo`.
 /// Devuelve los vanos (para alinear la planta alta).
-fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i32) -> Vec<(i32, i32, Hueco)> {
+pub(super) fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i32) -> Vec<(i32, i32, Hueco)> {
     if let Some(z) = es.zocalo {
         f.fill(e, u0, u1, 0, es.h_zocalo, 0, 1, z);
     }
@@ -644,7 +647,7 @@ fn fachada_pb(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, techo: i3
 }
 
 /// Tapia con portón sobre el tramo libre del frente (casas que no ocupan todo el solar).
-fn tapia(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hasta: i32) {
+pub(super) fn tapia(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hasta: i32) {
     if u1 - u0 < 2 {
         return;
     }
@@ -660,7 +663,7 @@ fn tapia(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, hasta: i32) {
 }
 
 /// Marco con la esquina siempre del lado u = 0 (espejado si la calle lateral está a la derecha).
-fn marco_esquina(f: &Frame, es: &Estilo) -> Frame {
+pub(super) fn marco_esquina(f: &Frame, es: &Estilo) -> Frame {
     if es.esquina == 2 {
         Frame { origin: f.origin + f.du * (f.width - 1), du: -f.du, ..*f }
     } else {
@@ -670,7 +673,7 @@ fn marco_esquina(f: &Frame, es: &Estilo) -> Frame {
 
 /// Fachada lateral de una casa de esquina: zócalo, cornisa y ventanas sobre la calle de al
 /// lado, y la entrada por la arista (pilar de esquina) o por la ochava.
-fn esquina(f: &Frame, e: &mut Edits, es: &Estilo, fondo: i32, techo: i32) {
+pub(super) fn esquina(f: &Frame, e: &mut Edits, es: &Estilo, fondo: i32, techo: i32) {
     let side = f.left_side();
     if let Some(z) = es.zocalo {
         side.fill(e, 0, fondo, 0, es.h_zocalo, 0, 1, z);
@@ -722,7 +725,7 @@ fn esquina(f: &Frame, e: &mut Edits, es: &Estilo, fondo: i32, techo: i32) {
 
 // --- Casa de una planta (teja, azotea, cuartos) --------------------------------------------
 
-fn casa_un_piso(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<Frente> {
+pub(super) fn casa_un_piso(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<Frente> {
     let f = &marco_esquina(f0, es);
     let mut r = rng(es, 0xCA5A);
     let azotea = es.cubierta == Cubierta::Azotea;
@@ -785,7 +788,7 @@ fn casa_un_piso(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Optio
 }
 
 /// Mirador: cuarto alto con ventanas a los cuatro lados y su azotea.
-fn mirador(g: &Frame, e: &mut Edits, es: &Estilo, u: i32, w: i32, h: i32) {
+pub(super) fn mirador(g: &Frame, e: &mut Edits, es: &Estilo, u: i32, w: i32, h: i32) {
     let s = 6;
     caja(g, e, u, u + s, h, h + 6, w, w + s, es.muro);
     losa(g, e, u, u + s, w, w + s, h + 5);
@@ -801,7 +804,7 @@ fn mirador(g: &Frame, e: &mut Edits, es: &Estilo, u: i32, w: i32, h: i32) {
 
 /// Patios, alas, segundo patio, fondo, ampliaciones, huerta, corral y letrina.
 #[allow(clippy::too_many_arguments)]
-fn fondo_casa(t: &TerrainGen, e: &mut Edits, g: &Frame, es: &Estilo, x0: i32, x1: i32, fd: i32, h: i32, r: &mut Rng) {
+pub(super) fn fondo_casa(t: &TerrainGen, e: &mut Edits, g: &Frame, es: &Estilo, x0: i32, x1: i32, fd: i32, h: i32, r: &mut Rng) {
     let azotea = es.cubierta == Cubierta::Azotea;
     let depth = g.depth;
     let ha = (h - 1).max(6);
@@ -971,7 +974,7 @@ fn fondo_casa(t: &TerrainGen, e: &mut Edits, g: &Frame, es: &Estilo, x0: i32, x1
 
 // --- Casa de altos ------------------------------------------------------------------------
 
-fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<Frente> {
+pub(super) fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<Frente> {
     let g = marco_esquina(f0, es);
     let mut r = rng(es, 0xA170);
     let (x0, x1) = (0, g.width);
@@ -1102,14 +1105,14 @@ fn casa_altos(t: &TerrainGen, e: &mut Edits, f0: &Frame, es: &Estilo) -> Option<
 
 /// El fondo de una casa desde la profundidad `w` (galpón, ampliaciones, huerta, letrina).
 #[allow(clippy::too_many_arguments)]
-fn fondo_casa_desde(t: &TerrainGen, e: &mut Edits, g: &Frame, es: &Estilo, x0: i32, x1: i32, w: i32, h: i32, r: &mut Rng) {
+pub(super) fn fondo_casa_desde(t: &TerrainGen, e: &mut Edits, g: &Frame, es: &Estilo, x0: i32, x1: i32, w: i32, h: i32, r: &mut Rng) {
     let sub = Frame { seed: g.seed, ..g.sub(0, w, g.width, g.depth - w, 0) };
     fondo_casa(t, e, &sub, &Estilo { patios: 0, ..*es }, x0, x1, 0, h, r);
 }
 
 /// Balcón: losa volada de piedra o de cal sobre ménsulas y baranda de hierro (o de madera,
 /// con su tejadito, en las casas de familias canarias).
-fn balcon(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i32) {
+pub(super) fn balcon(f: &Frame, e: &mut Edits, es: &Estilo, u0: i32, u1: i32, y: i32) {
     if es.balcon_madera {
         f.raw_fill(e, u0, u1, y, y + 1, -2, 0, WOOD);
         f.raw_fill(e, u0, u1, y + 1, y + 3, -2, -1, WOOD_DARK);

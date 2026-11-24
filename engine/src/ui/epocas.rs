@@ -15,6 +15,10 @@ use egui::{vec2, Align2, RichText};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Act {
     Pasar(Muralla),
+    /// [epoca3] Pasar a la época 3 con la decisión del ferrocarril.
+    Pasar3(crate::city::epocas::epoca3::Ferrocarril),
+    /// [epoca3] Inspeccionar los conventillos (o dejar de hacerlo).
+    Inspeccion,
     Ensanche,
     Reforma(u32, Reforma),
     ResumenVisto,
@@ -23,6 +27,8 @@ pub enum Act {
 pub fn apply(a: Act, game: &mut Game) {
     match a {
         Act::Pasar(m) => game.orders.push(Order::PasarEpoca(m)),
+        Act::Pasar3(fc) => game.orders.push(Order::PasarEpoca3(fc)),
+        Act::Inspeccion => game.city.epoca.inspeccion = !game.city.epoca.inspeccion,
         Act::Ensanche => {
             if game.city.en_epoca(Epoca::CiudadNueva) {
                 game.tool = Tool::Ensanche;
@@ -56,7 +62,7 @@ pub fn chip(ui: &mut egui::Ui, game: &Game, acts: &mut Vec<UiAction>) {
     let listo = c.puede_pasar_epoca();
     let txt = RichText::new(c.epoca.actual.nombre()).small();
     let txt = if listo { txt.color(theme::GOOD).strong() } else { txt.color(theme::INK_SOFT) };
-    let tip = if listo { "¡Se puede pasar a la época siguiente! Clic: decidir qué hacer con la muralla".to_string() } else { "Clic: la época, sus requisitos y lo que trae la siguiente".to_string() };
+    let tip = if listo { "¡Se puede pasar a la época siguiente! Clic: la decisión del paso (la muralla o el ferrocarril)".to_string() } else { "Clic: la época, sus requisitos y lo que trae la siguiente".to_string() };
     if ui.add(egui::Label::new(txt).sense(egui::Sense::click())).on_hover_text(tip).clicked() {
         acts.push(UiAction::Abrir(super::Detail::Epoca(0)));
     }
@@ -114,6 +120,24 @@ fn actual(ui: &mut egui::Ui, game: &Game, acts: &mut Vec<UiAction>) {
         Epoca::Colonial => {
             ui.label(RichText::new("La plaza fuerte crece apretada dentro de la muralla. Para abrir la ciudad al país hacen falta:").small());
         }
+        // [epoca3]
+        Epoca::Inmigracion => {
+            ui.label(RichText::new("Los barcos no dejan de llegar: estación y ferrocarril, tranvías, luz eléctrica, puerto moderno. Si falta vivienda barata, las casas viejas se vuelven conventillos.").small());
+            ui.add_space(4.0);
+            super::section(ui, "Lo de esta época");
+            egui::Grid::new("ep3").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                super::kv(ui, "Ferrocarril", c.epoca.concesion.map_or("—".to_string(), |f| f.nombre().to_string()), theme::INK);
+                super::kv(ui, "Faroles eléctricos / de gas", format!("{} / {}", c.epoca.faroles_electricos.len(), c.epoca.faroles_gas.len()), theme::INK);
+                super::kv(ui, "Líneas de tranvía", format!("{} ({})", c.epoca.tranvias.len(), if c.epoca.tranvias.iter().any(|l| l.electrica) { "eléctricas" } else { "a caballo" }), theme::INK);
+                super::kv(ui, "Sin casa", format!("{}", c.deficit_vivienda()), theme::INK);
+                super::kv(ui, "Conventillos", format!("{}", c.conventillos()), theme::INK);
+                super::kv(ui, "Pasajes por mes", format!("{} pesos", c.pasajes()), theme::INK);
+            });
+            let txt = if c.epoca.inspeccion { "Dejar de inspeccionar los conventillos" } else { "Inspeccionar los conventillos" };
+            if ui.button(RichText::new(txt).small()).on_hover_text(format!("La inspección municipal frena la división de casas en piezas (menos conventillos nuevos), pero cuesta {} pesos por mes y la gente sin casa sigue sin casa.", crate::city::epocas::epoca3::COSTO_INSPECCION)).clicked() {
+                acts.push(UiAction::Epoca(Act::Inspeccion));
+            }
+        }
         _ => {
             ui.label(RichText::new("La muralla cae y la ciudad respira: ensanche sobre el ejido, gas, teatro, agua corriente y colectores. Las casas viejas se modernizan de a poco.").small());
             ui.add_space(4.0);
@@ -135,7 +159,27 @@ fn actual(ui: &mut egui::Ui, game: &Game, acts: &mut Vec<UiAction>) {
     }
     if c.epoca_siguiente().is_none() {
         ui.add_space(4.0);
-        ui.label(RichText::new("La época siguiente (inmigración y Belle Époque) todavía no se juega en el motor.").small().color(theme::INK_SOFT));
+        ui.label(RichText::new("La época siguiente (Art Déco y Rambla) todavía no se juega en el motor.").small().color(theme::INK_SOFT));
+        return;
+    }
+    // [epoca3] De la Ciudad Nueva a la inmigración: la decisión del ferrocarril.
+    if e == Epoca::CiudadNueva {
+        super::section(ui, "Requisitos para la época de la inmigración");
+        for r in c.requisitos_epoca() {
+            ui.label(RichText::new(format!("{} {}", if r.cumplido { "✔" } else { "·" }, r.texto)).small().color(if r.cumplido { theme::GOOD } else { theme::INK }));
+        }
+        ui.add_space(4.0);
+        super::section(ui, "La decisión del ferrocarril");
+        let listo = c.puede_pasar_epoca();
+        for f in crate::city::epocas::epoca3::Ferrocarril::ALL {
+            ui.horizontal_wrapped(|ui| {
+                let b = ui.add_enabled(listo, egui::Button::new(RichText::new(f.nombre()).small()));
+                if b.on_hover_text(f.desc()).on_disabled_hover_text("Faltan requisitos").clicked() {
+                    acts.push(UiAction::Epoca(Act::Pasar3(f)));
+                }
+            });
+        }
+        ui.label(RichText::new("Al pasar: llegadas de la época 3 (italianos, españoles y de todas partes), casas standard, edificios de renta, almacenes y bares de esquina, fábricas, estación, usina eléctrica, tranvías, hotel de inmigrantes y puerto moderno.").small().color(theme::INK_SOFT));
         return;
     }
     super::section(ui, "Requisitos para la Ciudad Nueva");

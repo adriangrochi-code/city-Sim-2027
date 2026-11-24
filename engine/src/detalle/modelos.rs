@@ -110,6 +110,19 @@ pub fn paleta(id: Id, semilla: u32) -> Paleta {
         }
         // Aldaba de hierro o llamador de bronce.
         Id::Llamador => set(r::HIERRO, if s % 3 == 0 { [40, 36, 34] } else { [156, 118, 58] }),
+        // [epoca3] Lona de rayas: verde, rojo, azul o marrón con crudo [E].
+        Id::Toldo => {
+            set(r::CAPA, [[52, 96, 64], [150, 46, 40], [44, 70, 120], [120, 84, 52]][(s % 4) as usize]);
+            set(r::CLARO, [232, 222, 196]);
+            set(r::HIERRO, [36, 34, 33]);
+        }
+        // [epoca3] Sábanas, camisas, delantales y pantalones de todos los colores.
+        Id::RopaTendida => {
+            set(r::ROPA, [[222, 216, 200], [176, 60, 52], [70, 96, 150], [200, 180, 120]][(s % 4) as usize]);
+            set(r::CALZON, [[60, 58, 70], [96, 80, 60], [230, 226, 214]][((s >> 3) % 3) as usize]);
+            set(r::ACENTO, [[214, 120, 60], [120, 150, 90], [190, 170, 200]][((s >> 6) % 3) as usize]);
+            set(r::CLARO, [236, 234, 226]);
+        }
         Id::BrocalAljibe | Id::Cruz => {
             set(r::CAPA, [206, 202, 194]);
             set(r::HIERRO, [36, 34, 34]);
@@ -136,7 +149,7 @@ pub fn paleta(id: Id, semilla: u32) -> Paleta {
 /// ¿Lleva sombra de contacto en el suelo? (los animales y lo que tiene huella).
 pub fn con_sombra(id: Id) -> bool {
     // Lo que cuelga de una fachada no toca el suelo.
-    !matches!(id, Id::Bote | Id::Veleta | Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta | Id::FarolBrazo | Id::FarolGasBrazo | Id::Maceta | Id::Llamador)
+    !matches!(id, Id::Bote | Id::Veleta | Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta | Id::FarolBrazo | Id::FarolGasBrazo | Id::Maceta | Id::Llamador | Id::Toldo)
 }
 
 /// Arma un modelo de la biblioteca.
@@ -173,6 +186,8 @@ pub fn armar(id: Id) -> Modelo {
         Id::FarolGasBrazo => farol_gas_brazo(),
         Id::Maceta => maceta(),
         Id::Llamador => llamador(),
+        Id::Toldo => toldo(), // [epoca3]
+        Id::RopaTendida => ropa_tendida(),
     }
 }
 
@@ -723,6 +738,45 @@ fn llamador() -> Modelo {
     l.caja(Fijo, r::HIERRO, [-2, 0, 1], [2, 4, 2]);
     l.borrar([-1, 1, 1], [1, 3, 2]);
     l.armar("llamador")
+}
+
+// [epoca3] Detalles de la época 3 (ver `docs/sistemas/arquitectura-epoca3.md`).
+
+/// Toldo de lona a rayas de 3 m sobre la puerta de un almacén o un café: brazos de hierro y la
+/// lona inclinada hacia la vereda (1,25 m de vuelo) con su faldón.
+fn toldo() -> Modelo {
+    let mut l = Lienzo::new([-24, -6, 0], [24, 10, 21]);
+    for z in 0..20 {
+        let y = 9 - z / 3;
+        for x in -24..24 {
+            let raya = if (x + 24) / 4 % 2 == 0 { r::CAPA } else { r::CLARO };
+            l.punto(Fijo, raya, x, y, z);
+        }
+    }
+    // Faldón con borde ondeado.
+    for x in -24..24 {
+        let raya = if (x + 24) / 4 % 2 == 0 { r::CAPA } else { r::CLARO };
+        let largo = if (x as i32).rem_euclid(4) < 2 { 4 } else { 3 };
+        l.caja(Fijo, raya, [x, 3 - largo, 19], [x + 1, 3, 20]);
+    }
+    for x in [-24, 23] {
+        l.caja(Fijo, r::HIERRO, [x, 2, 0], [x + 1, 3, 20]);
+    }
+    l.armar("toldo")
+}
+
+/// Ropa tendida: dos palos, la cuerda y siete prendas colgadas (3 m).
+fn ropa_tendida() -> Modelo {
+    let mut l = Lienzo::new([-26, 0, -1], [26, 32, 2]);
+    for x in [-26, 24] {
+        l.caja(Fijo, r::MADERA_OSC, [x, 0, 0], [x + 2, 31, 1]);
+    }
+    l.caja(Fijo, r::MADERA_OSC, [-24, 29, 0], [24, 30, 1]);
+    let prendas: [(i32, i32, i32, u8); 7] = [(-22, 6, 12, r::CLARO), (-15, 5, 8, r::ROPA), (-9, 4, 11, r::CALZON), (-4, 7, 14, r::CLARO), (4, 5, 9, r::ACENTO), (10, 6, 10, r::ROPA), (17, 5, 12, r::CALZON)];
+    for (x, ancho, largo, c) in prendas {
+        l.caja(Fijo, c, [x, 29 - largo, 0], [x + ancho, 29, 1]);
+    }
+    l.armar("ropa tendida")
 }
 
 /// Palenque: dos postes y el travesaño para atar los caballos.

@@ -51,6 +51,10 @@ pub struct Contexto {
     /// sigue dibujando con ellos, así la casa reformada conserva su huella.
     #[serde(default)]
     pub antes: u8,
+    /// [epoca3] Año en que la casa se dividió en piezas de alquiler (conventillo; 0 = nunca).
+    /// La conversión no cambia la fachada: la casa vieja queda, con sus piezas en el patio.
+    #[serde(default)]
+    pub conventillo: u16,
 }
 
 /// Tradición constructiva según el origen de la familia (ver [`RASGOS`]). Es un ajuste de
@@ -384,6 +388,13 @@ pub struct Estilo {
     pub palmera: bool,
     /// Año de la fachada modernizada (0 = la original).
     pub reforma: u16,
+    // --- [epoca3] Época 3, Inmigración (ver `structures::epoca3`) ------------------------
+    /// Tipo del kit de la época 3 (`epoca3::tipo3`; 0 = no es de la época 3).
+    pub e3: u8,
+    /// Remate de la esquina: 0 nada, 1 cúpula, 2 mansarda.
+    pub remate: u8,
+    /// Año en que la casa pasó a conventillo (0 = nunca).
+    pub conventillo: u16,
     pub seed: u64,
 }
 
@@ -480,7 +491,7 @@ pub fn sucio(m: Mat) -> Mat {
 
 /// ¿Es un revoque de cal (limpio o manchado)?
 pub fn es_cal(m: Mat) -> bool {
-    matches!(m, CAL | CAL_OCRE | CAL_ROSA | CAL_AZUL | CAL_HUESO | CAL_ALMAGRE | CAL_GRIS | CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA | HUESO_SUCIA | ALMAGRE_SUCIA | GRIS_SUCIA | OCRE_CLARO | OCRE_CLARO_SUCIA | GRIS_PIEDRA | GRIS_PIEDRA_SUCIA)
+    matches!(m, CAL | CAL_OCRE | CAL_ROSA | CAL_AZUL | CAL_HUESO | CAL_ALMAGRE | CAL_GRIS | CAL_SUCIA | OCRE_SUCIA | ROSA_SUCIA | AZUL_SUCIA | HUESO_SUCIA | ALMAGRE_SUCIA | GRIS_SUCIA | OCRE_CLARO | OCRE_CLARO_SUCIA | GRIS_PIEDRA | GRIS_PIEDRA_SUCIA | ROSA_VIEJO | AMARILLO_PALIDO | CELESTE_GASTADO) // [epoca3]
 }
 
 /// El color limpio de un revoque manchado.
@@ -524,6 +535,8 @@ pub fn estilo(ctx: &Contexto, m_real: &MaterialesObra, uso: Uso, nivel: u8, alta
     // Las casas del kit de la época 2 siguen las reglas de su tiempo aunque la partida (en
     // historia alternativa) llegue antes a la Ciudad Nueva.
     let anio = if ctx.epoca >= 1 { anio.max(ANIO_CIUDAD_NUEVA) } else { anio };
+    // [epoca3] Y las de la época 3, las de la suya.
+    let anio = if ctx.epoca >= 2 { anio.max(super::epoca3::ANIO_INMIGRACION) } else { anio };
     let per = periodo(anio);
     let s = seed ^ (ctx.giro as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xE57110;
     let mut r = Rng::new(s);
@@ -757,6 +770,9 @@ pub fn estilo(ctx: &Contexto, m_real: &MaterialesObra, uso: Uso, nivel: u8, alta
         marmol: false,
         palmera: false,
         reforma: 0,
+        e3: 0,
+        remate: 0,
+        conventillo: ctx.conventillo,
         seed: s,
     };
     // Rejas por clase (§6.4) [E]; sin hierro, postigos.
@@ -979,6 +995,11 @@ pub fn estilo(ctx: &Contexto, m_real: &MaterialesObra, uso: Uso, nivel: u8, alta
     if ctx.epoca >= 1 {
         // Casa nueva de la Ciudad Nueva: fachada y algo de planta de la época 2.
         fachada_neo(&mut e, m, ra, ctx, &mut r, false);
+        // [epoca3] La época 3 sigue con esa base (la casa standard sale de la casa de patio
+        // neoclásica) y le pone su tipología, sus colores y sus remates.
+        if ctx.epoca >= 2 {
+            super::epoca3::estilo3(&mut e, m, ctx, &mut r, nivel, alta);
+        }
     } else if ctx.reforma > 0 {
         // Casa vieja modernizada en el lugar: la misma planta (todo lo de arriba sale igual),
         // y solo la fachada se rehace con otra tirada.
@@ -988,6 +1009,10 @@ pub fn estilo(ctx: &Contexto, m_real: &MaterialesObra, uso: Uso, nivel: u8, alta
         if e.neo {
             e.reforma = ctx.reforma;
         }
+    }
+    // [epoca3] Casa vieja dividida en piezas de alquiler: la misma fachada, el patio lleno.
+    if ctx.conventillo > 0 {
+        super::epoca3::conventillar(&mut e);
     }
     e
 }
@@ -1236,6 +1261,13 @@ impl Estilo {
 
     /// Nombre para la ficha: "casa de azotea con zaguán, dos patios y aljibe".
     pub fn nombre(&self) -> String {
+        // [epoca3] Los tipos de la época 3 y el conventillo.
+        if self.conventillo > 0 {
+            return format!("conventillo: casa vieja dividida en piezas desde {}", self.conventillo);
+        }
+        if let Some(n) = super::epoca3::nombre3(self) {
+            return n;
+        }
         let mut base = match (self.tipo, self.uso) {
             (Tipo::CasaAzotea, Uso::Vivienda) if self.neo && self.reforma == 0 => "casa neoclásica de patio".to_string(),
             (Tipo::CasaAltos, Uso::Vivienda) if self.neo && self.reforma == 0 && !self.renta => "casa de altos neoclásica".to_string(),

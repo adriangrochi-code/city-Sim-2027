@@ -182,6 +182,58 @@ Duración objetivo: entre 6 y 10 horas (es la época más densa).
 
 ---
 
+## 14. Qué está en el motor (v0.12.x)
+
+Código: `engine/src/city/epocas/epoca3.rs` (paso de época, ferrocarril, oleadas, conventillos,
+estación), `city/epocas/tranvias.rs` (alumbrado eléctrico y tranvías), `structures/epoca3.rs`
+(kit de vóxeles), `ui/epocas.rs` y `ui/services.rs`. Fuentes y marcas [F]/[E]:
+[../sistemas/arquitectura-epoca3.md](../sistemas/arquitectura-epoca3.md).
+
+**Paso de época.** Desde la Ciudad Nueva: 3.000 habitantes, el teatro, el ensanche y el
+acontecimiento de la **llegada del ferrocarril** (modo fiel: entre 1867 y 1869, seguro en 1869;
+el primer tren corrió el 1 de enero de 1869; historia alternativa: con teatro y 2.500
+habitantes, 1/36 por mes). La decisión, en el panel de la época: dar la línea en
+**concesión** (la compañía de ultramar paga un canon de 25.000 pesos y levanta la estación; los
+pasajes son suyos) o **construirla con dinero propio** (la estación cuesta 30.000 y los pasajes
+entran cada mes). Pantalla de resumen de la Ciudad Nueva y crónica. Las partidas viejas
+cargan como estaban (todo lo nuevo es `#[serde(default)]`).
+
+**Inmigración.** La población llega con la tabla de la época 3. La estación, el hotel de
+inmigrantes y el puerto moderno traen más gente; las **oleadas** (*crisis en la Península*)
+multiplican las llegadas por 1,8 durante 8 meses (más probables en las décadas de 1880 y
+1905–1913 en el modo fiel).
+
+**Conventillos.** Si hay más de 40 personas sin casa (80 con hotel de inmigrantes), cada mes
+hasta tres casas viejas de familias modestas, cerca de la plaza o del puerto, se dividen en
+piezas: misma fachada, densidad alta (más familias), patio lleno de piezas con ropa tendida,
+más insalubridad. El jugador puede **inspeccionarlos** desde el panel de la época (menos
+conversiones, 120 pesos por mes).
+
+**Casas de la época.** Lo que se levanta después del paso usa el kit de la época 3: casa
+standard (casa chorizo) con zaguán y patio lateral con galería de hierro, casa de altos
+italianizante, edificio de renta de 3 o 4 plantas con cúpula o mansarda en la esquina, almacén
+y bar de esquina con toldo; fábricas de ladrillo con chimenea y galpones de chapa en la zona
+industrial. Paleta de la época: rosa viejo, amarillo pálido, celeste gastado, pizarra / cobre
+verde.
+
+**Servicios.** Estación de ferrocarril (una por ciudad), usina eléctrica (faroles eléctricos
+cada 35 m por su red, hasta 2 km, que reemplazan a los de gas; luz más fuerte por la misma vía
+del shader; menos delito), cocheras de tranvía (dos líneas por la red de calles, a la plaza y
+a la punta más lejana; a caballo, eléctricas con una usina: postes, brazos y cable; suben el
+valor del suelo a menos de 300 m, así la ciudad crece donde llegan), hotel de inmigrantes y
+puerto moderno (muelle de piedra con grúas de pórtico, del lado del agua).
+
+**Recorrido.** `MOTOR_EPOCA3=1 motor --demo-ciudad <carpeta>`: la ciudad colonial y la Ciudad
+Nueva, el paso con el ferrocarril propio, los servicios, cuatro años de inmigración, calles de
+muestra del kit, capturas de día y de noche, y "guardar y cargar …: IGUAL".
+
+**Falta** (de este documento): coches de tranvía, trenes, carros de reparto y organilleros
+como agentes; zonas separadas por riqueza; colonias agrícolas y pueblos-estación en el mapa
+del país; el puerto por fases; escuela pública, bomberos, policía, hospital de pabellones,
+cafés y clubes; frigoríficos y molinos; colectividades con mecánicas propias; huelga general,
+gripe, guerra, exposición y crac; luz blanca de las lámparas de arco; plátanos en las veredas;
+transición a la época 4.
+
 ## 13. Preguntas abiertas de la época
 
 1. ¿Las colectividades de inmigrantes tienen mecánicas propias (fiestas, comercios únicos) o

@@ -17,6 +17,7 @@ pub mod epocas;
 pub mod game;
 pub mod game_demo;
 pub mod game_demo2;
+pub mod game_demo3; // [epoca3]
 pub mod lots;
 pub mod materiales;
 pub mod poblacion;
@@ -216,6 +217,9 @@ fn builder_for(kind: ZoneKind, density: lots::Density, level: u8, seed: u64, tec
         (ZoneKind::Comercial, _) if ctx.puerto && pick < 40 => &colonial::deposito,
         (ZoneKind::Comercial, _) if density == Alta || pick < 45 => &colonial::recova,
         (ZoneKind::Comercial, _) => &colonial::almacen,
+        // [epoca3] Fábricas de ladrillo con chimenea y galpones de chapa.
+        (ZoneKind::Industrial, 2..) if ctx.epoca >= 2 && pick < 70 => &crate::structures::epoca3::fabrica,
+        (ZoneKind::Industrial, 2..) if ctx.epoca >= 2 => &crate::structures::epoca3::galpon_chapa,
         (ZoneKind::Industrial, 1) if pick < 45 => &colonial::panaderia,
         (ZoneKind::Industrial, 1) => &colonial::taller,
         (ZoneKind::Industrial, 2) if pick < 45 => &colonial::veleria,
@@ -241,9 +245,14 @@ fn build_lot(t: &TerrainGen, c: Vec2, f: Vec2, seed: u64, kind: ZoneKind, densit
                 let b = builder_for(kind, density, level, seed, techo, &o.contexto);
                 let nom = materiales::ciudad::nominal(kind, density, level, seed, techo);
                 let cal = arquitectura::cal_de_legado(level, seed, &o);
+                // [epoca3] Las fábricas y galpones de la época 3 son de ladrillo visto y chapa:
+                // no se encalan ni se pintan.
+                let propio = kind == ZoneKind::Industrial && level >= 2 && o.contexto.epoca >= 2;
                 build_rotated(t, c, f, LOT_W, LOT_D, seed, &|t: &TerrainGen, e: &mut Edits, fr: &crate::structures::Frame| {
                     b(t, e, fr);
-                    materiales::ciudad::remapear_con_cal(e, &o, &nom, seed, cal);
+                    if !propio {
+                        materiales::ciudad::remapear_con_cal(e, &o, &nom, seed, cal);
+                    }
                 })
             }
         },
@@ -904,7 +913,7 @@ impl City {
         // Los barcos (con sus pobladores) los trae el puerto (`services::port`).
         // La gente que ya vive en la ciudad cuenta cómo le va: su felicidad atrae o espanta.
         let animo = if self.poblacion.fundada { (0.75 + 0.5 * self.poblacion.stats.felicidad).clamp(0.8, 1.15) } else { 1.0 };
-        let factor = self.economy.arrivals_factor() * work * self.services.attraction() * animo;
+        let factor = self.economy.arrivals_factor() * work * self.services.attraction() * animo * self.factor_inmigracion(); // [epoca3] oleadas
         let arrivals = ((4.0 + pop as f32 * 0.03) * factor) as i32;
         // Clima del mes: cosechas, pasturas, sequía y el caudal de los ríos.
         let (weather, cnews) = self.climate.month_tick(self.month % 12);

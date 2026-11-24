@@ -62,6 +62,10 @@ fn pick(seed: u64) -> u64 {
 pub fn legado(kind: ZoneKind, density: Density, level: u8, seed: u64, ctx: &Contexto) -> bool {
     match (kind, level) {
         (ZoneKind::Industrial, _) => true,
+        // [epoca3] En la época 3 el comercio va en casas y edificios de renta (el almacén y bar
+        // de esquina, el comercio en la planta baja); quedan los depósitos del puerto.
+        (ZoneKind::Comercial, 2) if ctx.epoca >= 2 => false,
+        (ZoneKind::Comercial, l) if l >= 3 && ctx.epoca >= 2 => ctx.puerto && pick(seed) < 25,
         (ZoneKind::Comercial, 2) => pick(seed) < 15,
         (ZoneKind::Comercial, l) if l >= 3 => (density == Density::Alta && pick(seed) < 50) || (ctx.puerto && pick(seed) < 40),
         _ => false,
@@ -145,8 +149,8 @@ impl City {
         let origen = origen.unwrap_or_else(|| origen_probable_en(self.epoca.actual, anio, l.seed));
         let puerto = self.services.port.pier.as_ref().is_some_and(|p| p.land.distance(l.c) < 350.0);
         // Lo que se levanta desde la Ciudad Nueva usa el kit de la época 2.
-        let epoca = u8::from(self.en_epoca(Epoca::CiudadNueva));
-        Contexto { anio, clase, esquina: self.esquina_de(l), lugar: self.lugar_de(l.c), puerto, giro: 0, tradicion: tradicion_de(origen).indice(), epoca, reforma: 0, antes: 0 }
+        let epoca = u8::from(self.en_epoca(Epoca::CiudadNueva)) + u8::from(self.en_epoca(Epoca::Inmigracion)); // [epoca3]
+        Contexto { anio, clase, esquina: self.esquina_de(l), lugar: self.lugar_de(l.c), puerto, giro: 0, tradicion: tradicion_de(origen).indice(), epoca, reforma: 0, antes: 0, conventillo: 0 }
     }
 
     /// Estilos de las casas vecinas sobre la misma calle (a un solar de distancia).

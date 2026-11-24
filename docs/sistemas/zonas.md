@@ -27,6 +27,15 @@ Edificios de la época colonial (todos caben en un solar de 12 × 38 m):
 En épocas siguientes la densidad alta es la que se transforma: conventillos y edificios de
 renta (época 3), propiedad horizontal (época 5), torres (época 6).
 
+**Época 3 (en el motor).** Lo nuevo se levanta con el kit de la época
+([arquitectura-epoca3.md](arquitectura-epoca3.md)): en residencial, la casa standard
+(nivel 2), la casa de altos italianizante y el edificio de renta de 3–4 plantas (nivel 3, siempre
+en densidad alta); en comercial, el almacén y bar de esquina y el comercio en la planta baja de
+los edificios de renta (quedan los depósitos del puerto); en industrial (niveles 2 y 3), la
+fábrica de ladrillo con chimenea y el galpón de chapa. Un **conventillo** es una casa vieja que
+pasa a densidad alta sin cambiar de fachada cuando falta vivienda barata (ver
+[../epocas/03-inmigracion.md](../epocas/03-inmigracion.md) §14).
+
 ## Demanda
 
 Tres barras (R, C, I) de −100 % a +100 % en el cajón de Zonas y en cada tarjeta:

@@ -54,6 +54,12 @@ fn icon_of(k: Kind) -> Icon {
         Kind::Teatro => Icon::Iglesia,
         Kind::AguaCorriente => Icon::Agua,
         Kind::Colector => Icon::Basura,
+        // [epoca3]
+        Kind::Estacion => Icon::Calles,
+        Kind::UsinaElectrica => Icon::Sereno,
+        Kind::CocherasTranvia => Icon::Recta,
+        Kind::HotelInmigrantes => Icon::Familia,
+        Kind::PuertoModerno => Icon::Puerto,
     }
 }
 
@@ -160,6 +166,18 @@ pub fn group_cards(g: Grupo, game: &Game) -> Vec<Card> {
             _ => {}
         }
     }
+    // [epoca3] Época 3: estación, usina eléctrica, tranvías, hotel de inmigrantes y puerto.
+    if game.city.en_epoca(crate::city::poblacion::Epoca::Inmigracion) {
+        match g {
+            Grupo::Seguridad => v.push(place_card(game, Kind::UsinaElectrica)),
+            Grupo::Otros => {
+                for k in [Kind::Estacion, Kind::CocherasTranvia, Kind::HotelInmigrantes, Kind::PuertoModerno] {
+                    v.push(place_card(game, k));
+                }
+            }
+            _ => {}
+        }
+    }
     v.extend(future_cards(g, game));
     v
 }
@@ -171,7 +189,7 @@ pub fn place_card_pub(game: &Game, k: Kind) -> Card {
 
 fn place_card(game: &Game, k: Kind) -> Card {
     let i = services::info(k);
-    let mut cost = format!("{} pesos", fmt_thousands(i.cost));
+    let mut cost = format!("{} pesos", fmt_thousands(game.city.costo_servicio(k))); // [epoca3]
     // Materiales: si falta el preferido, la tarjeta dice con qué se hará (nunca se bloquea).
     let previa = game.city.vista_previa_servicio(k);
     if let Some((o, _)) = &previa {
@@ -187,7 +205,7 @@ fn place_card(game: &Game, k: Kind) -> Card {
         Some("Falta tecnología")
     } else if matches!(k, Kind::Imprenta | Kind::EscuelaNautica) && game.city.services.count(k) > 0 {
         Some("Ya hay una")
-    } else if game.city.money < i.cost {
+    } else if game.city.money < game.city.costo_servicio(k) {
         Some("Sin fondos")
     } else if k == Kind::Aduana && game.city.services.port.pier.is_none() {
         Some("Falta el muelle")

@@ -55,8 +55,9 @@ pub fn farol_gas(e: &mut Edits, v: IVec2, base: i32) {
 
 impl City {
     /// Faroles de gas del mapa (posición en metros).
+    /// [epoca3] Con los eléctricos: los dos alumbran la calle (el delito los mira juntos).
     pub fn faroles_gas_m(&self) -> impl Iterator<Item = Vec2> + '_ {
-        self.epoca.faroles_gas.iter().map(|&(v, _)| (Vec2::new(v[0] as f32, v[1] as f32) + 0.5) * DESIGN_VOXEL)
+        self.epoca.faroles_gas.iter().map(|&(v, _)| (Vec2::new(v[0] as f32, v[1] as f32) + 0.5) * DESIGN_VOXEL).chain(self.faroles_electricos_m())
     }
 
     /// Luces de los faroles cerca de un punto (para el render de noche): posición (x, y, z),
@@ -77,6 +78,7 @@ impl City {
                 v.push((d, [q.x, (b + 6) as f32 * DESIGN_VOXEL + 0.25, q.y, LUZ_SEBO.0, LUZ_SEBO.1]));
             }
         }
+        self.luces_electricas(c, radio, &mut v); // [epoca3]
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
         v.truncate(max);
         v.into_iter().map(|x| x.1).collect()
@@ -133,7 +135,7 @@ impl City {
     /// Los faroles de sebo a la luz de uno de gas se sacan (los faroleros reemplazan a los
     /// serenos en esas calles).
     pub(crate) fn quitar_sebo_bajo_gas(&mut self, e: &mut Edits) {
-        if self.epoca.faroles_gas.is_empty() {
+        if self.epoca.faroles_gas.is_empty() && self.epoca.faroles_electricos.is_empty() { // [epoca3]
             return;
         }
         let gas: Vec<Vec2> = self.faroles_gas_m().collect();
