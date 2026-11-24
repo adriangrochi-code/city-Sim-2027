@@ -419,8 +419,12 @@ fn corriente_empaquetada(c: Vec2) -> u32 {
 ///
 /// `top`: índice del vóxel de suelo más alto de cada columna de la copia con borde (`q × q`,
 /// `i32::MIN` = fuera del anillo); `agua`: el agua de cada una; `y_base`: índice del vóxel en el
-/// origen de la malla; `drop`: cuánto baja la malla de este nivel (ver `lod::far_drop`).
-pub fn mallar(top: &[i32], agua: &[ColumnaAgua], q: i32, y_base: i32, vs: f32, drop: f32, mesh: &mut crate::mesher::Mesh) {
+/// origen de la malla. [render] `fill`: relleno del suelo de cada columna en los niveles gruesos
+/// (ver `stream::top_relleno`; 15 = lleno): el fondo del río es la cara recortada (antes había un
+/// parámetro `drop`, la malla bajada de `lod::far_drop`, que se fue).
+pub fn mallar(top: &[i32], fill: Option<&[u8]>, agua: &[ColumnaAgua], q: i32, y_base: i32, vs: f32, mesh: &mut crate::mesher::Mesh) {
+    let drop = 0.0f32; // [render]
+    let corte = |k: usize| fill.map_or(0, |f| 15 - f[k].min(15)) as u64;
     use crate::mesher::{Quad, MAX_Y};
     let n = q - 2;
     let at = |i: i32, j: i32| (i + j * q) as usize;
@@ -457,7 +461,9 @@ pub fn mallar(top: &[i32], agua: &[ColumnaAgua], q: i32, y_base: i32, vs: f32, d
             let key = match a.tipo {
                 AGUA_RIO => {
                     let piso = top[k].max(piso_rio);
-                    AGUA_RIO as u64 | (((piso + 1 + 0x8000) as u64 & 0xffff) << 8)
+                    // [render] Con el relleno, el fondo es la cara recortada (va en la clave).
+                    let c = if piso == top[k] { corte(k) } else { 0 };
+                    AGUA_RIO as u64 | (((piso + 1 + 0x8000) as u64 & 0xffff) << 8) | (c << 24)
                 }
                 AGUA_ARROYO => {
                     let piso = top[k].max(a.tope - hondo_arroyo);
@@ -502,7 +508,8 @@ pub fn mallar(top: &[i32], agua: &[ColumnaAgua], q: i32, y_base: i32, vs: f32, d
                 let (smooth, alto) = if tipo == AGUA_RIO {
                     // La cara va al ras del suelo; el shader la sube al nivel del agua. Lleva el
                     // fondo (m) para el tinte de la profundidad.
-                    ([0, (plano as f32 * vs - drop).to_bits()], plano.max(alto_rio))
+                    let c = ((key >> 24) & 15) as f32; // [render]
+                    ([0, (plano as f32 * vs - c / 16.0 * vs - drop).to_bits()], plano.max(alto_rio))
                 } else {
                     let piso = ((key >> 24) & 0xffff) as i32 - 0x8000;
                     let c = corriente_de(((key >> 40) & 0xff) as u32);

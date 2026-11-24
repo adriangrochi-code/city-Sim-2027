@@ -352,21 +352,27 @@ impl LevelStore {
         let s = DESIGN_SCALE;
         let mut staged: HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>> = HashMap::new();
         let design = edits.design.iter().map(|(&d, &m)| (d * s + IVec3::splat(s - 1), m));
+        // [render] Desde el nivel 3 (vóxel de 2 m) la reducción es por cobertura (abajo); hasta
+        // el 2, "cualquier sólido gana", como siempre (los niveles 0–2 no cambian).
+        let directo = lod.min(COBERTURA_DESDE as i32 - 1);
         for (v, m) in edits.voxels.iter().map(|(&v, &m)| (v, m)).chain(design) {
-            let k = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
-            let ck = chunk_of(k);
+            let k = IVec3::new(v.x >> directo, v.y >> directo, v.z >> directo);
             let tb = tiebreak(v.x, v.z);
             let solid = m != crate::palette::AIR;
-            let e = staged.entry(ck).or_default().entry(local_index(k)).or_insert((false, i32::MIN, 0, m));
+            let e = staged.entry(chunk_of(k)).or_default().entry(local_index(k)).or_insert((false, i32::MIN, 0, m));
             if (solid, v.y, tb) >= (e.0, e.1, e.2) {
                 *e = (solid, v.y, tb, m);
             }
-            let col = IVec2::new(ck.x, ck.z);
+            let kl = IVec3::new(v.x >> lod, v.y >> lod, v.z >> lod);
+            let col = IVec2::new(kl.x >> 5, kl.z >> 5);
             let my = self.max_y.entry(col).or_insert(i32::MIN);
-            *my = (*my).max(k.y);
+            *my = (*my).max(kl.y);
             if track {
-                cols.push(IVec2::new(k.x, k.z));
+                cols.push(IVec2::new(kl.x, kl.z));
             }
+        }
+        if lod > directo {
+            staged = reducir_por_cobertura(staged, directo as u32, lod as u32);
         }
         // Se compacta y se une con lo que ya había (la carga nueva gana los empates).
         for (ck, map) in staged {
@@ -375,6 +381,72 @@ impl LevelStore {
             self.voxels.entry(ck).or_default().merge(&list);
         }
     }
+}
+
+/// [render] Primer nivel cuyas ediciones se reducen por cobertura (técnicas del mod LOD §2.3).
+pub const COBERTURA_DESDE: u32 = 3;
+
+/// [render] Materiales finos (rejas, cercos, andamios, faroles): cuentan medio vóxel para la
+/// cobertura, así un cerco o una reja sueltos no engordan a lo lejos.
+fn es_fino(m: Mat) -> bool {
+    use crate::palette::*;
+    matches!(m, IRON | REJA | FENCE | SCAFFOLD | HIERRO_FUNDIDO | LUZ_GAS)
+}
+
+/// [render] Reducción encadenada de las ediciones de una carga por cobertura (`HierarchicalReducer`
+/// del mod; técnicas del mod LOD §2.3): de nivel en nivel, cada vóxel grueso mira sus 2×2×2 hijos y
+/// es sólido si al menos 4 son sólidos (los finos cuentan medio) **o** si cubre al menos 2 de sus 4
+/// columnas vistas desde arriba. Así una pared fina sobrevive en todos los niveles (en cada paso
+/// cubre 2 de 4 columnas) y un poste o una farola sueltos desaparecen, en vez de llenar un cubo de
+/// 2–64 m. Gana el material del hijo sólido más alto (desde arriba se ve el techo), con el mismo
+/// desempate de siempre. Un vóxel que no queda sólido es aire si la carga lo vacía (al menos tantos
+/// hijos de aire como sólidos) y, si no, no se escribe: lo que había queda (una carga nunca borra
+/// con aire lo que no vació). El resultado no depende del orden de las ediciones.
+fn reducir_por_cobertura(staged: HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>>, desde: u32, hasta: u32) -> HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>> {
+    // Celdas del nivel actual: posición → (sólido, altura, desempate, material).
+    let mut cur: HashMap<IVec3, (bool, i32, u64, Mat)> = HashMap::new();
+    for (ck, map) in staged {
+        for (i, e) in map {
+            let l = IVec3::new((i & 31) as i32, (i >> 10) as i32, ((i >> 5) & 31) as i32);
+            cur.insert(ck * CHUNK + l, e);
+        }
+    }
+    for _ in desde..hasta {
+        // Padre → (peso sólido ×2, columnas cubiertas, hijos de aire, mejor sólido, peor aire).
+        let mut next: HashMap<IVec3, (u32, u8, u32, Option<(i32, u64, Mat)>, (i32, u64))> = HashMap::new();
+        for (c, (solid, y, tb, m)) in cur {
+            let p = IVec3::new(c.x >> 1, c.y >> 1, c.z >> 1);
+            let e = next.entry(p).or_insert((0, 0, 0, None, (i32::MIN, 0)));
+            if solid {
+                e.0 += if es_fino(m) { 1 } else { 2 };
+                e.1 |= 1 << ((c.x & 1) + 2 * (c.z & 1));
+                if e.3.is_none_or(|b| (y, tb) >= (b.0, b.1)) {
+                    e.3 = Some((y, tb, m));
+                }
+            } else {
+                e.2 += 1;
+                e.4 = e.4.max((y, tb));
+            }
+        }
+        cur = HashMap::with_capacity(next.len());
+        for (p, (peso, colmask, aire, mejor, peor_aire)) in next {
+            let solidos = peso.div_ceil(2);
+            match mejor {
+                Some((y, tb, m)) if peso >= 8 || colmask.count_ones() >= 2 => {
+                    cur.insert(p, (true, y, tb, m));
+                }
+                _ if aire > 0 && aire >= solidos => {
+                    cur.insert(p, (false, peor_aire.0, peor_aire.1, crate::palette::AIR));
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out: HashMap<IVec3, HashMap<u16, (bool, i32, u64, Mat)>> = HashMap::new();
+    for (c, e) in cur {
+        out.entry(chunk_of(c)).or_default().insert(local_index(c), e);
+    }
+    out
 }
 
 impl LevelStore {
@@ -499,6 +571,58 @@ mod tests {
         c.fill(IVec3::new(0, 0, 0), IVec3::new(8, 8, 8), AIR);
         s.apply(&c, false);
         assert_eq!(s.levels[2].get(IVec3::new(1, 0, 1)), Some(AIR));
+    }
+
+    /// [render] Reducción por cobertura (técnicas del mod LOD §2.3): una pared de 0,5 m se ve en
+    /// todos los niveles; un poste aislado (0,25 × 0,25 × 4,5 m) sigue en los niveles 0–2 (que no
+    /// cambian) y desaparece desde el 3; una carga que no vacía un vóxel grueso no lo borra; el
+    /// resultado no depende del orden de las ediciones.
+    #[test]
+    fn la_cobertura_conserva_las_paredes_y_saca_los_postes() {
+        let n = 8;
+        let mut s = EditStore::new(n);
+        let mut e = Edits::default();
+        // Pared de 0,5 m de espesor (2 vóxeles base), 64 m de largo y 6 m de alto, en un lugar
+        // desalineado con la grilla gruesa.
+        e.fill(IVec3::new(103, 0, 64), IVec3::new(105, 24, 320), CAL);
+        // Poste suelto lejos de la pared.
+        e.fill(IVec3::new(300, 0, 300), IVec3::new(301, 18, 301), WOOD);
+        s.apply(&e, false);
+        for lod in 1..n {
+            let lv = &s.levels[lod as usize];
+            let k = IVec3::new(104 >> lod, 4 >> lod, 200 >> lod);
+            assert_eq!(lv.get(k), Some(CAL), "la pared falta en el nivel {lod}");
+            let p = IVec3::new(300 >> lod, 8 >> lod, 300 >> lod);
+            let poste = (0..=(18 >> lod)).any(|y| lv.get(IVec3::new(p.x, y, p.z)) == Some(WOOD));
+            assert_eq!(poste, lod < COBERTURA_DESDE, "poste en el nivel {lod}");
+        }
+        // Una carga con un poste dentro de un vóxel grueso ocupado no lo borra (no lo vació).
+        let mut f = Edits::default();
+        f.fill(IVec3::new(104, 10, 200), IVec3::new(105, 14, 201), WOOD);
+        s.apply(&f, false);
+        assert_eq!(s.levels[5].get(IVec3::new(104 >> 5, 4 >> 5, 200 >> 5)), Some(CAL));
+        // Determinismo: la misma carga en otro orden da lo mismo.
+        let mut a = EditStore::new(n);
+        let mut b = EditStore::new(n);
+        let mut e1 = Edits::default();
+        let mut e2 = Edits::default();
+        let mut vs: Vec<(IVec3, Mat)> = (0..400).map(|i| (IVec3::new((i * 37) % 97, (i * 11) % 23, (i * 53) % 89), [CAL, TILE, AIR, IRON][i as usize % 4])).collect();
+        for (v, m) in &vs {
+            e1.set(*v, *m);
+        }
+        vs.reverse();
+        for (v, m) in &vs {
+            e2.set(*v, *m);
+        }
+        a.apply(&e1, false);
+        b.apply(&e2, false);
+        for lod in 0..n as usize {
+            let mut x: Vec<_> = a.levels[lod].voxels.iter().flat_map(|(k, c)| c.iter().map(move |(i, m)| (*k, i, m))).collect();
+            let mut y: Vec<_> = b.levels[lod].voxels.iter().flat_map(|(k, c)| c.iter().map(move |(i, m)| (*k, i, m))).collect();
+            x.sort_by_key(|t| (t.0.x, t.0.y, t.0.z, t.1));
+            y.sort_by_key(|t| (t.0.x, t.0.y, t.0.z, t.1));
+            assert_eq!(x, y, "nivel {lod}");
+        }
     }
 
     /// Un vóxel de diseño ocupa su bloque de vóxeles base en el nivel 0 y un vóxel en el 1

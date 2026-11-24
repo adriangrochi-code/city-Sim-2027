@@ -18,22 +18,9 @@ pub const BASE_VOXEL: f32 = 0.25;
 pub const LEVELS: u32 = 11;
 /// Niveles que bastan para ver todo el mapa jugable (24 km): la distancia "corta".
 pub const MAP_LEVELS: u32 = 9;
-/// Desde este nivel (vóxel de 64 m) la malla del terreno se baja casi un vóxel entero (ver
-/// [`far_drop`]).
-pub const DROP_LOD: u32 = 8;
-
-/// Cuánto se baja la malla de un nivel grueso (m). Con vóxeles de 64 a 256 m, la regla de que
-/// la tierra firme quede un vóxel entero sobre el agua (`stream::top_from_height`) convertía
-/// cada costa en un acantilado de 64 a 256 m. Bajando la malla `vóxel − 3 m`, el primer vóxel
-/// de tierra queda 3 m sobre el agua (por encima de la marea) y el fondo, bajo ella; las
-/// alturas se redondean al vóxel más cercano (`stream::top_from_height_far`).
-pub fn far_drop(lod: u32) -> f32 {
-    if lod >= DROP_LOD {
-        BASE_VOXEL * (1u32 << lod) as f32 - 3.0
-    } else {
-        0.0
-    }
-}
+// [render] El parche `far_drop` (bajar `vóxel − 3 m` la malla desde el vóxel de 64 m para que las
+// costas no fueran acantilados) se fue: desde el nivel 3 la superficie del terreno se dibuja a la
+// altura real (relleno, `stream::top_relleno`).
 /// Vóxeles base por lado de un vóxel de diseño, en potencia de dos (1 → 2 × 2 × 2).
 pub const DESIGN_SHIFT: u32 = 1;
 pub const DESIGN_SCALE: i32 = 1 << DESIGN_SHIFT;
@@ -191,16 +178,6 @@ mod tests {
                     .count();
                 assert_eq!(hits, 1, "el punto {p:?} está en {hits} niveles");
             }
-        }
-    }
-
-    #[test]
-    fn la_malla_de_los_niveles_gruesos_baja_casi_un_voxel() {
-        assert_eq!(far_drop(0), 0.0);
-        assert_eq!(far_drop(DROP_LOD - 1), 0.0);
-        for lod in DROP_LOD..LEVELS {
-            let vs = BASE_VOXEL * (1u32 << lod) as f32;
-            assert_eq!(far_drop(lod), vs - 3.0);
         }
     }
 

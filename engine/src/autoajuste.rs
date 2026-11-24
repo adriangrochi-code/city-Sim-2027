@@ -61,6 +61,10 @@ pub struct Preset {
     pub subida_ms: f32,
     pub fps_objetivo: u32,
     pub cache_mb: u32,
+    /// [render] Fundido entre niveles, SSAO lejano y escala de render (%, 100 = sin escalado).
+    pub fundido: bool,
+    pub ssao: bool,
+    pub escala: u32,
 }
 
 impl Calidad {
@@ -77,13 +81,16 @@ impl Calidad {
 
     /// La tabla de los presets (a ajustar con medidas en placas reales: acá solo hay lavapipe).
     pub fn preset(self) -> Option<Preset> {
-        let p = |niveles, anillo, sombras, msaa, hilos_menos, subida_ms, fps_objetivo, cache_mb| Some(Preset { niveles, anillo, sombras, msaa, hilos_menos, subida_ms, fps_objetivo, cache_mb });
+        let p = |niveles, anillo, sombras, msaa, hilos_menos, subida_ms, fps_objetivo, cache_mb, (fundido, ssao, escala)| Some(Preset { niveles, anillo, sombras, msaa, hilos_menos, subida_ms, fps_objetivo, cache_mb, fundido, ssao, escala });
+        // [render] Fundido desde Medio, SSAO lejano en Alto y Ultra (técnicas del mod LOD §2.5,
+        // §2.13); el escalado al 75 % en Mínimo (la prueba "apagar solo si pierde" lo apaga si no
+        // gana, §2.16).
         match self {
-            Calidad::Minimo => p(9, 16, SOMBRAS[0], 1, None, 1.0, 30, 32),
-            Calidad::Bajo => p(9, 20, SOMBRAS[1], 1, Some(2), 1.5, 30, 64),
-            Calidad::Medio => p(10, 24, SOMBRAS[2], 4, Some(1), 2.0, 45, 128),
-            Calidad::Alto => p(11, 24, SOMBRAS[3], 4, Some(1), 3.0, 60, 192),
-            Calidad::Ultra => p(11, 32, SOMBRAS[4], 4, Some(1), 4.0, 60, 256),
+            Calidad::Minimo => p(9, 16, SOMBRAS[0], 1, None, 1.0, 30, 32, (false, false, 75)),
+            Calidad::Bajo => p(9, 20, SOMBRAS[1], 1, Some(2), 1.5, 30, 64, (false, false, 100)),
+            Calidad::Medio => p(10, 24, SOMBRAS[2], 4, Some(1), 2.0, 45, 128, (true, false, 100)),
+            Calidad::Alto => p(11, 24, SOMBRAS[3], 4, Some(1), 3.0, 60, 192, (true, true, 100)),
+            Calidad::Ultra => p(11, 32, SOMBRAS[4], 4, Some(1), 4.0, 60, 256, (true, true, 100)),
             Calidad::Personalizado => None,
         }
     }
@@ -178,7 +185,13 @@ pub struct Perillas {
     pub hilos: usize,
     /// Índice en [`SUBIDAS`].
     pub subida: usize,
+    /// [render] SSAO lejano (0 apagado, 1 prendido) e índice en [`ESCALAS_PASOS`].
+    pub ssao: usize,
+    pub escala: usize,
 }
+
+/// [render] Escalas de render de menos a más (índices de la perilla `Escala`).
+pub const ESCALAS_PASOS: [u32; 4] = [67, 75, 85, 100];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Perilla {
@@ -187,6 +200,9 @@ pub enum Perilla {
     Niveles,
     Hilos,
     Subida,
+    /// [render]
+    Ssao,
+    Escala,
 }
 
 impl Perilla {
@@ -197,6 +213,8 @@ impl Perilla {
             Perilla::Niveles => "niveles",
             Perilla::Hilos => "hilos de generación",
             Perilla::Subida => "subida por cuadro",
+            Perilla::Ssao => "oclusión lejana",
+            Perilla::Escala => "escala de render",
         }
     }
 }
@@ -214,7 +232,21 @@ impl Perillas {
             niveles,
             hilos: hilos.max(1),
             subida: indice_cercano(&SUBIDAS, |s| (s - subida_ms).abs()),
+            ssao: 0,
+            escala: ESCALAS_PASOS.len() - 1,
         }
+    }
+
+    /// [render] Con SSAO lejano y escala de render (% del lado).
+    pub fn con_efectos(mut self, ssao: bool, escala: u32) -> Perillas {
+        self.ssao = ssao as usize;
+        self.escala = indice_cercano(&ESCALAS_PASOS, |e| (e as f32 - escala as f32).abs());
+        self
+    }
+
+    /// [render] Escala de render (%).
+    pub fn escala(&self) -> u32 {
+        ESCALAS_PASOS[self.escala]
     }
 
     pub fn sombras(&self) -> (u32, u32) {
@@ -234,6 +266,8 @@ impl Perillas {
             Perilla::Niveles => self.niveles as i64,
             Perilla::Hilos => self.hilos as i64,
             Perilla::Subida => self.subida as i64,
+            Perilla::Ssao => self.ssao as i64,
+            Perilla::Escala => self.escala as i64,
         }
     }
 
@@ -244,6 +278,8 @@ impl Perillas {
             Perilla::Niveles => self.niveles = v as u32,
             Perilla::Hilos => self.hilos = v as usize,
             Perilla::Subida => self.subida = v as usize,
+            Perilla::Ssao => self.ssao = v as usize,
+            Perilla::Escala => self.escala = v as usize,
         }
     }
 }
@@ -319,7 +355,7 @@ pub struct Autoajuste {
 
 impl Autoajuste {
     pub fn new(techo: Perillas, fps_objetivo: f64) -> Autoajuste {
-        let piso = Perillas { sombras: 0, anillo: 0, niveles: crate::lod::MAP_LEVELS.min(techo.niveles), hilos: 1, subida: 0 };
+        let piso = Perillas { sombras: 0, anillo: 0, niveles: crate::lod::MAP_LEVELS.min(techo.niveles), hilos: 1, subida: 0, ssao: 0, escala: piso_escala(&techo) };
         Autoajuste {
             activo: true,
             techo,
@@ -348,6 +384,7 @@ impl Autoajuste {
     pub fn set_techo(&mut self, techo: Perillas, fps_objetivo: f64) {
         self.techo = techo;
         self.piso.niveles = crate::lod::MAP_LEVELS.min(techo.niveles);
+        self.piso.escala = piso_escala(&techo);
         self.actual = techo;
         self.fps_objetivo = fps_objetivo;
         self.muestras.clear();
@@ -424,9 +461,9 @@ impl Autoajuste {
         if !en_tope && prom > objetivo * 1.05 {
             self.margen_seguido = 0;
             let ordenes: &[Perilla] = match lado {
-                Lado::Gpu => &[Perilla::Sombras, Perilla::Anillo, Perilla::Niveles],
+                Lado::Gpu => &[Perilla::Ssao, Perilla::Sombras, Perilla::Escala, Perilla::Anillo, Perilla::Niveles],
                 Lado::Cpu => &[Perilla::Hilos, Perilla::Subida, Perilla::Anillo, Perilla::Niveles],
-                Lado::Incierto => &[Perilla::Sombras, Perilla::Hilos, Perilla::Anillo, Perilla::Niveles],
+                Lado::Incierto => &[Perilla::Ssao, Perilla::Sombras, Perilla::Hilos, Perilla::Anillo, Perilla::Niveles],
             };
             return self.mover(ordenes, false, match lado {
                 Lado::Gpu => "GPU al límite",
@@ -440,7 +477,7 @@ impl Autoajuste {
             return self.mover(&[Perilla::Hilos], false, "tirones");
         }
         // 3) Margen: recuperar de a un paso.
-        let recuperar = [Perilla::Niveles, Perilla::Anillo, Perilla::Hilos, Perilla::Subida, Perilla::Sombras];
+        let recuperar = [Perilla::Niveles, Perilla::Anillo, Perilla::Hilos, Perilla::Subida, Perilla::Escala, Perilla::Sombras, Perilla::Ssao];
         if en_tope {
             // En el tope el cuadro no dice nada del margen: lo dice la carga.
             if carga > 0.0 && carga < 0.8 * tope && self.prueba_hasta.is_none() && self.ciclo >= self.bloqueo_hasta {
@@ -507,9 +544,126 @@ impl Autoajuste {
     }
 }
 
+/// [render] Piso de la escala de render: si el jugador eligió escalar, el auto-ajuste puede bajar
+/// hasta el 67 %; si eligió el 100 %, la escala no es una perilla (no se baja la resolución
+/// sin que lo pida).
+fn piso_escala(techo: &Perillas) -> usize {
+    if techo.escala + 1 < ESCALAS_PASOS.len() {
+        0
+    } else {
+        techo.escala
+    }
+}
+
+// --- [render] Prueba del escalado: "apagar si no gana" ---------------------------------------
+
+/// Prueba del escalado de render (`PruebaEscalado` del mod, 0.26.27; técnicas del mod LOD
+/// §2.16): con la escala prendida, se miden [`PruebaEscalado::CUADROS`] cuadros con escala y
+/// otros tantos sin, dos veces alternadas, y se compara la mediana del tiempo de GPU (o del
+/// cuadro, sin marcas de tiempo). Si el escalado no gana más de [`PruebaEscalado::GANANCIA`] se
+/// apaga: en un equipo limitado por la CPU (o render por software) solo empeora la imagen.
+#[derive(Clone, Debug, Default)]
+pub struct PruebaEscalado {
+    con: Vec<f64>,
+    sin: Vec<f64>,
+    cuadro: usize,
+    pub resultado: Option<bool>,
+}
+
+impl PruebaEscalado {
+    pub const CUADROS: usize = 30;
+    pub const GANANCIA: f64 = 0.03;
+    /// Cuadros que se descartan al cambiar de escala (destinos nuevos, cascadas).
+    const DESCARTE: usize = 3;
+
+    /// ¿Se dibuja este cuadro con la escala? (fases: con, sin, con, sin).
+    pub fn con_escala(&self) -> bool {
+        self.resultado.unwrap_or((self.cuadro / Self::CUADROS) % 2 == 0)
+    }
+
+    /// Suma el tiempo de un cuadro dibujado; al terminar devuelve la decisión (seguir o apagar).
+    pub fn muestra(&mut self, ms: f64) -> Option<bool> {
+        if self.resultado.is_some() {
+            return None;
+        }
+        if self.cuadro % Self::CUADROS >= Self::DESCARTE && ms > 0.0 {
+            if self.con_escala() { &mut self.con } else { &mut self.sin }.push(ms);
+        }
+        self.cuadro += 1;
+        if self.cuadro >= Self::CUADROS * 4 {
+            let r = Self::decidir(&self.sin, &self.con);
+            self.resultado = Some(r);
+            return Some(r);
+        }
+        None
+    }
+
+    /// Sigue si la mediana con escala es más de un 3 % menor que sin escala.
+    pub fn decidir(sin: &[f64], con: &[f64]) -> bool {
+        let mediana = |v: &[f64]| {
+            let mut v = v.to_vec();
+            v.sort_by(f64::total_cmp);
+            if v.is_empty() { f64::NAN } else { v[v.len() / 2] }
+        };
+        let (s, c) = (mediana(sin), mediana(con));
+        s.is_finite() && c.is_finite() && c < s * (1.0 - Self::GANANCIA)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_prueba_del_escalado_apaga_si_no_gana() {
+        // Limitado por la GPU: con escala el cuadro baja un 40 %: sigue.
+        let mut p = PruebaEscalado::default();
+        let mut r = None;
+        while r.is_none() {
+            let ms = if p.con_escala() { 12.0 } else { 20.0 };
+            r = p.muestra(ms);
+        }
+        assert_eq!(r, Some(true));
+        assert!(p.con_escala());
+        // Limitado por la CPU: casi igual (−2 %): se apaga.
+        let mut p = PruebaEscalado::default();
+        let mut r = None;
+        while r.is_none() {
+            let ms = if p.con_escala() { 19.6 } else { 20.0 };
+            r = p.muestra(ms);
+        }
+        assert_eq!(r, Some(false));
+        assert!(!p.con_escala());
+    }
+
+    #[test]
+    fn la_escala_solo_baja_si_el_jugador_la_eligio() {
+        let t = Perillas::desde(11, 24, (2, 1024), 3, 3.0).con_efectos(true, 100);
+        let mut a = Autoajuste::new(t, 60.0);
+        a.piso.sombras = 0;
+        // GPU al límite: SSAO primero; la escala (100 %) no se toca.
+        let gpu = Muestra { cuadro_ms: 40.0, trabajo_ms: 5.0, gpu_ms: Some(39.0), tope_ms: 0.0, dibujado: true, menu: false };
+        let mut cambios = Vec::new();
+        for _ in 0..60 {
+            if let Some(c) = ciclo(&mut a, gpu) {
+                cambios.push(c.perilla);
+            }
+        }
+        assert_eq!(cambios.first(), Some(&Perilla::Ssao));
+        assert!(!cambios.contains(&Perilla::Escala));
+        // Con la escala elegida (85 %), baja hasta el 67 % después de las sombras.
+        let t = Perillas::desde(11, 24, (2, 1024), 3, 3.0).con_efectos(false, 85);
+        let mut a = Autoajuste::new(t, 60.0);
+        let mut cambios = Vec::new();
+        for _ in 0..60 {
+            if let Some(c) = ciclo(&mut a, gpu) {
+                cambios.push(c.perilla);
+            }
+        }
+        let i = cambios.iter().position(|p| *p == Perilla::Escala).expect("la escala baja");
+        assert!(cambios[..i].iter().all(|p| *p == Perilla::Sombras));
+        assert_eq!(a.actual.escala().min(a.techo.escala()), 67);
+    }
 
     fn techo() -> Perillas {
         Perillas::desde(11, 24, (4, 2048), 3, 3.0)
@@ -552,7 +706,7 @@ mod tests {
         let mut t = techo();
         t.niveles = 11;
         let mut a = Autoajuste::new(t, 75.0);
-        a.actual = Perillas { sombras: 1, anillo: 0, niveles: 9, hilos: 1, subida: 1 };
+        a.actual = Perillas { sombras: 1, anillo: 0, niveles: 9, hilos: 1, subida: 1, ssao: 0, escala: ESCALAS_PASOS.len() - 1 };
         let mut cambios = Vec::new();
         for k in 0..400 {
             if let Some(c) = ciclo(&mut a, vsync(5.0, 7.0)) {

@@ -5,12 +5,12 @@
 > motor (`engine/`) lo que el mod LOD de Minecraft (`/home/user/minecraft-lod`, Java/NeoForge,
 > versión 0.26.38) ya resolvió y midió.
 >
-> **Estado al 2026-11-24:** hechas las fases **0, 1, 2 y 5** (ver §5) y, en parte, la **3**
-> (prefiltrado de alturas y oclusión fuera del *greedy* en lo más grueso) y la **4** (niebla de lo
-> que falta); arreglados los tirones del vuelo que había dejado la v0.11.0 (ver §6). Faltan de la
-> fase 3 la cobertura de ediciones (§2.3) y el relleno (§2.1, con lo que se iría `far_drop`), de
-> la 4 el fundido entre niveles (§2.5) y toda la 6 salvo la franja de pasto (§2.15 b). Cambios
-> de esta tanda marcados con `[render]`. Código nuevo: `engine/src/cache.rs`,
+> **Estado al 2026-11-24 (segunda tanda, §7):** hechas las fases **0, 1, 2, 4 y 5**, la **3**
+> (prefiltrado, oclusión fuera del *greedy*, cobertura de ediciones y relleno de la costa, con
+> lo que se fue `far_drop`) y la **6** salvo el tinte de la flora en el suelo (§2.15 a): SSAO
+> lejano y escala de render con la prueba "apagar si no gana", detrás del preset y del
+> auto-ajuste. Además: sombra proyectada de personajes y animales y ramas colgantes del sauce.
+> Ver §6 (primera tanda) y §7. Cambios marcados con `[render]`. Código nuevo: `engine/src/cache.rs`,
 > `relieve.rs`, `autoajuste.rs`; cambios marcados con `[lod]` en `stream.rs`, `lod.rs`,
 > `session.rs`, `bench.rs`, `save.rs`, `app.rs`, `menu.rs`, `mesher.rs`, `render/mod.rs`, `agua.rs`
 > y `world/mod.rs` (`terrain.rs` no se tocó: las cotas del relieve se arman con `height` y
@@ -1012,8 +1012,113 @@ Capturas (arriba antes, abajo después): `docs/capturas/render-rasante-antes-des
 
 ### 6.5 Pendiente y riesgos
 
-- Fase 3: cobertura (§2.3) y relleno (§2.1, quitar `far_drop`). Fase 4: fundido (§2.5). Fase 6:
-  SSAO lejano (§2.13), tinte de la flora en el suelo (§2.15 a) y escalado (§2.16).
+- ~~Fase 3: cobertura (§2.3) y relleno (§2.1, quitar `far_drop`). Fase 4: fundido (§2.5). Fase 6:
+  SSAO lejano (§2.13) y escalado (§2.16).~~ Hechos en la segunda tanda (§7). Queda el tinte de
+  la flora en el suelo (§2.15 a).
 - Todo medido en lavapipe: el envío de copias que queda en el p99 en una placa es de la GPU.
 - La niebla de lo que falta se ve solo en la ventana (el banco no la dibuja): revisarla en una
   placa al teletransportarse y al alejar rápido.
+
+---
+
+## 7. Segunda tanda: fundido, cobertura, relleno, SSAO, escala y sombras de personajes (2026-11-24)
+
+> Medido con lavapipe (4 núcleos, 1280×720, MSAA 4×). Las vistas quietas se midieron con otros
+> agentes compilando en la máquina (carga 3–28): sus tiempos de GPU varían ±20–40 % entre
+> corridas y **solo valen los conteos y las diferencias de imagen**. El vuelo se midió después,
+> con la máquina quieta y `chrt -f 1`, en corridas alternadas (antes = v0.12.0 compilada igual).
+
+### 7.1 Qué quedó
+
+| Técnica (§) | En el motor |
+|---|---|
+| Fundido entre niveles (§2.5, `FundidoNiveles` + `lod_textura_fundido` del mod) | `Streamer::fundido`: una columna nueva que se superpone con una retirada de otro nivel sale como `Op::Entra`; una retirada ya cubierta, como `Op::Sale` (índice de retiradas proyectadas a los niveles gruesos, llevado al día al retirar y quitar). El renderer las marca en la tabla de columnas (`hi.w`: 1 estable, 2 entra, 3 sale): `cull.wgsl` deja afuera de la vista principal **y del Hi-Z** a las que se funden (tienen huecos); las sombras toman las estables y las que entran. Se dibujan después de la segunda pasada del Hi-Z con `fade_pipe` = mismo vértice + `fs_fade` (Bayer 4×4 complementario, 0,4 s), **el único fragmento con `discard`**: `fs_main` sigue sin él. El avance sale del reloj de las globales (`cam_pos.w`) y del comienzo de cada columna (`fundido[slot]`, escrito una vez, por tramos con las demás subidas); las colas de entrantes y salientes están en orden y solo se mira el frente. La que sale se libera a los 0,4 s (su agua se sigue dibujando hasta entonces). Opción "Fundido entre niveles" (desde el preset Medio). Fuera de la ventana está apagado (capturas, banco de vistas, demo). |
+| Cobertura de ediciones (§2.3, `HierarchicalReducer`) | `store::reducir_por_cobertura`: desde el nivel 3 (`COBERTURA_DESDE`), reducción encadenada desde el nivel 2: sólido si ≥ 4 de 8 hijos sólidos (rejas, cercos, andamios, faroles cuentan medio: `es_fino`, en `store.rs` para no tocar `palette.rs`) o ≥ 2 de 4 columnas cubiertas; gana el sólido más alto con el desempate de siempre. Un vóxel que no queda sólido es aire solo si la carga lo vació (aire ≥ sólidos); si no, no se escribe (una carga nunca borra lo de otra con aire que no puso). Niveles 0–2 sin cambios. |
+| Relleno (§2.1) y fin de `far_drop` | `mesher::mesh_chunk_relleno` + `Relleno { top, fill, y0 }`: recorte de la cara de arriba en 1/16 de vóxel (`Quad.a` bits 26–29), costados con el borde de arriba recortado y el de abajo corrido hasta la superficie del vecino (`Quad.b` bits 26–30, con signo) y **escalones** entre vecinos con el vóxel de superficie a la misma altura; solo en superficies con aire encima. `voxel.wgsl::corner` (y así `vs_shadow`) aplica el corrimiento; el agua usa la cara recortada como fondo (`agua::mallar` recibe `fill` en vez de `drop`). Se aplica desde el nivel 3 **solo a la tierra baja de la costa**: la que antes quedaba un vóxel entero (4 a 256 m) sobre el agua se dibuja a 3 m (`stream::superficie`, redondeado hacia arriba a 1/16 de vóxel: 16 m en el de 256 m). `lod::far_drop`, `DROP_LOD` y `top_from_height_far` se eliminaron (la obra de los niveles 8–10 ya no baja `vóxel − 3 m`). `MOTOR_SIN_RELLENO=1` y `MOTOR_RELLENO_DESDE=n` para medir. |
+| SSAO lejano (§2.13, `lod_ssao` + `lod_acabado`) | `post.wgsl`: 8 muestras en espiral áurea, radio `máx(2 m, 0,025·d)` en metros (pasado a píxeles con el foco), solo lo que está a más de un 20 % del radio y por encima de ~20° (los escalones de un vóxel dibujaban curvas de nivel), a media resolución (Rg16Float: oclusión y distancia) y aplicada a resolución completa con un realce bilateral y mezcla multiplicativa, desde 100–200 m y menos con la niebla. La profundidad se guarda (`Store`) solo con SSAO. Opción "Oclusión lejana" (Alto y Ultra) y primera perilla del auto-ajuste con la GPU al límite. |
+| Escala de render (§2.16, `EscaladoFsr` + `PruebaEscalado`) | `render/escala.rs` + `post.wgsl`: la escena (con su Hi-Z y MSAA) se dibuja al 100/85/75/67 %, se realza a la salida con Catmull-Rom de 9 lecturas bilineales y se afila con RCAS de FSR 1 (MIT); la interfaz va después, nítida. **EASU no se portó** (queda pendiente). `autoajuste::PruebaEscalado`: 30 cuadros con escala y 30 sin, dos veces; sigue si la mediana gana más de un 3 %, si no se apaga por la sesión (aviso en el menú). Perilla del auto-ajuste solo si el jugador eligió escalar (piso 67 %). Preset Mínimo al 75 %. |
+| Auto-ajuste | Perillas nuevas `Ssao` y `Escala` (`Perillas::con_efectos`); orden GPU: SSAO → sombras → escala → anillo → niveles; recupera en orden inverso. |
+| Sombra de personajes y animales | Mapa propio de 2048² con la matriz de la cascada 0, rehecho en cada cuadro solo con las cajas de los agentes (`agentes.wgsl::vs_proyecta`, `agent_cast_pipe`); las cascadas siguen en caché (mover los agentes las habría rehecho siempre). `sombras.wgsl::shadow` = estática × `shadow_agentes` (PCF 4 lecturas, `misc.w` = hay mapa): lo reciben el terreno, la flora y los mismos agentes. `Renderer::sombra_agentes` para medir. |
+| Ramas colgantes del sauce | `stream::leaf_fuzz` (nivel 0, micro-vóxeles): de la cara de abajo de la copa del sauce cuelgan hebras de 0,5–2 m (60 % de los vóxeles de abajo, sin llegar al suelo), que tiemblan como las hojas. Sin captura propia (no hay sauce en las vistas del banco). |
+
+**No se hizo:** tinte de la flora en el suelo (§2.15 a: cambia el color de todo el pasto lejano,
+también en el mapa de prueba sin flora; queda para hacerlo con el mapa real a la vista), EASU.
+
+### 7.2 Vistas quietas (conteos e imagen)
+
+| Vista | Caras antes → después | Diferencia de imagen con la v0.12.0 |
+|---|---|---|
+| Ciudad de cerca | 0,75 → 0,76 M | 0,06 % |
+| Península | 0,51 → 0,52 M | 0,27 % |
+| Lejos (9 km) | 0,23 → 0,24 M | 1,08 % (costa a 3 m) |
+| Calle | 0,71 → 0,73 M | 0,000 % |
+| Cerro, rasante | 1,95 → 1,99 M | 0,61 % |
+| Cerro | 1,61 → 1,65 M | 1,10 % |
+
+- **Relleno con la altura real en todas las columnas** (lo que pedía §2.1): Península 0,51 →
+  1,17 M caras (desde el nivel 3), 0,89 M (desde el 6), 0,71 M (solo 8–10): cada columna con su
+  recorte casi no se une con la vecina. Se dejó solo para la costa (+2–4 % de caras, por los
+  escalones de la orilla). **Criterio "caras de Lejos ≤ hoy": no** (+4 %); **"−10 % en niveles ≥ 4"
+  : no** (la cobertura apenas toca la ciudad de prueba, que es chica frente al terreno).
+- **Niveles 0–2 iguales:** Calle 0,000 %, Ciudad de cerca 0,06 % (lo de la orilla lejana).
+- **Determinismo:** dos corridas del banco (Península y Cerro rasante con su barrido): PNG
+  idénticos byte a byte. La demo (`--demo-ciudad`) imprime las mismas 129 líneas que la v0.12.0
+  salvo la versión, tiempos y los incendios, que ya variaban entre dos corridas del mismo binario
+  (la simulación depende del reloj), igual que la hora de cada captura.
+- **Salto al recentrar:** Península 4,63 → 4,50 %, Lejos 0,56 → 0,49 %: lejos del −50 % (lo
+  dominan los niveles finos, §6.2).
+
+### 7.3 Fundido, SSAO, escala y sombras (GPU, lavapipe, cargada)
+
+| Vista | Fundido 32 / 128 columnas | SSAO (dif. de imagen) | Escala 67 % (dif.) | Prueba del escalado |
+|---|---|---|---|---|
+| Península | −13 / −12 % (ruido) | −16 % (2,5 %) | −26 % (13,6 %) | sigue |
+| Calle | +4,6 / +5,1 % | +11 % (0,00 %) | −18 % (3,9 %) | sigue |
+| Cerro, rasante | +13,5 / −4,3 % | −17 % (1,1 %) | −15 % (10 %) | sigue |
+| Cerro | +19 / −7 % | −23 % (1,8 %) | −45 % (32 %, textura fina) | sigue |
+
+Con la máquina cargada las cifras de GPU se contradicen (SSAO "ahorra"): **no sirven para
+validar los criterios de +3 % (fundido) y +8 % (SSAO)**; hay que medirlos en una placa. Lo que sí
+vale: **quieto, el fundido no cambia nada** (0,000 % después de terminar en las cuatro vistas, y
+sin fundidos en curso la pasada no se dibuja); el pipeline principal no tiene `discard`
+(revisado); el SSAO de cerca no cambia la imagen (Calle 0,00 %, criterio < 1 %); la escala al
+67 % gana un 15–45 % aun en lavapipe (vértices incluidos). En el vuelo hay hasta 720 columnas
+fundiéndose a la vez (~275 por cuadro): con un zoom de 3 km se retiran cientos.
+
+**Sombra de personajes** (multitud de 2500 agentes, mínimo de los cuadros): con cajas, Calle
+868 → 900 ms (+3,7 %), Ciudad de cerca 882 → 948 ms (+7,5 %); con los modelos de micro-vóxeles
+cerca, +11–16 % (88 mil cajas en el mapa). En el juego hay muchos menos agentes a la vista.
+
+Capturas: `docs/capturas/render-fundido-antes-despues.jpg` (abajo, 32 columnas a mitad del
+fundido), `render-ssao-cerro-antes-despues.jpg`, `render-escala67-antes-despues.jpg`,
+`render-relleno-rasante-antes-despues.jpg` (arriba v0.12.0), `render-sombras-personajes-antes-despues.jpg`.
+
+### 7.4 Vuelo: costo del fundido y el criterio de p99 −30 %
+
+Máquina quieta (recién reiniciada, carga ~1,5), `chrt -f 1`, `MOTOR_BANCO=streaming`, corridas
+alternadas; "sin fundido" es el mismo binario con `MOTOR_SIN_FUNDIDO=1`.
+
+| Vuelo (84 s) | v0.12.0 (2 corridas) | Ahora, sin fundido (3) | Ahora, con fundido (4) |
+|---|---|---|---|
+| Cuadro p50 | 0,16–0,17 ms | 0,15–0,20 ms | 0,32–0,41 ms |
+| p99 | 1,87–2,03 ms | 1,92–2,06 ms | 2,23–2,43 ms |
+| CPU del hilo, total | 2,25–2,34 s | 2,26–2,47 s | 2,69–2,94 s |
+| Peor subida | 5,7–12,9 ms | 5,7–36,8 ms (un pico) | 8,6–11,0 ms |
+
+- Sin fundido, la tanda no cambia el vuelo (relleno, cobertura y lo demás son de generación).
+- El fundido cuesta **~0,2 ms por cuadro de CPU** en el vuelo (p99 +15 %), con ~280 columnas
+  fundiéndose por cuadro. Se bajó de +0,9 ms (primera versión: el avance se escribía por cuadro
+  y por columna) a +0,4 (avance en el shader con el reloj de las globales), +0,25 (índice de
+  retiradas incremental: rearmarlo costaba ~0,1 ms por cuadro) y lo que queda; lo que sigue
+  sospechado son los bloques del megabúfer y los lugares de la tabla retenidos 0,4 s más (más
+  bloques vivos en el asignador). No es GPU (el banco del vuelo no dibuja): el criterio de GPU
+  (+3 %) queda para una placa.
+- **Criterio del p99 −30 % del vuelo (Fase 1), documentado:** se mide contra el binario de la
+  Fase 0 (o la versión anterior) **en la misma sesión**, con la máquina quieta, `chrt -f 1` y al
+  menos dos pares de corridas alternadas; vale la mediana de los p99 de cada binario. Las cifras
+  absolutas no se comparan entre sesiones: el mismo binario de la v0.12.0 dio p99 1,44 ms una
+  hora antes (con otros procesos tomando núcleos) y 1,87–2,03 ms en esta máquina recién
+  reiniciada. Con lavapipe lo que queda del p99 es el envío de las copias en el hilo principal
+  (§6.1), que en una placa hace la GPU: el criterio **no se cumple acá** (la v0.12.0 ya estaba en
+  el mismo nivel que la Fase 0) y hay que volver a medirlo con `medir-fps.bat` en placa. No se
+  encontró una mejora barata más allá de las del fundido.

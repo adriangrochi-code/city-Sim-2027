@@ -4,6 +4,7 @@
 
 mod alloc;
 pub mod cascades;
+pub mod escala;
 pub mod hiz;
 
 use crate::camera::OrbitCamera;
@@ -92,6 +93,9 @@ struct Subidas {
     origins: Vec<[f32; 4]>,
     sucias: Vec<u32>,
     visibles: Vec<u32>,
+    /// [render] Comienzo del fundido por lugar (ver `Renderer::fundido`), subido por tramos.
+    fund: Vec<f32>,
+    fund_sucias: Vec<u32>,
 }
 
 /// Lugares libres entre dos tocados de la tabla que todavía conviene subir juntos (copiar 64 B
@@ -100,7 +104,7 @@ const SUBIDA_HUECO: u32 = 8;
 
 impl Subidas {
     fn new() -> Subidas {
-        Subidas { belt: wgpu::util::StagingBelt::new(1 << 20), enc: None, cols: vec![ColGpu::zeroed(); ORIGIN_SLOTS as usize], origins: vec![[0.0; 4]; ORIGIN_SLOTS as usize], sucias: Vec::new(), visibles: Vec::new() }
+        Subidas { belt: wgpu::util::StagingBelt::new(1 << 20), enc: None, cols: vec![ColGpu::zeroed(); ORIGIN_SLOTS as usize], origins: vec![[0.0; 4]; ORIGIN_SLOTS as usize], sucias: Vec::new(), visibles: Vec::new(), fund: vec![0.0; ORIGIN_SLOTS as usize], fund_sucias: Vec::new() }
     }
 
     /// Lugar en el búfer intermedio para `size` bytes que van a `target` en `off`.
@@ -136,7 +140,23 @@ impl Subidas {
     }
 
     /// Envía lo juntado en el cuadro. Devuelve si hubo un envío.
-    fn enviar(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, cols: &wgpu::Buffer, origins: &wgpu::Buffer, visible: &wgpu::Buffer) -> bool {
+    /// [render] Comienzo del fundido de un lugar.
+    fn poner_fundido(&mut self, slot: u32, v: f32) {
+        self.fund[slot as usize] = v;
+        self.fund_sucias.push(slot);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn enviar(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, cols: &wgpu::Buffer, origins: &wgpu::Buffer, visible: &wgpu::Buffer, fundido: &wgpu::Buffer) -> bool {
+        if !self.fund_sucias.is_empty() {
+            let mut v = std::mem::take(&mut self.fund_sucias);
+            for (a, b) in Subidas::tramos(&mut v, SUBIDA_HUECO * 4) {
+                let (a, b) = (a as usize, b as usize + 1);
+                let f: Vec<f32> = self.fund[a..b].to_vec();
+                self.escribir(device, fundido, a as u64 * 4, (b - a) as u64 * 4).copy_from_slice(bytemuck::cast_slice(&f));
+            }
+            self.fund_sucias = v;
+        }
         if !self.sucias.is_empty() {
             let mut v = std::mem::take(&mut self.sucias);
             for (a, b) in Subidas::tramos(&mut v, SUBIDA_HUECO) {
@@ -285,10 +305,26 @@ struct Batch {
     /// `groups[6]`), y se dibujan aparte, en el pase del agua.
     water: u32,
     lod: u32,
+    /// [render] Entrando con fundido (no va en la pasada principal ni en el Hi-Z).
+    entra: bool,
     /// Posición de esta columna en las tablas de la GPU (origen y descarte).
     slot: u32,
     lo: Vec3,
     hi: Vec3,
+}
+
+/// [render] Estado de una columna en la tabla de la GPU (`hi.w`, ver cull.wgsl): estable (en la
+/// vista principal y en las sombras), entrando (solo en la pasada del fundido y en las sombras) y
+/// saliendo (solo en la pasada del fundido).
+const ESTABLE: f32 = 1.0;
+const ENTRA: f32 = 2.0;
+const SALE: f32 = 3.0;
+/// [render] Duración del fundido entre niveles (s), como `FundidoNiveles` del mod.
+pub const FUNDIDO_S: f32 = 0.4;
+
+fn col_gpu(b: &Batch, estado: f32) -> ColGpu {
+    let g = b.groups;
+    ColGpu { lo: [b.lo.x, b.lo.y, b.lo.z, b.lod as f32], hi: [b.hi.x, b.hi.y, b.hi.z, estado], start: b.start, g: [g[0], g[1], g[2], g[3], g[4], g[5], g[6]] }
 }
 
 /// Planos de un volumen de visión (frustum) a partir de una matriz de proyección × vista
@@ -373,14 +409,100 @@ pub struct FrameStats {
     pub quads_shadow: u64,
     /// Se usó el descarte de lo tapado.
     pub hiz: bool,
+    /// [render] Se dibujó el mapa de sombra de los personajes.
+    pub agent_shadow: bool,
+    /// [render] Columnas y caras de la pasada del fundido entre niveles.
+    pub cols_fade: u32,
+    pub quads_fade: u64,
 }
 
 struct Targets {
+    /// Tamaño de la imagen de la escena (con escala de render, más chico que la salida).
     width: u32,
     height: u32,
     msaa: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     hiz: Option<HizTargets>,
+    /// [render] Tamaño de la salida, escala y SSAO con que se armaron (si cambian, se rehacen).
+    out: (u32, u32),
+    escala: u32,
+    ssao: Option<SsaoTargets>,
+    escalado: Option<EscaladoTargets>,
+}
+
+/// [render] Media resolución del SSAO lejano (oclusión y distancia) y sus grupos.
+struct SsaoTargets {
+    ao: wgpu::TextureView,
+    size: (u32, u32),
+    bg_ssao: wgpu::BindGroup,
+    bg_apply: wgpu::BindGroup,
+}
+
+/// [render] Imagen de la escena a la escala de render, la realzada a la salida y sus grupos.
+struct EscaladoTargets {
+    color: wgpu::TextureView,
+    full: wgpu::TextureView,
+    bg_up: wgpu::BindGroup,
+    bg_rcas: wgpu::BindGroup,
+}
+
+/// [render] Pipelines de las pasadas de pantalla (`post.wgsl`): SSAO lejano y escala de render.
+struct PostPipes {
+    ssao: wgpu::RenderPipeline,
+    apply: wgpu::RenderPipeline,
+    up: wgpu::RenderPipeline,
+    rcas: wgpu::RenderPipeline,
+    bgl_ssao: wgpu::BindGroupLayout,
+    bgl_apply: wgpu::BindGroupLayout,
+    bgl_tex: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// Parámetros de pantalla de la escena (SSAO) y de la salida (realce).
+    params_scene: wgpu::Buffer,
+    params_out: wgpu::Buffer,
+}
+
+const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
+
+impl PostPipes {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, msaa: u32) -> PostPipes {
+        let src = include_str!("shaders/post.wgsl").replace("DEPTH_TEX", if msaa > 1 { "texture_depth_multisampled_2d" } else { "texture_depth_2d" });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pasadas de pantalla"), source: wgpu::ShaderSource::Wgsl(src.into()) });
+        let uni = |binding| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None };
+        let depth = wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: msaa > 1 }, count: None };
+        let tex = |binding, filterable| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None };
+        let bgl_ssao = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("ssao"), entries: &[uni(0), uni(1), depth] });
+        let bgl_apply = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("ssao aplicar"), entries: &[uni(0), uni(1), depth, tex(3, false)] });
+        let bgl_tex = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("escala"),
+            entries: &[uni(1), tex(4, true), wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None }],
+        });
+        let pipe = |label, bgl: &wgpu::BindGroupLayout, entry, target: wgpu::ColorTargetState| {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[bgl], push_constant_ranges: &[] });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState { module: &module, entry_point: "vs_full", compilation_options: Default::default(), buffers: &[] },
+                fragment: Some(wgpu::FragmentState { module: &module, entry_point: entry, compilation_options: Default::default(), targets: &[Some(target)] }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
+        // Multiplica lo ya dibujado por el factor de oclusión.
+        let mult = wgpu::BlendState {
+            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::Src, operation: wgpu::BlendOperation::Add },
+            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+        };
+        let ssao = pipe("ssao", &bgl_ssao, "fs_ssao", AO_FORMAT.into());
+        let apply = pipe("ssao aplicar", &bgl_apply, "fs_ssao_apply", wgpu::ColorTargetState { format, blend: Some(mult), write_mask: wgpu::ColorWrites::ALL });
+        let up = pipe("escala: realce", &bgl_tex, "fs_upscale", format.into());
+        let rcas = pipe("escala: nitidez", &bgl_tex, "fs_rcas", format.into());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
+        let buf = |label| device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: 16, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        PostPipes { ssao, apply, up, rcas, bgl_ssao, bgl_apply, bgl_tex, sampler, params_scene: buf("pantalla de la escena"), params_out: buf("pantalla de salida") }
+    }
 }
 
 pub struct Renderer {
@@ -400,6 +522,25 @@ pub struct Renderer {
     faltan: wgpu::Buffer,
     faltan_val: [f32; crate::stream::SECTORES],
     luces_key: u64,
+    /// [render] Fundido entre niveles (técnicas del mod LOD §2.5): avance por lugar de columna
+    /// (binding 9), las columnas que entran (clave, desde cuándo) y las que salen (su bloque,
+    /// desde cuándo). Las dos se dibujan con `fade_pipe` (tramado con `discard`), en una pasada
+    /// aparte: el pipeline principal sigue sin `discard`.
+    fundido: wgpu::Buffer,
+    entrantes: std::collections::VecDeque<((u32, IVec2), u32, f32)>,
+    salientes: std::collections::VecDeque<(Batch, f32)>,
+    reloj: std::time::Instant,
+    /// [render] Reloj del fundido quieto (banco: `forzar_fundido`).
+    reloj_fijo: Option<f32>,
+    fade_pipe: wgpu::RenderPipeline,
+    post: PostPipes,
+    /// [render] Fundir al cambiar de nivel (opción "Fundido entre niveles"; si no, cambio seco).
+    /// Apagado fuera de la ventana: las capturas y el banco no esperan fundidos.
+    pub fundir: bool,
+    /// [render] Oclusión ambiental en pantalla para lo lejano (§2.13).
+    pub ssao: bool,
+    /// [render] Escala de render en % (ver [`escala`]).
+    pub escala: u32,
     /// Mapas de sombra: una capa por cascada (vista de todo el arreglo y una por capa).
     shadow_view: wgpu::TextureView,
     shadow_layers: Vec<wgpu::TextureView>,
@@ -428,6 +569,16 @@ pub struct Renderer {
     /// en cada cuadro.
     agent_pipe: wgpu::RenderPipeline,
     agent_shadow_pipe: wgpu::RenderPipeline, // [personajes]
+    /// [render] Sombra proyectada de los personajes y animales: un mapa propio con la matriz de
+    /// la cascada 0, rehecho en cada cuadro con solo las cajas de los agentes (las cascadas son
+    /// estáticas y se guardan en caché: moverlas con cada paso las rehacía siempre). Lo leen
+    /// `shadow()` (sombras.wgsl) en el terreno, la flora y los mismos agentes.
+    agent_map: wgpu::TextureView,
+    agent_vp: wgpu::Buffer,
+    agent_cast_bg: wgpu::BindGroup,
+    agent_cast_pipe: wgpu::RenderPipeline,
+    /// [render] Personajes que proyectan sombra (opción; el banco la apaga para medir).
+    pub sombra_agentes: bool,
     agent_buf: Option<wgpu::Buffer>,
     agent_count: u32,
     agent_key: u64,
@@ -530,6 +681,10 @@ struct View {
     /// nivel de detalle máximo).
     sun: Vec3,
     cascades: Vec<(usize, Mat4, u32)>,
+    /// [render] 1 / tan(fov/2) (para pasar metros a píxeles en el SSAO).
+    focal: f32,
+    /// [render] Dibujar el mapa de sombra de los personajes en este cuadro.
+    agentes: bool,
 }
 
 /// Luz del día según la hora (0–24). Sol del norte: estamos en el hemisferio sur.
@@ -611,7 +766,25 @@ fn make_shadow_maps(device: &wgpu::Device, q: ShadowQuality) -> (wgpu::TextureVi
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
-fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer, luces: &wgpu::Buffer, faltan: &wgpu::Buffer) -> wgpu::BindGroup {
+/// [render] Mapa de sombra de los personajes (2048², con la matriz de la cascada 0).
+const AGENT_MAP: u32 = 2048;
+fn make_agent_map(device: &wgpu::Device) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("sombra de los personajes"),
+            size: wgpu::Extent3d { width: AGENT_MAP, height: AGENT_MAP, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&Default::default())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer, luces: &wgpu::Buffer, faltan: &wgpu::Buffer, fundido: &wgpu::Buffer, agentes: &wgpu::TextureView) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout,
@@ -624,6 +797,8 @@ fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: 
             wgpu::BindGroupEntry { binding: 5, resource: sombras.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 7, resource: luces.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 8, resource: faltan.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 9, resource: fundido.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(agentes) },
         ],
     })
 }
@@ -827,6 +1002,15 @@ impl Renderer {
                 storage_entry(7, wgpu::ShaderStages::FRAGMENT, true),
                 // [render] Niebla de lo que falta (ver `Renderer::set_faltan`).
                 storage_entry(8, wgpu::ShaderStages::FRAGMENT, true),
+                // [render] Fundido entre niveles: avance por columna (ver `Renderer::fundidos`).
+                storage_entry(9, wgpu::ShaderStages::FRAGMENT, true),
+                // [render] Sombra de los personajes y animales (ver `Renderer::agent_map`).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+                    count: None,
+                },
             ],
         });
         // Pase de sombras: orígenes de las columnas y la matriz de la cascada (desplazamiento
@@ -863,13 +1047,25 @@ impl Renderer {
         let luces_ini = luces::armar(glam::Vec2::ZERO, &[]);
         let luces_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("luces de los faroles"), contents: bytemuck::cast_slice(&luces_ini), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
         let faltan_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("niebla de lo que falta"), contents: bytemuck::cast_slice(&[crate::stream::SIN_FALTA; crate::stream::SECTORES]), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
-        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras, &luces_buf, &faltan_buf);
+        let fundido_buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("fundido entre niveles"), size: ORIGIN_SLOTS as u64 * 4, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let agent_map = make_agent_map(&device);
+        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras, &luces_buf, &faltan_buf, &fundido_buf, &agent_map);
+        // [render] Matriz de la cascada 0 para el mapa de sombra de los personajes.
+        let agent_vp = device.create_buffer(&wgpu::BufferDescriptor { label: Some("matriz de la sombra de los personajes"), size: 256, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let shadow_vox_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &shadow_bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &cascade_vp, offset: 0, size: wgpu::BufferSize::new(64) }) },
+            ],
+        });
+        let agent_cast_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &shadow_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 3, resource: origins.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &agent_vp, offset: 0, size: wgpu::BufferSize::new(64) }) },
             ],
         });
         let shadow_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -910,6 +1106,18 @@ impl Renderer {
             layout: Some(&main_layout),
             vertex: wgpu::VertexState { module: &voxel_mod, entry_point: "vs_main", compilation_options: Default::default(), buffers: &[quad_layout.clone()] },
             fragment: Some(wgpu::FragmentState { module: &voxel_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(format.into())] }),
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            depth_stencil: Some(reverse_depth(true, wgpu::CompareFunction::Greater)),
+            multisample: ms,
+            multiview: None,
+            cache: None,
+        });
+        // [render] Fundido entre niveles: mismo vértice, fragmento con tramado (`discard`).
+        let fade_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("voxeles (fundido)"),
+            layout: Some(&main_layout),
+            vertex: wgpu::VertexState { module: &voxel_mod, entry_point: "vs_main", compilation_options: Default::default(), buffers: &[quad_layout.clone()] },
+            fragment: Some(wgpu::FragmentState { module: &voxel_mod, entry_point: "fs_fade", compilation_options: Default::default(), targets: &[Some(format.into())] }),
             primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
             depth_stencil: Some(reverse_depth(true, wgpu::CompareFunction::Greater)),
             multisample: ms,
@@ -1033,6 +1241,25 @@ impl Renderer {
             cache: None,
         });
         // [/personajes]
+        // [render] Personajes y animales en el mapa de sombra propio (proyectan sombra en las
+        // cascadas): mismas instancias, solo profundidad, con el sesgo del pase de sombras.
+        let agent_cast_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("agentes: sombra proyectada"),
+            layout: Some(&shadow_layout),
+            vertex: wgpu::VertexState { module: &agent_mod, entry_point: "vs_proyecta", compilation_options: Default::default(), buffers: &[agent_layout.clone()] },
+            fragment: None,
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
         let agent_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("agentes"),
             layout: Some(&main_layout),
@@ -1220,6 +1447,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let post = PostPipes::new(&device, format, msaa);
         Ok(Renderer {
             device,
             queue,
@@ -1234,6 +1462,16 @@ impl Renderer {
             luces: luces_buf,
             luces_key: 0,
             faltan: faltan_buf,
+            fundido: fundido_buf,
+            entrantes: Default::default(),
+            salientes: Default::default(),
+            reloj: std::time::Instant::now(),
+            reloj_fijo: None,
+            fade_pipe,
+            post,
+            fundir: false,
+            ssao: false,
+            escala: 100,
             faltan_val: [crate::stream::SIN_FALTA; crate::stream::SECTORES],
             shadow_view,
             shadow_layers,
@@ -1255,6 +1493,11 @@ impl Renderer {
             detail_dirty: std::cell::Cell::new(false),
             agent_pipe,
             agent_shadow_pipe, // [personajes]
+            agent_map,
+            agent_vp,
+            agent_cast_bg,
+            agent_cast_pipe,
+            sombra_agentes: true,
             agent_buf: None,
             agent_count: 0,
             agent_key: 0,
@@ -1403,10 +1646,10 @@ impl Renderer {
         }
         self.uploaded_bytes += bytes;
         let origin = [m.origin.x, m.origin.y, m.origin.z, m.voxel];
-        let col = ColGpu { lo: [lo.x, lo.y, lo.z, lod as f32], hi: [hi.x, hi.y, hi.z, 1.0], start, g: [groups[0], groups[1], groups[2], groups[3], groups[4], groups[5], groups[6]] };
+        let b = Batch { start, order, groups, quads: n as u32, water: m.water.len() as u32, lod, entra: false, slot, lo, hi };
         // Columna nueva: se dibuja en la primera pasada del Hi-Z (seguramente tapa algo).
-        self.subidas.get_mut().poner_col(slot, col, Some(origin), true);
-        Some(Batch { start, order, groups, quads: n as u32, water: m.water.len() as u32, lod, slot, lo, hi })
+        self.subidas.get_mut().poner_col(slot, col_gpu(&b, ESTABLE), Some(origin), true);
+        Some(b)
     }
 
     /// Un cambio de geometría solo obliga a rehacer una cascada si cae dentro de su caja de luz
@@ -1538,10 +1781,124 @@ impl Renderer {
         }
     }
 
+    /// [render] Efectos de las opciones (fundido, SSAO, escala de render).
+    pub fn aplicar_efectos(&mut self, s: &crate::save::Settings) {
+        self.fundir = s.fundido;
+        if !self.fundir {
+            self.terminar_fundidos();
+        }
+        if self.ssao != s.ssao || self.escala != s.escala_render {
+            self.scene_version += 1;
+        }
+        self.ssao = s.ssao;
+        self.escala = escala::valida(s.escala_render);
+    }
+
+    /// [render] Columna que reemplaza a otra de otro nivel (técnicas del mod LOD §2.5): entra
+    /// con tramado en [`FUNDIDO_S`] mientras la vieja sigue entera; hasta que termina no va en
+    /// la pasada principal ni en el Hi-Z (tiene huecos), sí en las sombras.
+    pub fn set_column_fade(&mut self, key: (u32, IVec2), mesh: &Mesh) {
+        self.set_column(key, mesh);
+        if !self.fundir {
+            return;
+        }
+        let t = self.reloj.elapsed().as_secs_f32();
+        if let Some(b) = self.columns.get_mut(&key) {
+            b.entra = true;
+            let (slot, col) = (b.slot, col_gpu(b, ENTRA));
+            self.subidas.get_mut().poner_col(slot, col, None, false);
+            self.subidas.get_mut().poner_fundido(slot, t + 1.0);
+            self.entrantes.push_back((key, slot, t));
+        }
+    }
+
+    /// [render] Columna que se va porque otras ya la cubren: se desvanece con el tramado
+    /// complementario en [`FUNDIDO_S`] y recién después se libera. No tira sombra.
+    pub fn fade_out_column(&mut self, key: (u32, IVec2)) {
+        if !self.fundir {
+            return self.remove_column(key);
+        }
+        self.set_detail(key, &[]);
+        if let Some(mut b) = self.columns.remove(&key) {
+            self.scene_version += 1;
+            self.shadow_dirty_box(b.lo, b.hi);
+            b.entra = false;
+            let t = self.reloj.elapsed().as_secs_f32();
+            self.subidas.get_mut().poner_col(b.slot, col_gpu(&b, SALE), None, false);
+            self.subidas.get_mut().poner_fundido(b.slot, -(t + 1.0));
+            self.salientes.push_back((b, t));
+        }
+    }
+
+    /// [render] Termina los fundidos vencidos (las que entran pasan a estables; las que salen se
+    /// liberan). El avance no se escribe por cuadro: el shader lo saca del reloj de las globales
+    /// (`cam_pos.w`) y del momento en que empezó cada columna (`fundido[slot]`, escrito una sola
+    /// vez). Escribirlo en cada cuadro eran ~280 escrituras por cuadro en el vuelo (p50 0,06 →
+    /// 0,95 ms).
+    fn avanzar_fundidos(&mut self, terminar: bool) {
+        if self.entrantes.is_empty() && self.salientes.is_empty() {
+            return;
+        }
+        self.scene_version += 1;
+        let now = self.reloj.elapsed().as_secs_f32();
+        let avance = |t0: f32| if terminar { 1.0 } else { ((now - t0) / FUNDIDO_S).clamp(0.0, 1.0) };
+        // [render] Las colas están en orden de comienzo: solo se miran las del frente que
+        // vencieron (antes se recorrían las ~280 en cada cuadro del vuelo). Una entrada cuya
+        // columna se reemplazó o quitó (otro lugar, o ya no entra) se descarta.
+        while let Some(&(key, slot, t0)) = self.entrantes.front() {
+            if avance(t0) < 1.0 {
+                break;
+            }
+            self.entrantes.pop_front();
+            if let Some(b) = self.columns.get_mut(&key).filter(|b| b.slot == slot && b.entra) {
+                b.entra = false;
+                let col = col_gpu(b, ESTABLE);
+                self.subidas.get_mut().poner_col(slot, col, None, true);
+            }
+        }
+        while let Some((_, t0)) = self.salientes.front() {
+            if avance(*t0) < 1.0 {
+                break;
+            }
+            let (b, _) = self.salientes.pop_front().unwrap();
+            self.free_batch(b);
+        }
+    }
+
+    /// [render] Termina ya todos los fundidos (antes de una captura o al medir quieto).
+    pub fn terminar_fundidos(&mut self) {
+        self.reloj_fijo = None;
+        self.avanzar_fundidos(true);
+    }
+
+    /// [render] Columnas fundiéndose (entran, salen).
+    pub fn fundidos(&self) -> (usize, usize) {
+        (self.entrantes.len(), self.salientes.len())
+    }
+
+    /// [render] Banco: pone a entrar con fundido las `n` columnas más cercanas a `eye` (el punto
+    /// mirado), para medir el costo de la pasada del fundido en el peor caso, sin vencerse solas.
+    pub fn forzar_fundido(&mut self, eye: Vec3, n: usize) {
+        let mut keys: Vec<((u32, IVec2), f32)> = self.columns.iter().map(|(k, b)| (*k, ((b.lo + b.hi) * 0.5 - eye).length_squared())).collect();
+        keys.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0 .0.cmp(&b.0 .0)).then(a.0 .1.x.cmp(&b.0 .1.x)).then(a.0 .1.y.cmp(&b.0 .1.y)));
+        // Reloj quieto a mitad del fundido.
+        let t = self.reloj.elapsed().as_secs_f32();
+        self.reloj_fijo = Some(t + FUNDIDO_S * 0.5);
+        for (key, _) in keys.into_iter().take(n) {
+            let b = self.columns.get_mut(&key).unwrap();
+            b.entra = true;
+            let (slot, col) = (b.slot, col_gpu(b, ENTRA));
+            self.subidas.get_mut().poner_col(slot, col, None, false);
+            self.subidas.get_mut().poner_fundido(slot, t + 1.0);
+            // Sin vencimiento: el reloj de inicio en el futuro lejano (del lado de la CPU).
+            self.entrantes.push_back((key, slot, f32::MAX / 4.0));
+        }
+    }
+
     /// [render] Envía las subidas juntadas en el cuadro (antes de dibujar o de agrandar el
     /// megabúfer).
     fn flush_uploads(&self) -> bool {
-        self.subidas.borrow_mut().enviar(&self.device, &self.queue, &self.cols, &self.origins, &self.visible)
+        self.subidas.borrow_mut().enviar(&self.device, &self.queue, &self.cols, &self.origins, &self.visible, &self.fundido)
     }
 
     /// Avanza el contador de cuadros y libera los bloques que la GPU ya no usa.
@@ -1554,6 +1911,7 @@ impl Renderer {
         self.device.poll(wgpu::Maintain::Poll);
         self.frame += 1;
         self.alloc.collect(self.frame, FRAMES_IN_FLIGHT);
+        self.avanzar_fundidos(false);
     }
 
     /// Memoria de las mallas en la GPU (bytes de caras realmente usados), en MB.
@@ -1581,7 +1939,7 @@ impl Renderer {
         }
         self.quality = q;
         let (all, layers) = make_shadow_maps(&self.device, q);
-        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras, &self.luces, &self.faltan);
+        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras, &self.luces, &self.faltan, &self.fundido, &self.agent_map);
         self.shadow_view = all;
         self.shadow_layers = layers;
         *self.casc.borrow_mut() = CascState { force: true, dirty: [true; MAX_CASCADES], ..Default::default() };
@@ -1595,6 +1953,8 @@ impl Renderer {
     /// Quita todas las mallas (banco de pruebas).
     pub fn clear_columns(&mut self) {
         self.invalidate_shadows();
+        self.entrantes.clear();
+        self.salientes.clear();
         self.columns.clear();
         self.detail_cols.clear();
         self.detail_static.clear();
@@ -1623,7 +1983,7 @@ impl Renderer {
     /// Dibuja un cuadro fuera de pantalla y mide CPU y tiempo total (banco de pruebas).
     pub fn bench_frame(&mut self, cam: &OrbitCamera, hour: f32, width: u32, height: u32) -> FrameStats {
         self.flush_uploads(); // [render]
-        if self.targets.as_ref().map(|t| (t.width, t.height)) != Some((width, height)) {
+        if !self.targets_ok(self.targets.as_ref(), width, height) {
             self.targets = Some(self.make_targets(width, height));
         }
         if self.bench_out.as_ref().map(|b| (b.0, b.1)) != Some((width, height)) {
@@ -1651,7 +2011,7 @@ impl Renderer {
         let view = self.write_globals(cam, hour, width as f32 / height as f32, self.shadow_budget);
         let mut enc = self.device.create_command_encoder(&Default::default());
         let ts = self.timestamps.as_ref().map(|t| &t.0);
-        let mut st = self.encode(&mut enc, self.targets.as_ref().unwrap(), &self.bench_out.as_ref().unwrap().2, &view, ts);
+        let mut st = self.encode_frame(&mut enc, self.targets.as_ref().unwrap(), &self.bench_out.as_ref().unwrap().2, &view, ts);
         if let Some((set, resolve, read, _)) = &self.timestamps {
             enc.resolve_query_set(set, 0..2, resolve, 0);
             enc.copy_buffer_to_buffer(resolve, 0, read, 0, 16);
@@ -1839,7 +2199,9 @@ impl Renderer {
                 g.info[i] = cascades::shader_info(&p, res).into();
             }
         }
-        g.misc = [n as f32, 1.0 / res as f32, if depurar { 1.0 } else { 0.0 }, 0.0];
+        // [render] w: hay mapa de sombra de los personajes (con la matriz de la cascada 0).
+        let agentes = self.sombra_agentes && self.agent_count > 0 && st.drawn[0].is_some() && st.want[0].is_some();
+        g.misc = [n as f32, 1.0 / res as f32, if depurar { 1.0 } else { 0.0 }, if agentes { 1.0 } else { 0.0 }];
         (g, draw)
     }
 
@@ -1857,6 +2219,9 @@ impl Renderer {
         let view_proj = cam.proj(aspect) * cam.view();
         let (sg, draw) = self.plan_cascades(cam, aspect, sun, budget);
         self.queue.write_buffer(&self.sombras, 0, bytemuck::bytes_of(&sg));
+        if sg.misc[3] > 0.5 {
+            self.queue.write_buffer(&self.agent_vp, 0, bytemuck::cast_slice(&sg.vp[0])); // [render]
+        }
         for (i, m, _) in &draw {
             self.queue.write_buffer(&self.cascade_vp, *i as u64 * 256, bytemuck::cast_slice(&m.to_cols_array()));
         }
@@ -1864,7 +2229,8 @@ impl Renderer {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
             light_view_proj: sg.vp[0],
-            cam_pos: cam.eye().extend(1.0).into(),
+            // [render] w: reloj del fundido entre niveles (s desde que se creó el renderer).
+            cam_pos: cam.eye().extend(self.reloj_fijo.unwrap_or_else(|| self.reloj.elapsed().as_secs_f32())).into(),
             sun_dir: l.sun_dir.extend(0.0).into(),
             // [entorno amplio] Los .w libres llevan el alcance del terreno (ver `reach`).
             sun_color: l.sun_color.extend(self.reach[2]).into(),
@@ -1876,10 +2242,18 @@ impl Renderer {
             extra: [if !self.smooth_terrain { 0.0 } else if self.voxel_terrain { 2.0 } else { 1.0 }, self.water_level, self.moon, self.wind.0.rem_euclid(360.0).round() * 100.0 + self.wind.1.clamp(0.0, 99.0)],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
-        View { eye: cam.eye(), view_proj, near: (cam.distance * 0.002).clamp(0.1, 20.0), sun, cascades: draw }
+        View { eye: cam.eye(), view_proj, near: (cam.distance * 0.002).clamp(0.1, 20.0), sun, cascades: draw, focal: 1.0 / (cam.fov_y.to_radians() * 0.5).tan(), agentes: sg.misc[3] > 0.5 }
     }
 
-    fn make_targets(&self, width: u32, height: u32) -> Targets {
+    /// [render] ¿Sirven estos destinos para una salida de `w × h` con la escala y el SSAO de ahora?
+    fn targets_ok(&self, t: Option<&Targets>, w: u32, h: u32) -> bool {
+        t.is_some_and(|t| t.out == (w, h) && t.escala == self.escala && t.ssao.is_some() == self.ssao)
+    }
+
+    /// Destinos para una salida de `out_w × out_h`: la escena se dibuja a la escala de render.
+    fn make_targets(&self, out_w: u32, out_h: u32) -> Targets {
+        let escala = self.escala;
+        let (width, height) = if escala < 100 { ((out_w * escala).div_ceil(100).max(1), (out_h * escala).div_ceil(100).max(1)) } else { (out_w, out_h) };
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let make = |format, usage| {
             self.device
@@ -1888,7 +2262,7 @@ impl Renderer {
         };
         let msaa = if self.msaa > 1 { Some(make(self.format, wgpu::TextureUsages::RENDER_ATTACHMENT)) } else { None };
         // Con Hi-Z, la profundidad se lee después en un compute shader.
-        let depth_usage = if self.hiz_pipes.is_some() { wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::RENDER_ATTACHMENT };
+        let depth_usage = if self.hiz_pipes.is_some() || self.ssao { wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::RENDER_ATTACHMENT };
         let depth = make(DEPTH_FORMAT, depth_usage);
         let hiz = self.hiz_pipes.as_ref().map(|hp| {
             let sizes = hiz::level_sizes(width, height);
@@ -1922,7 +2296,82 @@ impl Renderer {
             let cull_bg = make_cull_bg(&self.device, &self.cull_bgl, &self.cols, &self.args_main2, &self.cull_params_main2, &self.visible, &all);
             HizTargets { levels, reduce_bg, down_bg, sizes, cull_bg }
         });
-        Targets { width, height, msaa, depth, hiz }
+        // [render] Pasadas de pantalla: SSAO lejano a media resolución y escala de render.
+        let p = &self.post;
+        let tex = |w: u32, h: u32, format, usage| {
+            self.device
+                .create_texture(&wgpu::TextureDescriptor { label: None, size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format, usage, view_formats: &[] })
+                .create_view(&Default::default())
+        };
+        fn entry(binding: u32, resource: wgpu::BindingResource<'_>) -> wgpu::BindGroupEntry<'_> {
+            wgpu::BindGroupEntry { binding, resource }
+        }
+        let ssao = self.ssao.then(|| {
+            let ao_size = (width.div_ceil(2), height.div_ceil(2));
+            let ao = tex(ao_size.0, ao_size.1, AO_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+            let bg_ssao = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &p.bgl_ssao,
+                entries: &[entry(0, self.globals.as_entire_binding()), entry(1, p.params_scene.as_entire_binding()), entry(2, wgpu::BindingResource::TextureView(&depth))],
+            });
+            let bg_apply = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &p.bgl_apply,
+                entries: &[entry(0, self.globals.as_entire_binding()), entry(1, p.params_scene.as_entire_binding()), entry(2, wgpu::BindingResource::TextureView(&depth)), entry(3, wgpu::BindingResource::TextureView(&ao))],
+            });
+            SsaoTargets { ao, size: ao_size, bg_ssao, bg_apply }
+        });
+        let escalado = (escala < 100).then(|| {
+            let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+            let color = tex(width, height, self.format, usage);
+            let full = tex(out_w, out_h, self.format, usage);
+            let bg = |src: &wgpu::TextureView| {
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &p.bgl_tex,
+                    entries: &[entry(1, p.params_out.as_entire_binding()), entry(4, wgpu::BindingResource::TextureView(src)), entry(5, wgpu::BindingResource::Sampler(&p.sampler))],
+                })
+            };
+            let (bg_up, bg_rcas) = (bg(&color), bg(&full));
+            EscaladoTargets { color, full, bg_up, bg_rcas }
+        });
+        Targets { width, height, msaa, depth, hiz, out: (out_w, out_h), escala, ssao, escalado }
+    }
+
+    /// [render] Un cuadro entero: la escena (a la escala de render), el SSAO lejano y el realce a
+    /// la salida. Con marcas de tiempo, la última pasada cierra la medida (el tiempo de GPU
+    /// incluye las pasadas de pantalla).
+    fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, t: &Targets, out: &wgpu::TextureView, view: &View, timestamps: Option<&wgpu::QuerySet>) -> FrameStats {
+        let scene_out = t.escalado.as_ref().map_or(out, |e| &e.color);
+        let st = self.encode(enc, t, scene_out, view, timestamps);
+        if t.ssao.is_none() && t.escalado.is_none() {
+            return st;
+        }
+        let p = &self.post;
+        self.queue.write_buffer(&p.params_scene, 0, bytemuck::cast_slice(&[t.width as f32, t.height as f32, t.height as f32 * 0.5 * view.focal, 0.0]));
+        self.queue.write_buffer(&p.params_out, 0, bytemuck::cast_slice(&[t.out.0 as f32, t.out.1 as f32, 0.0, 0.0]));
+        let pasada = |enc: &mut wgpu::CommandEncoder, label, target: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>, pipe: &wgpu::RenderPipeline, bg: &wgpu::BindGroup, ultima: bool| {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(label),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, resolve_target: None, ops: wgpu::Operations { load, store: wgpu::StoreOp::Store } })],
+                depth_stencil_attachment: None,
+                timestamp_writes: timestamps.filter(|_| ultima).map(|q| wgpu::RenderPassTimestampWrites { query_set: q, beginning_of_pass_write_index: None, end_of_pass_write_index: Some(1) }),
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(pipe);
+            pass.set_bind_group(0, bg, &[]);
+            pass.draw(0..3, 0..1);
+        };
+        if let Some(s) = &t.ssao {
+            let _ = s.size;
+            pasada(enc, "ssao", &s.ao, wgpu::LoadOp::Clear(wgpu::Color::WHITE), &p.ssao, &s.bg_ssao, false);
+            pasada(enc, "ssao aplicar", scene_out, wgpu::LoadOp::Load, &p.apply, &s.bg_apply, t.escalado.is_none());
+        }
+        if let Some(e) = &t.escalado {
+            pasada(enc, "escala: realce", &e.full, wgpu::LoadOp::Clear(wgpu::Color::BLACK), &p.up, &e.bg_up, false);
+            pasada(enc, "escala: nitidez", out, wgpu::LoadOp::Clear(wgpu::Color::BLACK), &p.rcas, &e.bg_rcas, true);
+        }
+        st
     }
 
     /// Tramos de caras a dibujar en la vista principal: descarte por frustum, orden de cerca a
@@ -1937,7 +2386,7 @@ impl Renderer {
             .chain(self.columns.values())
             .filter(|b| {
                 let (lo, hi) = curved_box(view.eye, b.lo, b.hi);
-                box_visible(&vp, lo, hi)
+                !b.entra && box_visible(&vp, lo, hi)
             })
             .map(|b| (((b.lo + b.hi) * 0.5 - view.eye).length_squared(), b))
             .collect();
@@ -2084,6 +2533,21 @@ impl Renderer {
             let cpu: &[DrawArgs] = if gpu { &[] } else { &shadow_cpu[k] };
             st.draws_shadow += self.draw_voxels(&mut pass, gpu.then(|| &self.args_shadow[*i]), slots, indirect, cpu, if gpu { 0 } else { offsets[k] });
         }
+        // [render] Sombra proyectada de los personajes y animales (mapa propio, cada cuadro).
+        if let (Some(buf), true) = (&self.agent_buf, view.agentes) {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sombra de los personajes"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &self.agent_map, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.agent_cast_pipe);
+            pass.set_bind_group(0, &self.agent_cast_bg, &[0]);
+            pass.set_vertex_buffer(0, buf.slice(..));
+            pass.draw(0..36, 0..self.agent_count);
+            st.agent_shadow = true;
+        }
         let (view_tex, resolve) = match &targets.msaa {
             Some(m) => (m, Some(out)),
             None => (out, None),
@@ -2098,7 +2562,7 @@ impl Renderer {
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: if last { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } }),
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: if last && targets.ssao.is_none() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: timestamps.map(|q| wgpu::RenderPassTimestampWrites { query_set: q, beginning_of_pass_write_index: Some(0), end_of_pass_write_index: if last { Some(1) } else { None } }),
@@ -2139,7 +2603,7 @@ impl Renderer {
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: if targets.ssao.is_none() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: timestamps.map(|q| wgpu::RenderPassTimestampWrites { query_set: q, beginning_of_pass_write_index: None, end_of_pass_write_index: Some(1) }),
@@ -2150,6 +2614,29 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.quads.slice(..));
             pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
             st.draws_main += self.draw_voxels(&mut pass, Some(&self.args_main2), slots, indirect, &[], 0);
+        }
+        // [render] Fundido entre niveles: las columnas que entran y las que salen, con tramado
+        // complementario y en una pasada aparte (técnicas del mod LOD §2.5). Son pocas: tramos de
+        // la CPU, uno por grupo de caras que mira a la cámara.
+        if !self.entrantes.is_empty() || !self.salientes.is_empty() {
+            let vp = frustum_planes(view.view_proj);
+            let entran = self.entrantes.iter().filter_map(|(k, slot, _)| self.columns.get(k).filter(|b| b.slot == *slot && b.entra));
+            let mut rangos = Vec::new();
+            for b in entran.chain(self.salientes.iter().map(|(b, _)| b)) {
+                let (lo, hi) = curved_box(view.eye, b.lo, b.hi);
+                if box_visible(&vp, lo, hi) {
+                    st.cols_fade += 1;
+                    push_groups(&mut rangos, b, &visible_dirs(view.eye, b.lo, b.hi));
+                }
+            }
+            if !rangos.is_empty() {
+                pass.set_pipeline(&self.fade_pipe);
+                pass.set_bind_group(0, &self.main_bg, &[]);
+                pass.set_vertex_buffer(0, self.quads.slice(..));
+                pass.set_index_buffer(self.quad_index.slice(..), wgpu::IndexFormat::Uint16);
+                st.quads_fade = rangos.iter().map(|a| a.instance_count as u64).sum();
+                st.draws_main += self.draw_voxels(&mut pass, None, 0, false, &rangos, 0);
+            }
         }
         self.refresh_detail();
         let detail = self.detail_buf.borrow();
@@ -2179,6 +2666,7 @@ impl Renderer {
         let mut agua: Vec<(f32, u32, u32)> = self
             .columns
             .values()
+            .chain(self.salientes.iter().map(|(b, _)| b)) // [render] el agua de las que salen sigue hasta liberarlas
             .filter(|b| b.water > 0 && {
                 let (lo, hi) = curved_box(view.eye, b.lo, b.hi);
                 box_visible(&vp, lo, hi)
@@ -2249,7 +2737,7 @@ impl Renderer {
         };
         let mut wait = t_wait.elapsed();
         let (w, h) = (frame.texture.width(), frame.texture.height());
-        if self.targets.as_ref().map(|t| (t.width, t.height)) != Some((w, h)) {
+        if !self.targets_ok(self.targets.as_ref(), w, h) {
             self.targets = Some(self.make_targets(w, h));
         }
         let v = self.write_globals(cam, hour, w as f32 / h as f32, self.shadow_budget);
@@ -2257,7 +2745,7 @@ impl Renderer {
         let mut enc = self.device.create_command_encoder(&Default::default());
         let measure = self.timestamps.is_some() && self.gpu_read.load(AO::SeqCst) == 0;
         let ts = if measure { self.timestamps.as_ref().map(|t| &t.0) } else { None };
-        let st = self.encode(&mut enc, self.targets.as_ref().unwrap(), &view, &v, ts);
+        let st = self.encode_frame(&mut enc, self.targets.as_ref().unwrap(), &view, &v, ts);
         if measure {
             let (set, resolve, read, _) = self.timestamps.as_ref().unwrap();
             enc.resolve_query_set(set, 0..2, resolve, 0);
@@ -2313,7 +2801,7 @@ impl Renderer {
         });
         let resolve_v = resolve.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
-        self.encode(&mut enc, &targets, &resolve_v, &v, None);
+        self.encode_frame(&mut enc, &targets, &resolve_v, &v, None);
         if let Some(ui) = ui {
             ui(&self.device, &self.queue, &mut enc, &resolve_v, (width, height));
         }

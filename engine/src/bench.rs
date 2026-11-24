@@ -77,6 +77,8 @@ struct Extra {
     agentes: Vec<String>, // [personajes]
     hiz: Vec<String>,
     csm: Vec<String>,
+    /// [render] Fundido, SSAO lejano y escala de render (técnicas del mod LOD, fases 4 y 6).
+    efectos: Vec<String>,
     /// [lod] Una fila por vista para `bench.json`.
     json: Vec<serde_json::Value>,
 }
@@ -116,7 +118,7 @@ pub fn run(o: &Options) -> Result<(), String> {
     let _ = writeln!(md, "| Vista | Generar+mallar (pared) | CPU generación | CPU mallado | Columnas | Generadas (ocultas) | Triángulos | Caras | Geometría en GPU | Megabúfer | Subido | Dibujos (principal / sombras) | Columnas / caras dibujadas | Caras de sombra | CPU por cuadro | Total por cuadro (sombra rehecha) | Total por cuadro (sombra en caché) | GPU pase principal | RSS |");
     let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     println!("{md}");
-    let mut extra = Extra { hiz: Vec::new(), csm: Vec::new(), agentes: Vec::new(), json: Vec::new() };
+    let mut extra = Extra { hiz: Vec::new(), csm: Vec::new(), efectos: Vec::new(), agentes: Vec::new(), json: Vec::new() };
     let mut json = serde_json::json!({ "version": crate::version::completa(), "adaptador": r.adapter_name.clone(), "hilos": o.threads, "niveles": o.levels, "tamano": [o.size.0, o.size.1] });
     // [lod] `MOTOR_BANCO=streaming`: solo la parte de streaming (para medir rápido).
     // `MOTOR_BANCO_VISTAS=peninsula,calle`: solo esas vistas (y sin la parte de streaming).
@@ -156,6 +158,16 @@ pub fn run(o: &Options) -> Result<(), String> {
     let _ = writeln!(md, "|---|---|---|---|---|---|");
     for l in &extra.csm {
         let _ = writeln!(md, "{l}");
+    }
+    // [render]
+    if !extra.efectos.is_empty() {
+        let _ = writeln!(md, "\n### Fundido entre niveles, SSAO lejano y escala de render\n");
+        let _ = writeln!(md, "GPU del pase principal (marcas de tiempo; con lavapipe valen las proporciones), mínimo de {} cuadros con la sombra en caché. Fundido: las 32 y las 128 columnas más cercanas entrando a la vez (el peor caso del vuelo: al recentrar se funden unas decenas). Diferencias de imagen contra la base (píxeles con diferencia > 8).\n", EFECTOS_CUADROS);
+        let _ = writeln!(md, "| Vista | Base | Fundido 32 / 128 columnas | SSAO (diferencia de imagen) | Escala 67 % (diferencia) | Prueba \"apagar solo si pierde\" |");
+        let _ = writeln!(md, "|---|---|---|---|---|---|");
+        for l in &extra.efectos {
+            let _ = writeln!(md, "{l}");
+        }
     }
     // [personajes]
     if !extra.agentes.is_empty() {
@@ -201,8 +213,8 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
         let tu = Instant::now();
         for op in ops {
             match op {
-                Op::Set(k, m) => r.set_column(k, &m),
-                Op::Remove(k) => r.remove_column(k),
+                Op::Set(k, m) | Op::Entra(k, m) => r.set_column(k, &m),
+                Op::Remove(k) | Op::Sale(k) => r.remove_column(k),
             }
         }
         upload += tu.elapsed();
@@ -364,6 +376,9 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
         r.hiz = hiz;
     }
     println!("   Sombras: {}", extra.csm.last().unwrap());
+    if matches!(v.slug, "peninsula" | "calle" | "real-cerro" | "real-rasante") {
+        bench_efectos(o, r, &cam, v, extra)?;
+    }
     // [personajes] Multitud de 2500 agentes alrededor de la vista: sin agentes, solo cajas
     // de siempre y con los modelos de micro-vóxeles cerca (como en el juego).
     if matches!(v.slug, "cerca" | "calle") {
@@ -381,10 +396,17 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
             let armar = t0.elapsed();
             r.set_agents(&cajas);
             let con = medir(r);
+            // [render] Lo mismo sin la sombra proyectada de los personajes (costo del mapa propio).
+            r.sombra_agentes = false;
+            let sin_sombra = medir(r);
+            if cerca > 0.0 {
+                let _ = r.capture_image(&cam, v.hour, w, h, None).save(format!("{}/bench-{}-multitud-sin-sombra.png", o.dir, v.slug));
+            }
+            r.sombra_agentes = true;
             if cerca > 0.0 {
                 let _ = r.capture_image(&cam, v.hour, w, h, None).save(format!("{}/bench-{}-multitud.png", o.dir, v.slug));
             }
-            fila.push(format!("{nombre}: {} instancias ({} KB), armadas en {armar:.2?}, cuadro {con:.1} ms", cajas.len(), cajas.len() * std::mem::size_of::<crate::detalle::Caja>() / 1024));
+            fila.push(format!("{nombre}: {} instancias ({} KB), armadas en {armar:.2?}, cuadro {con:.1} ms (sin sombra proyectada {sin_sombra:.1} ms)", cajas.len(), cajas.len() * std::mem::size_of::<crate::detalle::Caja>() / 1024));
         }
         r.set_agents(&[]);
         let l = format!("| {} | {sin:.1} ms | {} |", v.name, fila.join(" · "));
@@ -392,6 +414,71 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
         extra.agentes.push(l);
     }
     // [/personajes]
+    Ok(())
+}
+
+// --- [render] Efectos (fundido, SSAO, escala) ----------------------------------------------------
+
+const EFECTOS_CUADROS: usize = 5;
+
+/// GPU del pase principal (mínimo de unos cuadros con la sombra en caché; sin marcas de tiempo,
+/// el total del cuadro).
+fn gpu_min(r: &mut Renderer, cam: &OrbitCamera, hour: f32, w: u32, h: u32) -> f64 {
+    r.bench_frame(cam, hour, w, h);
+    (0..EFECTOS_CUADROS).map(|_| { let f = r.bench_frame(cam, hour, w, h); f.gpu_ms.unwrap_or(f.total_ms) }).fold(f64::INFINITY, f64::min)
+}
+
+fn bench_efectos(o: &Options, r: &mut Renderer, cam: &OrbitCamera, v: &View, extra: &mut Extra) -> Result<(), String> {
+    let (w, h) = o.size;
+    let (ssao0, esc0) = (r.ssao, r.escala);
+    r.ssao = false;
+    r.escala = 100;
+    let base = gpu_min(r, cam, v.hour, w, h);
+    let img_base = r.capture_image(cam, v.hour, w, h, None);
+    // Fundido: las columnas más cercanas entrando a la vez (a mitad de camino).
+    let mut fundido = Vec::new();
+    for n in [32, 128] {
+        r.forzar_fundido(cam.target, n);
+        fundido.push(gpu_min(r, cam, v.hour, w, h));
+        if n == 32 {
+            let _ = r.capture_image(cam, v.hour, w, h, None).save(format!("{}/bench-{}-fundido.png", o.dir, v.slug));
+        }
+        r.terminar_fundidos();
+        r.maintain();
+    }
+    let quieto = diff(&img_base, &r.capture_image(cam, v.hour, w, h, None));
+    // SSAO lejano.
+    r.ssao = true;
+    let ssao = gpu_min(r, cam, v.hour, w, h);
+    let img = r.capture_image(cam, v.hour, w, h, None);
+    let _ = img.save(format!("{}/bench-{}-ssao.png", o.dir, v.slug));
+    let d_ssao = diff(&img_base, &img);
+    r.ssao = false;
+    // Escala de render al 67 %.
+    r.escala = 67;
+    let esc = gpu_min(r, cam, v.hour, w, h);
+    let img = r.capture_image(cam, v.hour, w, h, None);
+    let _ = img.save(format!("{}/bench-{}-escala67.png", o.dir, v.slug));
+    let d_esc = diff(&img_base, &img);
+    let prueba = crate::autoajuste::PruebaEscalado::decidir(&[base, base], &[esc, esc]);
+    r.escala = 100;
+    let pct = |x: f64| format!("{x:.1} ms ({:+.1} %)", 100.0 * (x / base - 1.0));
+    let l = format!(
+        "| {} | {base:.1} ms | {} / {} (quieto después: {:.3} %) | {} ({:.2} %) | {} ({:.1} %) | {} |",
+        v.name,
+        pct(fundido[0]),
+        pct(fundido[1]),
+        quieto * 100.0,
+        pct(ssao),
+        d_ssao * 100.0,
+        pct(esc),
+        d_esc * 100.0,
+        if prueba { "se queda" } else { "se apaga (no gana > 3 %)" }
+    );
+    println!("   Efectos: {l}");
+    extra.efectos.push(l);
+    r.ssao = ssao0;
+    r.escala = esc0;
     Ok(())
 }
 
@@ -472,11 +559,18 @@ fn window_step(s: &mut Streamer, r: &mut Renderer, terrain: &TerrainGen, cam: &m
     crate::session::view_to_streamer(s, cam, view_h);
     let tv = t0.elapsed().as_secs_f64() * 1000.0;
     let up = crate::session::upload_ops(s, r, crate::session::WINDOW_VERTEX_BUDGET);
+    let (e, sa) = r.fundidos(); // [render]
+    FUNDIDOS_MAX.fetch_max(e + sa, Ordering::Relaxed);
+    FUNDIDOS_TOTAL.fetch_add(e + sa, Ordering::Relaxed);
     if std::env::var("MOTOR_BANCO_DETALLE").is_ok() && (t0.elapsed().as_secs_f64() * 1000.0 > 6.0 || cpu_ms() - c0 > 1.0) {
         println!("cuadro lento (cpu {:.2}): vista {tv:.2} · poll {:.2} · maintain {:.2} · subir {:.2} ({} órdenes, {} KB)", cpu_ms() - c0, up.poll_ms, up.maintain_ms, up.ms - up.poll_ms - up.maintain_ms, up.ops, up.bytes / 1024);
     }
     (t0.elapsed().as_secs_f64() * 1000.0, up.ms, up.bytes, cpu_ms() - c0)
 }
+
+/// [render] Columnas fundiéndose a la vez en el vuelo: máximo y suma por cuadro.
+static FUNDIDOS_MAX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static FUNDIDOS_TOTAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn pace(t0: Instant) {
     if let Some(rest) = FRAME.checked_sub(t0.elapsed()) {
@@ -515,12 +609,17 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
     let dir = (cerro - city).normalize();
     let near = |c: Vec2| OrbitCamera { target: Vec3::new(c.x, 0.0, c.y), yaw: look_yaw(dir), pitch: 32.0, distance: 150.0, fov_y: 50.0 };
 
+    // [render] Como en la ventana: con fundido entre niveles (el streamer manda `Entra`/`Sale`).
+    // `MOTOR_SIN_FUNDIDO=1`: sin fundido (para medirlo con el mismo binario).
+    r.fundir = std::env::var("MOTOR_SIN_FUNDIDO").is_err();
     // 1) Vuelo: zoom 150 m → 3 km → 150 m (4 s cada tramo) y 3 km hacia el cerro a 40 m/s.
     r.clear_columns();
     r.maintain();
     let mut s = new_streamer(o, terrain, store);
     let mut cam = near(city);
     let t_first = settle(&mut s, r, terrain, &mut cam, view_h, 240.0);
+    FUNDIDOS_MAX.store(0, Ordering::Relaxed); // [render]
+    FUNDIDOS_TOTAL.store(0, Ordering::Relaxed);
     let (b0, c0) = (r.uploaded_bytes, s.stats.columns_built);
     let mut work = Vec::new();
     let mut upload_max = 0.0f64;
@@ -554,6 +653,7 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
     let (hits, hidden) = (s.stats.cache_hits, s.stats.hidden_skipped);
     let (occl_n, occl_max, occl_hilo) = (s.stats.occl_evals, s.stats.occl_ms_max, s.stats.occl_thread_ms_max);
     let p = percentiles(&work);
+    let (fund_max, fund_total) = (FUNDIDOS_MAX.load(Ordering::Relaxed), FUNDIDOS_TOTAL.load(Ordering::Relaxed)); // [render]
     let pc = percentiles(&work_cpu);
     drop(s);
     let _ = writeln!(md, "\n### Streaming: vuelo, zoom de ida y vuelta, teletransporte y salto al recentrar\n");
@@ -590,6 +690,7 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
     for (k, v) in vueltas.iter().enumerate() {
         let _ = writeln!(md, "| Zoom 150 m ↔ 3 km, vuelta {} | — | — | — | — | — | — | — | {} | {} | — | {:.1} MB | 0 | {:.1} s |", k + 1, v.0, v.1, v.2 as f64 / 1048576.0, v.3);
     }
+    let _ = writeln!(md, "\nFundido entre niveles en el vuelo: hasta {fund_max} columnas a la vez, {:.1} en promedio por cuadro.", fund_total as f64 / work.len().max(1) as f64);
     let _ = writeln!(md, "\nOclusión por relieve en el vuelo: {occl_n} evaluaciones; la peor, {occl_max:.2} ms en el hilo principal (armar las cajas) y {occl_hilo:.2} ms en su hilo (el barrido).");
     let ratio = if vueltas[0].0 > 0 { vueltas[1].0 as f64 / vueltas[0].0 as f64 } else { 0.0 };
     let _ = writeln!(md, "\nZoom de ida y vuelta: la segunda vuelta genera el {:.0} % de las columnas de la primera.", ratio * 100.0);
@@ -653,6 +754,7 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
             }
             drop(s);
             r.maintain();
+            r.terminar_fundidos(); // [render]
             r.bench_frame(&cam, v.hour, w, h);
             imgs.push(r.capture_image(&cam, v.hour, w, h, None));
         }
@@ -662,6 +764,8 @@ pub fn bench_streaming(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>,
         saltos.insert(v.slug.to_string(), serde_json::json!(d));
     }
     json["salto_al_recentrar"] = serde_json::Value::Object(saltos);
+    r.terminar_fundidos(); // [render]
+    r.fundir = false;
     Ok(StreamReport { md, json })
 }
 

@@ -165,6 +165,27 @@ fn curva_tonal(c: vec3<f32>) -> vec3<f32> {
     return c * (l2 / l);
 }
 
+// --- [render] Sombra proyectada en el mapa de los personajes ----------------------------------
+// Las mismas cajas (sin las sombras de contacto) con la matriz de la cascada 0, sin curvatura
+// (como el pase de sombras del terreno).
+struct CascadaVp {
+    m: mat4x4<f32>,
+};
+@group(0) @binding(6) var<uniform> cascada: CascadaVp;
+
+@vertex
+fn vs_proyecta(v: VIn, @builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+    if (v.tam.y <= 0.0) {
+        return vec4(2.0, 2.0, 2.0, 1.0);
+    }
+    var corners = CORNERS;
+    var tri = TRI;
+    let c = corners[(vi / 6u) * 4u + tri[vi % 6u]];
+    let local = vec3((c.x - 0.5) * v.tam.x, c.y * v.tam.y, (c.z - 0.5) * v.tam.z) + v.desde;
+    let p = v.pos + girar(inclinar(local, sin(v.inclina), cos(v.inclina)), sin(v.giro), cos(v.giro));
+    return cascada.m * vec4(p, 1.0);
+}
+
 // --- Sombras de contacto ---------------------------------------------------------------------
 struct SOut {
     @builtin(position) clip: vec4<f32>,

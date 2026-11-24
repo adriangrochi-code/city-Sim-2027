@@ -47,6 +47,7 @@ pub fn upload_ops(streamer: &mut Streamer, r: &mut Renderer, vertex_budget: usiz
     let b0 = r.uploaded_bytes;
     // Tope de vértices y de bytes (lo que entra en el presupuesto de tiempo de subida).
     let byte_budget = if vertex_budget == usize::MAX { usize::MAX } else { streamer.ritmo.bytes() };
+    streamer.fundido = r.fundir; // [render]
     let ops = streamer.poll_budget(vertex_budget, byte_budget);
     let poll_ms = t0.elapsed().as_secs_f64() * 1000.0;
     let n = ops.len();
@@ -63,6 +64,12 @@ pub fn upload_ops(streamer: &mut Streamer, r: &mut Renderer, vertex_budget: usiz
                 streamer.give_back(k, m);
             }
             Op::Remove(k) => r.remove_column(k),
+            // [render] Fundido entre niveles (técnicas del mod LOD §2.5).
+            Op::Entra(k, m) => {
+                r.set_column_fade(k, &m);
+                streamer.give_back(k, m);
+            }
+            Op::Sale(k) => r.fade_out_column(k),
         }
     }
     let bytes = r.uploaded_bytes - b0;

@@ -73,6 +73,18 @@ fn corner(v: VIn) -> Corner {
     let ax = dir_axis(c.dir);
     let o = origins[v.slot];
     c.pos = o.xyz + vec3<f32>(base + unit((ax + 1u) % 3u) * du + unit((ax + 2u) % 3u) * dv) * o.w;
+    // [render] Relleno de los niveles gruesos (técnicas del mod LOD §2.1, ver
+    // `mesher::mesh_chunk_relleno`): la cara de arriba baja `corte` dieciseisavos de vóxel; en los
+    // costados, las esquinas de arriba bajan lo mismo y las de abajo se corren `corr` (con signo).
+    let corte = f32((v.qa >> 26u) & 15u);
+    let corr = f32(i32((v.qb >> 26u) << 27u) >> 27u);
+    if (c.dir == 0u) {
+        c.pos.y -= corte / 16.0 * o.w;
+    } else if (ax != 1u) {
+        // Costados en x: u es la vertical; en z, v.
+        let arriba = select(dv == h, du == w, ax == 0u);
+        c.pos.y += select(corr, -corte, arriba) / 16.0 * o.w;
+    }
     return c;
 }
 
@@ -84,6 +96,7 @@ struct VOut {
     @location(3) ao: f32,
     @location(4) voxel: f32,
     @location(5) smooth_n: vec3<f32>,
+    @location(6) @interpolate(flat) slot: u32,
 };
 
 @group(0) @binding(4) var<uniform> palette: array<vec4<f32>, 96>;
@@ -109,6 +122,7 @@ fn vs_main(v: VIn) -> VOut {
     let sx = (f32(sw & 255u) - 128.0) / 127.0;
     let sz = (f32(sw >> 8u) - 128.0) / 127.0;
     o.smooth_n = vec3(sx, sqrt(max(1.0 - sx * sx - sz * sz, 0.0)), sz);
+    o.slot = v.slot;
     return o;
 }
 
@@ -310,6 +324,38 @@ fn along(world: vec3<f32>, n: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(v: VOut) -> @location(0) vec4<f32> {
+    return sombrear(v);
+}
+
+// [render] Fundido entre niveles (técnicas del mod LOD §2.5, `FundidoNiveles` +
+// `lod_textura_fundido`): las columnas que entran y las que salen se dibujan en una pasada aparte
+// con este fragmento, el único con `discard` (el principal no lo tiene: conserva la prueba de
+// profundidad temprana). Tramado de Bayer 4×4: la que entra muestra los píxeles con umbral menor
+// que su avance y la que sale los demás, así a cada momento cada píxel lo pinta una sola.
+// `fundido[slot]`: 1 + el momento en que empezó (s, reloj de `cam_pos.w`) si entra; el opuesto si
+// sale. El avance sale del reloj: no se escribe en cada cuadro.
+@group(0) @binding(9) var<storage, read> fundido: array<f32>;
+fn bayer4(p: vec2<u32>) -> u32 {
+    let x = p.x & 3u;
+    let y = p.y & 3u;
+    let a = (x ^ y);
+    // Matriz de Bayer 4×4 por intercalado de bits: b = (x^y)₀ y₀ (x^y)₁ y₁.
+    return ((a & 1u) << 3u) | ((y & 1u) << 2u) | ((a & 2u)) | ((y & 2u) >> 1u);
+}
+@fragment
+fn fs_fade(v: VOut) -> @location(0) vec4<f32> {
+    let c = sombrear(v);
+    let f = fundido[v.slot];
+    let p = clamp((g.cam_pos.w - (abs(f) - 1.0)) / 0.4, 0.0, 1.0);
+    let umbral = (f32(bayer4(vec2<u32>(v.clip.xy))) + 0.5) / 16.0;
+    let ver = select(umbral >= p, umbral < p, f > 0.0);
+    if (!ver) {
+        discard;
+    }
+    return c;
+}
+
+fn sombrear(v: VOut) -> vec4<f32> {
     let n = normalize(v.normal);
     let mat = u32(v.color.a * 255.0 + 0.5);
     // Variación de tono por vóxel: se ve cada bloque aunque las caras estén unidas (en la
@@ -358,10 +404,10 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // [render] Franja de pasto en los vóxeles grandes (técnicas del mod LOD §2.15): desde el
     // vóxel de 2 m el costado del vóxel de pasto es verde solo en sus ~30 cm de arriba y tierra
     // debajo, así las barrancas y los escalones gruesos se leen como tierra y no como paredes
-    // verdes, solo donde la ladera es empinada. (Desde el vóxel de 64 m la malla está bajada `vóxel − 3 m`, ver `lod::far_drop`.)
+    // verdes, solo donde la ladera es empinada. ([render] Con el relleno la franja se mide desde la
+    // grilla del vóxel; ya no hay malla bajada.)
     if (abs(n.y) < 0.5 && v.voxel >= 2.0 && (mat == 1u || mat == 20u || mat == 49u || mat == 53u)) {
-        let off = select(0.0, v.voxel - 3.0, v.voxel >= 63.0);
-        let yv = (v.world.y + off) / v.voxel;
+        let yv = v.world.y / v.voxel;
         let desde_arriba = (floor(yv + 0.0001) + 1.0 - yv) * v.voxel;
         let tierra = srgb_to_linear(vec3(124.0, 98.0, 70.0) / 255.0) * tint; // `palette::DIRT`
         // Solo en las barrancas (ladera empinada según la normal suave): en una pendiente suave

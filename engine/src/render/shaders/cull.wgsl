@@ -113,7 +113,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         let dz = max(abs(p.eye.z - c.lo.z), abs(p.eye.z - c.hi.z));
         lo.y -= (dx * dx + dz * dz) / 12742000.0;
     }
-    var vis = c.hi.w > 0.5 && box_visible(lo, c.hi.xyz);
+    // hi.w: 0 = libre, 1 = estable, 2 = entrando, 3 = saliendo (fundido entre niveles, que se
+    // dibuja aparte). La vista principal y el Hi-Z, solo las estables; las sombras, también las
+    // que entran (las que salen ya no tiran sombra).
+    let estado = c.hi.w;
+    var vis = estado > 0.5 && estado < select(1.5, 2.5, p.shadow == 1u) && box_visible(lo, c.hi.xyz);
     if (p.shadow == 1u && u32(c.lo.w) > p.max_lod) {
         vis = false;
     }
