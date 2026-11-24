@@ -132,22 +132,45 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     let light = g.sun_color.rgb * (ndl + trans) * sh + sky * 0.55 * g.params.w * ao + moon;
     var col = v.color * light;
     let d = distance(v.world, g.cam_pos.xyz);
-    let fog = 1.0 - exp(-d * g.params.x);
+    // [render] Niebla por altura y dispersión ancha del sol, como en voxel.wgsl.
+    let fog = 1.0 - exp(-d * g.params.x * niebla_altura(g.cam_pos.y, v.world.y));
     let vdir = normalize(v.world - g.cam_pos.xyz);
-    let s = pow(max(dot(vdir, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
-    let fog_c = mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s * 0.6);
+    let cs = max(dot(vdir, g.sun_dir.xyz), 0.0);
+    let s = (pow(cs, 6.0) * 0.6 + pow(cs, 2.0) * 0.12 * (0.6 + 0.4 * (1.0 - max(g.sun_dir.y, 0.0)))) * (1.0 - g.params.y);
+    let fog_c = mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s);
     col = mix(col, fog_c, clamp(fog, 0.0, 0.88));
     return vec4(curva_tonal(col), 1.0);
 }
 
-// Curva tonal suave: hasta 0,75 de luminancia no toca nada; más arriba comprime de a poco (sin
-// cambiar el tono), así los claros al sol no se queman en amarillo saturado.
+// Curva tonal suave: hasta 0,75 de luminancia, un contraste leve en los medios ([render]: las
+// sombras ~5 % más hondas, los medios ~3 % más claros; continua en 0 y en 0,75); más arriba
+// comprime de a poco (sin cambiar el tono), así los claros al sol no se queman en amarillo
+// saturado. La misma curva en el cielo, el agua, la flora y los agentes.
 fn curva_tonal(c: vec3<f32>) -> vec3<f32> {
     let l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    if (l <= 0.75) {
+    if (l <= 0.0) {
         return c;
+    }
+    if (l <= 0.75) {
+        let l2 = l + 0.6 * l * (0.75 - l) * (l - 0.3);
+        return c * (l2 / l);
     }
     let x = l - 0.75;
     let l2 = 0.75 + x / (1.0 + x * 2.5);
     return c * (l2 / l);
+}
+
+// [render] Niebla más densa abajo (el aire húmedo de la costa y los bañados) y más rala en los
+// cerros: densidad proporcional a exp(−y/H) promediada a lo largo del rayo, relativa a la de
+// 120 m de altura y suavizada (entre ×0,8 y ×1,2 de la de antes).
+fn niebla_altura(ya: f32, yb: f32) -> f32 {
+    let hh = 450.0;
+    let a = max(ya, 0.0);
+    let b = max(yb, 0.0);
+    let dy = b - a;
+    var m = exp(-a / hh);
+    if (abs(dy) > 1.0) {
+        m = hh * (exp(-a / hh) - exp(-b / hh)) / dy;
+    }
+    return clamp(mix(1.0, m / 0.766, 0.5), 0.8, 1.2);
 }

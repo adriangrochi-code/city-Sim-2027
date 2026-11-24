@@ -5,8 +5,12 @@
 > motor (`engine/`) lo que el mod LOD de Minecraft (`/home/user/minecraft-lod`, Java/NeoForge,
 > versión 0.26.38) ya resolvió y midió.
 >
-> **Estado al 2026-11-23:** hechas las fases **0, 1, 2 y 5** (ver §5, resultados y desvíos del
-> plan); las fases 3, 4 y 6 siguen pendientes. Código nuevo: `engine/src/cache.rs`,
+> **Estado al 2026-11-24:** hechas las fases **0, 1, 2 y 5** (ver §5) y, en parte, la **3**
+> (prefiltrado de alturas y oclusión fuera del *greedy* en lo más grueso) y la **4** (niebla de lo
+> que falta); arreglados los tirones del vuelo que había dejado la v0.11.0 (ver §6). Faltan de la
+> fase 3 la cobertura de ediciones (§2.3) y el relleno (§2.1, con lo que se iría `far_drop`), de
+> la 4 el fundido entre niveles (§2.5) y toda la 6 salvo la franja de pasto (§2.15 b). Cambios
+> de esta tanda marcados con `[render]`. Código nuevo: `engine/src/cache.rs`,
 > `relieve.rs`, `autoajuste.rs`; cambios marcados con `[lod]` en `stream.rs`, `lod.rs`,
 > `session.rs`, `bench.rs`, `save.rs`, `app.rs`, `menu.rs`, `mesher.rs`, `render/mod.rs`, `agua.rs`
 > y `world/mod.rs` (`terrain.rs` no se tocó: las cotas del relieve se arman con `height` y
@@ -898,3 +902,118 @@ Personalizado sin cambios; preset aplicado ida y vuelta).
   se generan en milisegundos).
 - El auto-ajuste no se probó en una ventana real (acá no hay pantalla): sus decisiones están
   cubiertas con series sintéticas.
+
+---
+
+## 6. Tirones del vuelo, fases 3 y 4 (en parte) y calidad de imagen (2026-11-24)
+
+> Medido con lavapipe (4 núcleos, 1280×720, MSAA 4×). La máquina la compartían otros agentes
+> compilando: las tablas de tiempo son de corridas con la máquina quieta (carga ~1) o, donde se
+> dice, con `chrt -f 1` (el proceso medido por encima de los demás). "Antes" es la v0.11.0
+> (commit `68a51e7`) compilada igual. El banco ahora también da la **CPU del hilo principal** por
+> cuadro (`CLOCK_THREAD_CPUTIME_ID`), que no cuenta lo que el sistema le quita al hilo.
+
+### 6.1 Por qué tironeaba el vuelo (regresión de v0.11.0)
+
+Medido por partes con la CPU del hilo (`MOTOR_BANCO_DETALLE=1`), no eran el megabúfer ni las
+tablas del descarte, sino cuatro cosas:
+
+| Causa | Costo medido | Arreglo |
+|---|---|---|
+| `covered()` de cada retirada en **cada** cuadro, recorriendo en cada nivel fino todo lo que ese nivel quiere | 4–5 ms por cuadro con ~740 retiradas esperando (zoom y vuelo), 100+ cuadros | Se miran solo si cambió algo de lo que decide la cobertura (versiones, subidas, tapadas) y con un índice de lo que falta proyectado a los niveles gruesos (`missing_index`/`covered_by`; el test compara con `covered`) |
+| El mapa de la caché de columnas (entradas de ~250 B) se duplicaba al crecer | 4–17 ms en un solo cuadro, 6 veces por vuelo | Malla en caja (`Box<Mesh>`) y lugar reservado según el presupuesto |
+| ~370 000 `queue.write_buffer` en el vuelo (caras, origen, visibilidad y fila de la tabla por columna, más una por retirada), cada uno con su búfer intermedio | 40 % del trabajo del hilo principal (0,54 s de escritura + 0,51 s de envío) | `Subidas`: las caras van directo a un `StagingBelt`; las tablas de columnas y orígenes tienen espejo en la CPU y se suben por tramos al final del cuadro (la visibilidad, que también escribe la GPU, solo en los lugares tocados) |
+| Recentrar rearmaba y comparaba los conjuntos de **todos** los niveles, y el cuadro que recentraba subía además el presupuesto entero | 1,5–3 ms en los cuadros del p99 | Los niveles cuyo anillo y hueco no se movieron no se tocan; lo gastado en recentrar y recibir sale del presupuesto de subida del cuadro, y el envío a la GPU del cuadro siguiente entra en el costo por byte (`RitmoSubida::medir_envio`) |
+
+Lo que queda de los cuadros > 1 ms es casi todo el `queue.submit` de las copias (~0,4 ms): con
+lavapipe las copias se ejecutan en el mismo hilo al enviar (en una placa son de la GPU).
+
+| Vuelo (84 s), máquina quieta, dos corridas | Fase 0 (§5.3) | v0.11.0 | Ahora |
+|---|---|---|---|
+| Cuadro p50 / p95 / p99 | 0,07 / 1,04 / 1,71 ms | 0,08 / 1,58–1,66 / **2,40–2,46** ms | 0,11 / 1,25 / **1,77–1,81** ms |
+| 1 % peor | 2,48 ms | 3,54–3,75 ms | 2,15–2,51 ms |
+| Peor cuadro / peor subida | 8,3 / 8,3 ms | **20,0–20,5** ms | **5,4–5,7 / 4,9–5,4** ms |
+| CPU del hilo: p99 / peor / total | — | — | 1,65 / 2,5–5,7 ms / 2,04 s |
+| Teletransporte Lejos → Calle: visible / todo / peor cuadro | 1,06 / 1,06 s / — | 0,91–0,96 / 0,96–1,01 s / 8,8–9,4 ms | 0,91–0,94 / 0,94–0,98 s / 4,0–5,7 ms |
+| Zoom de ida y vuelta: generadas en la 2.ª vuelta | 100 % | 0 % | 0 % |
+
+Con la máquina cargada (otros agentes compilando, carga 9–14) el tiempo de pared no sirve
+(p99 5–6 ms en las dos versiones); con `chrt -f 1`: v0.11.0 p99 2,15 ms y peor 20,2 ms, ahora
+p99 1,66–1,73 ms y peor 6,5–10,9 ms.
+
+**Criterios:** peor cuadro ≤ 8 ms y por debajo del de antes: **sí** (20 → 5,4–5,7 ms, y 8,3 en la
+Fase 0). p99: −26 % contra la v0.11.0, pero **igual** que la Fase 0 (1,71 ms): el criterio de −30 %
+contra ella **no se cumple**. Peor subida ≤ 4 ms: **no** (4,9–5,4 ms). Lo que falta es el envío de
+las copias en lavapipe (ver arriba) y el recentrado de los niveles finos; bajar el presupuesto de
+subida a 1 ms casi no movió el p99 (1,66 → 1,49 ms con `chrt`), así que no es el presupuesto.
+
+### 6.2 Fase 3 (en parte): prefiltrado y oclusión fuera del *greedy*
+
+- **Altura prefiltrada** (`stream::prefiltra`, `altura_prefiltrada`): desde el vóxel de 2 m (nivel 3)
+  la altura de un vóxel es el promedio de sus 4 esquinas; las esquinas se comparten entre vecinos,
+  así que cuesta lo mismo que antes (CPU de generación igual: Península 2,35 → 2,54 s, Cerro
+  9,5 → 10,2 s, dentro del ruido). Primero se probó 2×2 y 3×3 muestras por vóxel más un **voto del
+  material**: la generación costaba 2,5–4 veces más y el voto se quedaba siempre con el pasto más
+  común (el campo lejano del Cerro perdía sus manchas verdes, 22 % de píxeles cambiados): se
+  descartó. El material sigue saliendo del centro del vóxel. `MOTOR_SIN_PREFILTRO=1` lo apaga
+  para medir.
+- **Oclusión por vértice fuera de la clave del *greedy*** (`mesher::AoModo`): terreno sin oclusión
+  desde el nivel 6 (16 m) y nada desde el 8 (64 m). Se probó desde el nivel 4 como decía §2.14: el
+  shader todavía muestra la oclusión en el borde de adentro de cada anillo (vóxeles de ~4 px) y el
+  Cerro se veía más claro y plano; desde el 6 la imagen cambia 0,005 %.
+
+| Vista | Caras antes → ahora | Diferencia de imagen |
+|---|---|---|
+| Ciudad de cerca | 0,78 → 0,75 M (−4 %) | 0,001 % |
+| Calle | 0,73 → 0,71 M (−3 %) | 0,000 % |
+| Península | 0,54 → 0,51 M (−6 %) | 0,18 % |
+| Lejos (9 km) | 0,26 → 0,23 M (−12 %) | 0,17 % |
+| Cerro | 1,74 → 1,61 M (−7 %) | 4,5 % (relieve un poco más suave) |
+| Cerro, rasante | 2,08 → 1,95 M (−6 %) | 2,2 % |
+
+Los niveles 0–2 quedan iguales (Calle y Ciudad de cerca ≤ 0,001 %). **Criterios:** caras en
+niveles ≥ 4 −10 %: en Lejos sí (−12 %), en el resto −6/−7 %. **Salto al recentrar: no bajó**
+(Península 4,36 → 4,39 %, Lejos 0,46 → 0,47 %): esa medida la dominan los cambios de los niveles
+finos (flora, aspecto vóxel de cerca), que el prefiltrado no toca. Determinismo: dos corridas,
+diferencia 0 (los PNG son idénticos byte a byte).
+
+**No se hizo:** cobertura de ediciones (§2.3: hay que releer el nivel 0 de cada celda porque las
+cargas se unen de a una, con riesgo de huecos y de romper el determinismo) y relleno (§2.1: toca el
+formato de `Quad`, el *greedy*, `corner` y las sombras); por eso `far_drop` sigue.
+
+### 6.3 Fase 4 (en parte): niebla de lo que falta
+
+`Streamer::sectores_faltan` (64 sectores alrededor del centro de los anillos, cada 100 ms o cuando
+cambia algo): la distancia a la primera columna querida que no está en la GPU y cuya zona no tapa
+ninguna otra dibujada (de otro nivel, aunque esté retirada); las tapadas por el relieve no cuentan.
+`Renderer::set_faltan` la sube a un búfer (binding 8) y `voxel.wgsl`/`water.wgsl` funden con la
+niebla desde un 20 % antes (`hole_fog`, entre dos sectores manda el más cercano). El plano de
+respaldo del río usa `fs_plano` (está más allá del último anillo). Quieto y ocioso no hay nada que
+falte: la imagen no cambia (el banco no la usa). Test: al empezar todos los sectores en 0, al
+terminar ninguno, al moverse > 0. **No se hizo** el fundido con tramado (§2.5) ni se midió el
+criterio "ningún píxel de río donde hay tierra" en el vuelo (el banco no dibuja en el vuelo).
+
+### 6.4 Calidad de imagen y franja de pasto
+
+- **Variación de color a gran escala** del terreno natural (`voxel.wgsl`): zonas de 400 m a 1,3 km
+  algo más húmedas o más secas (±6 %).
+- **Niebla por altura** (`niebla_altura`, en vóxeles, agua, flora y agentes): densidad ∝ exp(−y/450 m)
+  promediada en el rayo, entre ×0,8 y ×1,2 de la de antes; **dispersión ancha del sol** además del
+  halo (más con el sol bajo).
+- **Curva tonal**: un contraste leve en los medios (sombras ~5 % más hondas, medios ~3 % más claros),
+  ahora también en el cielo y el agua para que el horizonte siga empalmando.
+- **Franja de pasto** (§2.15 b): desde el vóxel de 2 m el costado del vóxel de pasto es tierra salvo
+  sus 30 cm de arriba, **solo en las barrancas** (normal suave empinada): en las pendientes suaves
+  dibujaba curvas de nivel marrones (se vio en la vista rasante y se corrigió).
+
+Capturas (arriba antes, abajo después): `docs/capturas/render-rasante-antes-despues.jpg`,
+`render-cerro-antes-despues.jpg`, `render-peninsula-antes-despues.jpg`,
+`render-noche-antes-despues.jpg`, `render-cerca-antes-despues.jpg`.
+
+### 6.5 Pendiente y riesgos
+
+- Fase 3: cobertura (§2.3) y relleno (§2.1, quitar `far_drop`). Fase 4: fundido (§2.5). Fase 6:
+  SSAO lejano (§2.13), tinte de la flora en el suelo (§2.15 a) y escalado (§2.16).
+- Todo medido en lavapipe: el envío de copias que queda en el p99 en una placa es de la GPU.
+- La niebla de lo que falta se ve solo en la ventana (el banco no la dibuja): revisarla en una
+  placa al teletransportarse y al alejar rápido.

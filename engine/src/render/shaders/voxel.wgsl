@@ -158,8 +158,12 @@ fn vnoise(p: vec2<f32>) -> f32 {
 // que dispersa el aire), y nada de eso de noche.
 fn fog_color(world: vec3<f32>) -> vec3<f32> {
     let vdir = normalize(world - g.cam_pos.xyz);
-    let s = pow(max(dot(vdir, g.sun_dir.xyz), 0.0), 6.0) * (1.0 - g.params.y);
-    return mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s * 0.6);
+    let cs = max(dot(vdir, g.sun_dir.xyz), 0.0);
+    // [render] Además del halo cercano al sol, una dispersión ancha (más con el sol bajo): la
+    // bruma del lado del sol es más clara y cálida en un abanico grande, no solo alrededor del disco.
+    let ancho = pow(cs, 2.0) * 0.12 * (0.6 + 0.4 * (1.0 - max(g.sun_dir.y, 0.0)));
+    let s = (pow(cs, 6.0) * 0.6 + ancho) * (1.0 - g.params.y);
+    return mix(g.sky_horizon.rgb, g.sky_horizon.rgb * 0.55 + g.sun_color.rgb * 0.45, s);
 }
 
 // [render] Niebla de lo que falta (técnicas del mod LOD §2.12): por sector alrededor del centro
@@ -190,6 +194,21 @@ fn reach_fog(world: vec3<f32>) -> f32 {
     }
     let d = distance(world.xz, vec2(g.sky_top.w, g.sky_horizon.w));
     return smoothstep(r * 0.6, r * 0.97, d);
+}
+
+// [render] Niebla más densa abajo (el aire húmedo de la costa y los bañados) y más rala en los
+// cerros: densidad proporcional a exp(−y/H) promediada a lo largo del rayo, relativa a la de
+// 120 m de altura y suavizada (entre ×0,8 y ×1,2 de la de antes).
+fn niebla_altura(ya: f32, yb: f32) -> f32 {
+    let hh = 450.0;
+    let a = max(ya, 0.0);
+    let b = max(yb, 0.0);
+    let dy = b - a;
+    var m = exp(-a / hh);
+    if (abs(dy) > 1.0) {
+        m = hh * (exp(-a / hh) - exp(-b / hh)) / dy;
+    }
+    return clamp(mix(1.0, m / 0.766, 0.5), 0.8, 1.2);
 }
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -326,6 +345,30 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     ln = normalize(mix(ln, n, vox_look));
     albedo *= mix(1.0, 0.93 + 0.14 * hash3(cell + vec3(5.0, 11.0, 3.0)), vox_look);
     albedo *= 1.0 - mix(select(0.18, 0.05, terr), 0.22, vox_look) * line;
+    // [render] Variación de color a gran escala en el terreno natural: zonas de cientos de metros
+    // a un par de kilómetros algo más húmedas (verde azulado) o más secas (pajizo), como se ve un
+    // campo real desde lejos. Sutil (±6 %) y más suave fuera de los pastos.
+    if (terr || is_terrain(mat)) {
+        if (mat == 1u || mat == 2u || mat == 3u || mat == 4u || mat == 5u || mat == 20u || (mat >= 47u && mat <= 53u && mat != 52u)) {
+            let gv = vnoise(v.world.xz / 1300.0) * 0.55 + vnoise(v.world.xz / 420.0 + 31.0) * 0.45;
+            let verde = mat == 1u || mat == 20u || mat == 49u || mat == 53u;
+            albedo *= mix(vec3(1.0), mix(vec3(0.94, 0.98, 0.97), vec3(1.05, 1.02, 0.93), gv), select(0.6, 1.0, verde));
+        }
+    }
+    // [render] Franja de pasto en los vóxeles grandes (técnicas del mod LOD §2.15): desde el
+    // vóxel de 2 m el costado del vóxel de pasto es verde solo en sus ~30 cm de arriba y tierra
+    // debajo, así las barrancas y los escalones gruesos se leen como tierra y no como paredes
+    // verdes, solo donde la ladera es empinada. (Desde el vóxel de 64 m la malla está bajada `vóxel − 3 m`, ver `lod::far_drop`.)
+    if (abs(n.y) < 0.5 && v.voxel >= 2.0 && (mat == 1u || mat == 20u || mat == 49u || mat == 53u)) {
+        let off = select(0.0, v.voxel - 3.0, v.voxel >= 63.0);
+        let yv = (v.world.y + off) / v.voxel;
+        let desde_arriba = (floor(yv + 0.0001) + 1.0 - yv) * v.voxel;
+        let tierra = srgb_to_linear(vec3(124.0, 98.0, 70.0) / 255.0) * tint; // `palette::DIRT`
+        // Solo en las barrancas (ladera empinada según la normal suave): en una pendiente suave
+        // los escalones de un vóxel dibujaban curvas de nivel marrones.
+        let barranca = 1.0 - smoothstep(0.6, 0.85, normalize(v.smooth_n).y);
+        albedo = mix(albedo, tierra, smoothstep(0.25, 0.45, desde_arriba) * (1.0 - smoothstep(0.98, 1.0, desde_arriba / v.voxel)) * barranca);
+    }
     // Monte visto de lejos: en los niveles sin árboles (vóxel de más de 4 m) el suelo del
     // monte toma el color de las copas, y a media distancia se mezcla con él (desde lejos,
     // entre árbol y árbol se ven más copas que hojarasca).
@@ -506,17 +549,23 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     }
     // Niebla de distancia hacia el color del horizonte.
     let d = distance(v.world, g.cam_pos.xyz);
-    let fog = 1.0 - exp(-d * g.params.x);
+    let fog = 1.0 - exp(-d * g.params.x * niebla_altura(g.cam_pos.y, v.world.y));
     col = mix(col, fog_color(v.world), max(max(clamp(fog, 0.0, 0.88), reach_fog(v.world)), hole_fog(v.world)));
     return vec4(curva_tonal(col * shadow_debug_tint(v.world)), 1.0);
 }
 
-// Curva tonal suave: hasta 0,75 de luminancia no toca nada; más arriba comprime de a poco (sin
-// cambiar el tono), así los claros al sol no se queman en amarillo saturado.
+// Curva tonal suave: hasta 0,75 de luminancia, un contraste leve en los medios ([render]: las
+// sombras ~5 % más hondas, los medios ~3 % más claros; continua en 0 y en 0,75); más arriba
+// comprime de a poco (sin cambiar el tono), así los claros al sol no se queman en amarillo
+// saturado. La misma curva en el cielo, el agua, la flora y los agentes.
 fn curva_tonal(c: vec3<f32>) -> vec3<f32> {
     let l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    if (l <= 0.75) {
+    if (l <= 0.0) {
         return c;
+    }
+    if (l <= 0.75) {
+        let l2 = l + 0.6 * l * (0.75 - l) * (l - 0.3);
+        return c * (l2 / l);
     }
     let x = l - 0.75;
     let l2 = 0.75 + x / (1.0 + x * 2.5);
