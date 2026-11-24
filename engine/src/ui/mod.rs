@@ -976,6 +976,8 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, game: &Game, acts: &mut Ve
                         InspectKind::Terrain => Icon::Lupa,
                         InspectKind::Service(_) => Icon::Servicios,
                         InspectKind::Church => Icon::Iglesia,
+                        InspectKind::Porton => Icon::Muralla, // [ia]
+                        InspectKind::Agente => Icon::Lupa,    // [ia]
                     };
                     icons::show(ui, icon, 22.0, theme::INK);
                     ui.label(RichText::new(&info.title).size(theme::BODY * 1.2));
@@ -1014,7 +1016,7 @@ fn inspect_panel(ctx: &egui::Context, info: &Inspect, game: &Game, acts: &mut Ve
                     InspectKind::Lot => &[("Zonificar", "Pintar la zona elegida alrededor · atajo: 5", 4), ("Quitar zona", "Quitar la zona · atajo: 6", 5)],
                     InspectKind::Road => &[("Demoler tramo", "Elegir la herramienta de demoler · atajo: 7", 6), ("Calle nueva", "Trazar una calle recta desde aquí · atajo: 2", 1)],
                     InspectKind::Terrain => &[("Calle recta", "Trazar una calle · atajo: 2", 1)],
-                    InspectKind::Service(_) | InspectKind::Church => &[],
+                    InspectKind::Service(_) | InspectKind::Church | InspectKind::Porton | InspectKind::Agente => &[], // [ia]
                 };
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {

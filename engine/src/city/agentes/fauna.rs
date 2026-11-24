@@ -312,6 +312,8 @@ pub fn cajas_ciudad(c: &City, t: &TerrainGen, centro: Vec2, hora: f32, out: &mut
     let anio = super::super::START_YEAR as i32 + (c.month / 12) as i32;
     let v = super::dibujo::Vestuario { poblacion: Some(&c.poblacion), lots: Some(&c.lots), anio, t: segs };
     ag.cajas_con(&c.net, centro, &v, out);
+    ag.cajas_oficios(c, t, centro, &v, out); // [ia]
+    ag.cajas_rampas(c, t, centro, out); // [ia]
     let esc = escena(c, t);
     cajas_fauna(&esc, t, centro, segs, out);
     cajas_botes(&esc, t, centro, c.water_level(hora), segs, out);

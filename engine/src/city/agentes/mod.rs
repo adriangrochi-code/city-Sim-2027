@@ -31,6 +31,7 @@ pub mod datos;
 pub mod dibujo;
 pub mod fauna; // [personajes]
 pub mod idm;
+pub mod oficios; // [ia] aguadores, serenos, incendios, misa, empantanadas
 pub mod perfil;
 pub mod portones;
 pub mod ruta;
@@ -141,6 +142,15 @@ pub enum Proposito {
     AVisita,
     /// Tropa de ganado que va a los corrales.
     ArreoALosCorrales,
+    // --- Oficios y sucesos de la colonia (ia-y-transito.md §4.1, v0.12.x) ---
+    /// Aguador: llena la pipa en la aguada y la reparte por las casas sin aljibe.
+    Aguador,
+    /// Sereno: enciende los faroles de sebo al anochecer.
+    EnciendeFaroles,
+    /// Sereno: ronda nocturna, canta la hora en las esquinas.
+    Ronda,
+    /// Corre a ver el incendio (y a ayudar con los baldes).
+    AlIncendio,
 }
 
 impl Proposito {
@@ -163,6 +173,10 @@ impl Proposito {
             Proposito::APaseo => "al paseo de la plaza",
             Proposito::AVisita => "a visitar a los parientes",
             Proposito::ArreoALosCorrales => "lleva la tropa a los corrales por fuera de la muralla",
+            Proposito::Aguador => "aguador: llena la pipa y la reparte por las casas sin aljibe",
+            Proposito::EnciendeFaroles => "sereno: enciende los faroles de sebo",
+            Proposito::Ronda => "sereno: ronda la noche y canta la hora",
+            Proposito::AlIncendio => "corre a ver el incendio",
         }
     }
 }
@@ -181,6 +195,15 @@ pub enum Marcha {
     Empantanada,
     /// Adelantando por el carril contrario.
     Adelantando,
+    // [ia] Paradas de los oficios y sucesos.
+    /// El aguador deja agua en una casa (o llena la pipa en la aguada).
+    DejaAgua,
+    /// El sereno enciende un farol o canta la hora.
+    CantaLaHora,
+    /// Mira el incendio.
+    MiraElFuego,
+    /// Ayuda a sacar una carreta del barro.
+    Ayudando,
 }
 
 impl Marcha {
@@ -193,6 +216,10 @@ impl Marcha {
             Marcha::EnRevision => "el guarda revisa la carga",
             Marcha::Empantanada => "empantanada en el barro",
             Marcha::Adelantando => "adelantando",
+            Marcha::DejaAgua => "deja agua en una casa",
+            Marcha::CantaLaHora => "enciende un farol y canta la hora",
+            Marcha::MiraElFuego => "mira el incendio",
+            Marcha::Ayudando => "ayuda a sacar una carreta del barro",
         }
     }
 }
@@ -338,9 +365,31 @@ pub struct Agente {
     /// Ruta: cómo la eligió (para la ficha).
     #[serde(default)]
     pub ruta: Eleccion,
-    /// Posición y dirección en el paso anterior (para interpolar el dibujo; no se guarda).
+    // [ia] Recorridos con paradas (aguadores, serenos, curiosos de un incendio).
+    /// Las paradas que le quedan (al llegar a cada una se detiene `parada_seg` y sigue).
+    #[serde(default)]
+    pub paradas: Vec<[f32; 2]>,
+    #[serde(default)]
+    pub parada_seg: f32,
+    /// Qué hace mientras está parado (con `detenido_hasta`).
+    #[serde(default)]
+    pub en_parada: Option<Marcha>,
+    /// Carreta empantanada a la que ayuda (o, en la carreta, quien la ayuda).
+    #[serde(default)]
+    pub ayuda: Option<u32>,
+    /// Dónde estaba en el paso anterior (para interpolar el dibujo; no se guarda). Solo la
+    /// pata, la posición en ella y si adelantaba: la pose se calcula al dibujar, y solo para
+    /// los que se dibujan (antes se calculaba en cada paso para todos los de cerca).
     #[serde(skip)]
-    pub antes: Option<(Vec2, Vec2)>,
+    pub antes: Option<Antes>,
+}
+
+/// Lo que hace falta para la pose del paso anterior (ver [`Agente::antes`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Antes {
+    pub li: u16,
+    pub s: f32,
+    pub adelantando: bool,
 }
 
 /// Cómo eligió la ruta (se muestra en la ficha).
@@ -381,6 +430,7 @@ impl PartialEq for Agente {
             && (self.perfil, self.destino, self.largo_extra, self.cabezas, self.cargada, self.contrabando, &self.portones, self.porton_i, self.revision, self.en_cola, self.adelantando, self.detenido_hasta)
                 == (o.perfil, o.destino, o.largo_extra, o.cabezas, o.cargada, o.contrabando, &o.portones, o.porton_i, o.revision, o.en_cola, o.adelantando, o.detenido_hasta)
             && self.ruta == o.ruta
+            && (&self.paradas, self.parada_seg, self.en_parada, self.ayuda) == (&o.paradas, o.parada_seg, o.en_parada, o.ayuda)
     }
 }
 
@@ -413,6 +463,10 @@ pub enum Quien {
     Carro,
     /// Una tropa de ganado de la estancia a los corrales.
     Arreo,
+    /// [ia] Un aguador de un puesto (id del servicio) y el número de su carro.
+    Aguador(u32, u8),
+    /// [ia] Un sereno de un puesto (id del servicio), su número y si es la ronda de encender.
+    Sereno(u32, u8, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -472,6 +526,23 @@ pub struct Estadisticas {
     /// Salidas optativas suspendidas hoy (lluvia, epidemia).
     #[serde(default)]
     pub suspendidos_hoy: u32,
+    // [ia] Oficios y sucesos.
+    /// Viajes de aguadores y casas a las que dejaron agua hoy.
+    #[serde(default)]
+    pub aguadores_hoy: u32,
+    #[serde(default)]
+    pub casas_con_agua_hoy: u32,
+    /// Rondas de serenos y faroles encendidos hoy.
+    #[serde(default)]
+    pub rondas_hoy: u32,
+    #[serde(default)]
+    pub faroles_hoy: u32,
+    /// Carretas sacadas del barro con ayuda (y las que salieron solas).
+    #[serde(default)]
+    pub ayudas_hoy: u32,
+    /// Curiosos que corrieron a un incendio.
+    #[serde(default)]
+    pub curiosos_hoy: u32,
 }
 
 /// Todo lo que se guarda con la partida.
@@ -511,6 +582,9 @@ pub struct Estado {
     pub lluvia: bool,
     #[serde(default)]
     pub barro: bool,
+    /// [ia] Incendios que se ven (con su cadena de baldes y sus curiosos).
+    #[serde(default)]
+    pub incendios: Vec<oficios::Incendio>,
 }
 
 /// Puntos fijos del mapa para los viajes (se recalculan cuando cambia la red).
@@ -532,6 +606,8 @@ struct Lugares {
 pub struct Contexto<'a> {
     /// Las personas (si la población está fundada).
     pub poblacion: Option<&'a crate::city::poblacion::Poblacion>,
+    /// [ia] Los servicios (aguadores, serenos y faroles, incendios) y el terreno.
+    pub servicios: Option<&'a crate::city::services::Services>,
     /// Días de lluvia del mes (para sortear si llueve hoy).
     pub dias_de_lluvia: f32,
     pub epidemia: bool,
@@ -578,6 +654,12 @@ pub struct Agentes {
     epidemia: bool,
     /// El último lanzamiento no salió porque había otro vehículo encima del punto de salida.
     bloqueado: bool,
+    /// [ia] Puestos de aguadores y de serenos (derivado de los servicios; no se guarda).
+    oficios: oficios::Oficios,
+    /// [ia] La gente parada en el atrio después de misa y en el paseo (fuerza social).
+    pub(crate) corrillos: oficios::Corrillos,
+    /// [ia] Rampas de los escalones de las calles en pendiente (cerca de la vista).
+    rampas: oficios::Rampas,
 }
 
 impl Default for Agentes {
@@ -689,6 +771,9 @@ impl Agentes {
             dias_de_lluvia: 0.0,
             epidemia: false,
             bloqueado: false,
+            oficios: Default::default(),
+            corrillos: Default::default(),
+            rampas: Default::default(),
         }
     }
 
@@ -849,6 +934,9 @@ impl Agentes {
         self.dias_de_lluvia = ctx.dias_de_lluvia;
         self.epidemia = ctx.epidemia;
         self.preparar(t, net, pc, angle);
+        if let Some(s) = ctx.servicios {
+            self.actualizar_oficios(s, lots); // [ia]
+        }
         let pob = ctx.poblacion.filter(|p| p.fundada);
         let firma = (lots.lots.len(), lots.population(), pob.map_or(-1, |p| p.mes), pob.map_or(0, |p| p.idx.vivos.len()));
         // Sin población no se tocan los vecinos que ya son personas (cuadros sin contexto).
@@ -868,6 +956,9 @@ impl Agentes {
             self.armar_agenda(lots);
         }
         self.salidas(net, lots);
+        if let Some(s) = ctx.servicios {
+            self.revisar_incendios(net, lots, s); // [ia]
+        }
         self.e.acumulado += dt * ESCALA_TIEMPO;
         let mut n = 0;
         while self.e.acumulado >= PASO {
@@ -1164,6 +1255,13 @@ impl Agentes {
         st.adelantamientos_hoy = 0;
         st.empantanadas_hoy = 0;
         st.suspendidos_hoy = 0;
+        // [ia]
+        st.aguadores_hoy = 0;
+        st.casas_con_agua_hoy = 0;
+        st.rondas_hoy = 0;
+        st.faroles_hoy = 0;
+        st.ayudas_hoy = 0;
+        st.curiosos_hoy = 0;
         for g in self.e.portones.values_mut() {
             g.nuevo_dia();
         }
@@ -1203,6 +1301,7 @@ impl Agentes {
                 ag.push(Programado { hora: h, quien: Quien::Arreo, que: Proposito::ArreoALosCorrales });
             }
         }
+        self.programar_oficios(&mut ag, domingo); // [ia]
         ag.sort_by(|a, b| a.hora.total_cmp(&b.hora));
         self.e.agenda = ag;
         // Si el día ya empezó (al fundar o al cargar), no se largan de golpe los viajes pasados.
@@ -1321,6 +1420,13 @@ impl Agentes {
                 Quien::Arreo => {
                     self.lanzar_arreo(net);
                 }
+                // [ia]
+                Quien::Aguador(sid, j) => {
+                    self.lanzar_aguador(net, sid, j);
+                }
+                Quien::Sereno(sid, j, enciende) => {
+                    self.lanzar_sereno(net, sid, j, enciende);
+                }
             }
         }
         // Vecinos: las salidas que ya llegaron a su hora.
@@ -1420,8 +1526,8 @@ impl Agentes {
             self.vecino_llego(Some(k), ahora, false);
             return;
         }
-        // Para trayectos cortos todos caminan; lejos, a caballo quien tiene (D14, simple).
-        let tipo = if a.distance(b) < 150.0 || !v.perfil.caballo() && v.tipo != Tipo::Jinete { Tipo::APie } else { Tipo::Jinete };
+        // A pie o a caballo (D14): ver `usa_caballo`.
+        let tipo = if self.usa_caballo(&v, a, b, act.que) { Tipo::Jinete } else { Tipo::APie };
         if self.lanzar(net, tipo, a, b, Some(k), act.que, v.semilla_ruta, v.temple, v.nombre) {
             let id = self.e.agentes.last().unwrap().id;
             let v = self.e.vecinos.get_mut(&k).unwrap();
@@ -1436,6 +1542,33 @@ impl Agentes {
         } else {
             self.saltar_salida(k, ahora);
         }
+    }
+
+    /// ¿Va a caballo? Hace falta tener caballo (o ser un vecino sintético de a caballo) y que
+    /// el viaje lo valga (datos `caballo`): lejos, y más lejos todavía si las dos puntas están
+    /// intramuros o si es una salida del barrio (misa, compra, pulpería, paseo, visita). Al
+    /// campo o desde el campo, siempre (arreglo de la v0.12.0: demasiados jinetes).
+    fn usa_caballo(&self, v: &Vecino, a: Vec2, b: Vec2, que: Proposito) -> bool {
+        let c = &datos::datos().caballo;
+        let tiene = if v.persona.is_some() { v.perfil.caballo() } else { v.perfil.caballo() || v.tipo == Tipo::Jinete };
+        if !tiene || (v.perfil.edad > 0 && v.perfil.edad > c.edad_maxima) {
+            return false;
+        }
+        let d = a.distance(b);
+        let campo = v.trabajo == Trabajo::Campo && matches!(que, Proposito::AlTrabajo | Proposito::VuelveDelTrabajo | Proposito::VuelveACasa);
+        if campo && d >= 150.0 {
+            return true;
+        }
+        let social = matches!(que, Proposito::AMisa | Proposito::VuelveDeMisa | Proposito::APaseo | Proposito::ACompra | Proposito::APulperia | Proposito::AVisita | Proposito::AlMercado | Proposito::VuelveDelMercado);
+        let adentro = |p: Vec2| self.lugares.plaza.is_some_and(|pc| p.distance(pc) < self.radio_intramuros);
+        let minimo = if social {
+            c.social_minima_m
+        } else if adentro(a) && adentro(b) {
+            c.intramuros_minima_m
+        } else {
+            c.distancia_minima_m
+        };
+        d >= minimo
     }
 
     /// No puede ir: se queda donde está y salta hasta después de la próxima vuelta a casa.
@@ -1615,6 +1748,10 @@ impl Agentes {
             detenido_hasta: 0.0,
             ruta,
             antes: None,
+            paradas: Vec::new(),
+            parada_seg: 0.0,
+            en_parada: None,
+            ayuda: None,
         });
         true
     }
@@ -1629,28 +1766,28 @@ impl Agentes {
     fn paso(&mut self, net: &RoadNetwork, dt: f32) {
         self.e.reloj += dt as f64;
         self.e.pasos += 1;
+        self.ayudar_empantanadas(net); // [ia]
         let pasos = self.e.pasos;
         let foco = self.foco;
         let n = self.e.agentes.len();
         let mut dts = vec![dt; n];
         if let Some(f) = foco {
+            // La cota de la distancia al foco sale una vez por tramo y paso (muchos agentes
+            // comparten tramo), no una vez por agente.
+            let mut cota: HashMap<u32, f32, FxBuild> = HashMap::default();
             for (i, a) in self.e.agentes.iter_mut().enumerate() {
                 // Cota de la distancia al foco: la de un extremo del tramo menos su largo.
-                let e = &net.edges[&a.pata().tramo];
-                if e.pts[0].distance(f) - e.len() > LOD_LEJOS {
+                let tramo = a.patas[a.li as usize].tramo;
+                let d = *cota.entry(tramo).or_insert_with(|| net.edges.get(&tramo).map_or(f32::INFINITY, |e| e.pts[0].distance(f) - e.len()));
+                if d > LOD_LEJOS {
                     // Nivel de detalle: lejos, un paso de cada LOD_CADA con dt multiplicado.
                     a.antes = None;
                     dts[i] = if (pasos + a.id as u64).is_multiple_of(LOD_CADA) { dt * LOD_CADA as f32 } else { 0.0 };
                     continue;
                 }
-                // Posición anterior (para interpolar el dibujo) de los que están cerca de la vista
-                // (la misma cota descarta sin calcular la pose a los que no se dibujan).
-                if e.pts[0].distance(f) - e.len() > dibujo::RADIO + 100.0 {
-                    a.antes = None;
-                    continue;
-                }
-                let (p, d) = pose(net, a);
-                a.antes = (p.distance(f) < dibujo::RADIO + 100.0).then_some((p, d));
+                // Lo del paso anterior (para interpolar el dibujo) de los que pueden quedar
+                // cerca de la vista: tres números, sin calcular la pose (D16, rendimiento).
+                a.antes = (d <= dibujo::RADIO + 100.0).then_some(Antes { li: a.li, s: a.s, adelantando: a.adelantando.is_some() });
             }
         }
         let reloj = self.e.reloj;
@@ -1793,6 +1930,11 @@ impl Agentes {
                     }
                 }
             }
+            if !a.tipo.vehiculo() && reloj < a.detenido_hasta {
+                // [ia] Parado: en una parada de su recorrido o ayudando a una carreta.
+                nuevo.push((a.s, 0.0, a.en_parada.unwrap_or(Marcha::EsperandoEnLaFila)));
+                continue;
+            }
             if !a.tipo.vehiculo() {
                 // A pie: por la vereda, a su paso; en las esquinas cruzan la calzada con hueco.
                 let mut s1 = a.s + a.v0 * dt_i;
@@ -1818,7 +1960,7 @@ impl Agentes {
                 continue;
             }
             if reloj < a.detenido_hasta {
-                nuevo.push((a.s, 0.0, Marcha::Empantanada));
+                nuevo.push((a.s, 0.0, a.en_parada.unwrap_or(Marcha::Empantanada))); // [ia]
                 continue;
             }
             let p = a.params();
@@ -2010,6 +2152,8 @@ impl Agentes {
         while i < self.e.agentes.len() {
             match self.avanzar_patas(net, i) {
                 Avance::Sigue => i += 1,
+                // [ia] Si tiene paradas, se detiene y sigue a la siguiente.
+                Avance::Llego if !self.e.agentes[i].paradas.is_empty() && self.siguiente_parada(net, i) => i += 1,
                 Avance::Llego => llegados.push(self.e.agentes.remove(i)),
                 Avance::Perdido => {
                     perdidos.push(self.e.agentes[i].id);
@@ -2054,7 +2198,12 @@ impl Agentes {
             if barro && a.tipo == Tipo::Carreta && e.kind == RoadKind::Dirt {
                 let c = &datos::datos().clima;
                 if azar_n(semilla, a.id as u64, dia, Motivo::Empantanar as u32, a.li as u32) < c.empantanarse {
-                    let m = c.empantanado_minutos[0] + (c.empantanado_minutos[1] - c.empantanado_minutos[0]) * azar_n(semilla, a.id as u64, dia, Motivo::Empantanar as u32, 1000 + a.li as u32);
+                    // [ia] Espera que alguien la ayude (`oficios::ayudar_empantanadas`); si no
+                    // pasa nadie, sale sola mucho más tarde.
+                    let o = &datos::datos().oficios;
+                    let m = o.barro_espera_sin_ayuda_min[0] + (o.barro_espera_sin_ayuda_min[1] - o.barro_espera_sin_ayuda_min[0]) * azar_n(semilla, a.id as u64, dia, Motivo::Empantanar as u32, 1000 + a.li as u32);
+                    a.ayuda = None;
+                    a.en_parada = None;
                     a.detenido_hasta = reloj + m as f64 * 60.0;
                     self.e.stats.empantanadas_hoy += 1;
                 }
@@ -2078,11 +2227,13 @@ impl Agentes {
         st.viajes_total += 1;
         st.viajes_hoy += 1;
         st.minutos_hoy += tardo * MINUTOS_POR_SEGUNDO;
-        let demorado = tardo > a.previsto * 1.5 + 5.0;
+        // [ia] Los recorridos con paradas (aguadores, serenos, curiosos) no son viajes demorados.
+        let recorrido = a.parada_seg > 0.0;
+        let demorado = !recorrido && tardo > a.previsto * 1.5 + 5.0;
         if demorado {
             st.demorados_hoy += 1;
         }
-        if a.tipo.vehiculo() {
+        if a.tipo.vehiculo() && !recorrido {
             st.viajes_mes += 1;
             st.demora_mes += (tardo / a.previsto.max(1.0)).min(5.0);
         }
@@ -2203,6 +2354,10 @@ impl Agentes {
                 let quien = format!("{} {}", NOMBRES[a.conductor.0 as usize % NOMBRES.len()], APELLIDOS[a.conductor.1 as usize % APELLIDOS.len()]);
                 l.push(format!("{}: {quien}", if a.tipo == Tipo::Arreo { "Capataz" } else { "Conduce" }));
                 capitalizar(match a.tipo {
+                    // [ia]
+                    Tipo::Carro if a.proposito == Proposito::Aguador => "aguador",
+                    Tipo::APie if matches!(a.proposito, Proposito::Ronda | Proposito::EnciendeFaroles) => "sereno",
+                    Tipo::APie if a.proposito == Proposito::AlIncendio => "vecino que corre al incendio",
                     Tipo::Carreta if a.contrabando => "carreta de contrabando",
                     Tipo::Carreta => "carreta de bueyes",
                     Tipo::Carro => "carro de reparto",
@@ -2221,6 +2376,13 @@ impl Agentes {
         let fisico = (self.e.reloj - a.t0) as f32 / 60.0;
         l.push(format!("En camino: {} min ({} min del reloj; prevé {})", fisico.round() as i32, ((self.e.reloj - a.t0) as f32 * MINUTOS_POR_SEGUNDO) as i32, (a.previsto * MINUTOS_POR_SEGUNDO) as i32));
         l.push(format!("Ruta: {}", a.ruta.texto()));
+        // [ia]
+        if !a.paradas.is_empty() {
+            l.push(format!("Le quedan {} paradas (de {} s cada una)", a.paradas.len(), a.parada_seg.round() as i32));
+        }
+        if a.marcha == Marcha::Ayudando || (a.tipo == Tipo::Carreta && a.ayuda.is_some() && self.e.reloj < a.detenido_hasta) {
+            l.push("Con el lazo y a pulso: sacan la carreta del barro".into());
+        }
         if let Some(v) = vecino {
             if v.cambios_de_ruta > 0 {
                 l.push(format!("Cambió de ruta {} {} después de un viaje malo", v.cambios_de_ruta, if v.cambios_de_ruta == 1 { "vez" } else { "veces" }));
@@ -2450,6 +2612,19 @@ pub fn resumen(ag: &Agentes) -> Vec<(String, String, bool)> {
     if st.arreos_hoy > 0 {
         f.push(("Arreos hoy".into(), format!("{}", st.arreos_hoy), false));
     }
+    // [ia] Oficios y sucesos.
+    if st.aguadores_hoy > 0 {
+        f.push(("Aguadores hoy".into(), format!("{} viajes, agua a {} casas", st.aguadores_hoy, st.casas_con_agua_hoy), false));
+    }
+    if st.rondas_hoy > 0 {
+        f.push(("Serenos hoy".into(), format!("{} rondas, {} faroles encendidos", st.rondas_hoy, st.faroles_hoy), false));
+    }
+    if st.empantanadas_hoy > 0 {
+        f.push(("Carretas en el barro".into(), format!("{} empantanadas, {} sacadas con ayuda", st.empantanadas_hoy, st.ayudas_hoy), false));
+    }
+    if !ag.e.incendios.is_empty() {
+        f.push(("Incendio".into(), format!("{} curiosos hoy; cadena de baldes {}", st.curiosos_hoy, if ag.e.incendios.iter().any(|i| i.fuente.is_some()) { "desde el agua más cercana" } else { "imposible: no hay agua cerca" }), true));
+    }
     if ag.e.lluvia {
         f.push(("Lluvia".into(), format!("{} salidas suspendidas{}", st.suspendidos_hoy, if ag.e.barro { " · barro en los caminos" } else { "" }), ag.e.barro));
     }
@@ -2473,8 +2648,21 @@ pub fn pose(net: &RoadNetwork, a: &Agente) -> (Vec2, Vec2) {
     pose_en(net, a, a.li, a.s)
 }
 
+/// Pose del paso anterior (para interpolar el dibujo), si se sabe y la ruta no cambió.
+pub fn pose_antes(net: &RoadNetwork, a: &Agente) -> Option<(Vec2, Vec2)> {
+    let b = a.antes?;
+    if b.li as usize >= a.patas.len() {
+        return None;
+    }
+    Some(pose_con(net, a, b.li, b.s, b.adelantando))
+}
+
 /// Pose en una pata y posición dadas (para la tropa de un arreo, que va detrás de la punta).
 fn pose_en(net: &RoadNetwork, a: &Agente, li: u16, s: f32) -> (Vec2, Vec2) {
+    pose_con(net, a, li, s, a.adelantando.is_some())
+}
+
+fn pose_con(net: &RoadNetwork, a: &Agente, li: u16, s: f32, adelantando: bool) -> (Vec2, Vec2) {
     let p = a.patas[li as usize];
     let Some(e) = net.edges.get(&p.tramo) else { return (Vec2::ZERO, Vec2::X) };
     let l = e.len();
@@ -2485,7 +2673,7 @@ fn pose_en(net: &RoadNetwork, a: &Agente, li: u16, s: f32) -> (Vec2, Vec2) {
     let lat = match a.tipo {
         Tipo::APie => w * 0.5 - 1.0 - (a.id % 3) as f32 * 0.35,
         Tipo::Arreo => 0.0,
-        _ if a.adelantando.is_some() => -w * 0.25,
+        _ if adelantando => -w * 0.25,
         _ => w * 0.25,
     };
     let derecha = Vec2::new(-tan.y, tan.x);
@@ -2577,3 +2765,5 @@ fn lugares(t: &TerrainGen, net: &RoadNetwork, pc: Vec2, angle: f32) -> Lugares {
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod tests_oficios; // [ia]

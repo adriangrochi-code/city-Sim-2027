@@ -134,6 +134,17 @@ fn medidas(a: Atuendo) -> Medidas {
 /// Arma la figura de un atuendo, de pie (origen: el suelo entre los pies) o montada (origen:
 /// el asiento; las piernas abiertas a los costados del caballo).
 pub fn figura(a: Atuendo, montado: bool) -> Modelo {
+    figura_con(a, montado, false)
+}
+
+/// [ia] La figura sentada (en un banco, una silla o un poyo): el origen es el asiento, a medio
+/// metro del suelo; los muslos hacia adelante y las canillas abajo, juntas (las polleras
+/// largas caen hasta los pies).
+pub fn figura_sentada(a: Atuendo) -> Modelo {
+    figura_con(a, true, true)
+}
+
+fn figura_con(a: Atuendo, montado: bool, sentado: bool) -> Modelo {
     use Atuendo::*;
     use Parte::*;
     let m = medidas(a);
@@ -343,7 +354,22 @@ pub fn figura(a: Atuendo, montado: bool) -> Modelo {
             l.centrada(Fijo, r::ROPA, t, [y(6), y(ca + 1)], [-2, 2]);
         }
     }
-    if montado {
+    if sentado {
+        // Lo que cuelga bajo el asiento: fuera (queda debajo del banco).
+        l.borrar([-8, -20, -6], [8, 0, 6]);
+        // Muslos hacia adelante y canillas hasta el suelo (asiento a 0,5 m: 8 micro-vóxeles).
+        let (pc, ancho) = if a.nino() { (4, 2) } else { (7, 3) };
+        let pollera = a.mujer() && !a.nino();
+        let muslo = if pollera { r::ROPA } else { r::CALZON };
+        let canilla = if pollera { r::ROPA } else if matches!(a, Paisano | Peon) { r::CLARO } else { r::CALZON };
+        l.caja(Fijo, muslo, [-ancho, 0, -2], [ancho, 3, 6]);
+        l.caja(Fijo, canilla, [-ancho, -pc, 3], [ancho, 0, 6]);
+        l.caja(Fijo, r::CALZADO, [-ancho, -pc - 1, 3], [ancho, -pc, 8]);
+        if pollera {
+            // La pollera cae un poco más ancha.
+            l.caja(Fijo, r::ROPA, [-ancho - 1, -pc, 5], [ancho + 1, 2, 7]);
+        }
+    } else if montado {
         // Lo que cuelga bajo el asiento queda dentro del caballo: fuera.
         l.borrar([-4, -20, -6], [4, 0, 6]);
         // Piernas abiertas a los costados del caballo: muslos hacia adelante y canillas abajo.
@@ -356,7 +382,13 @@ pub fn figura(a: Atuendo, montado: bool) -> Modelo {
             l.caja(Fijo, r::CALZADO, [x0, -pc - 1, 3], [x1, -pc, 7]);
         }
     }
-    l.armar(if montado { "persona montada" } else { "persona" })
+    l.armar(if sentado {
+        "persona sentada"
+    } else if montado {
+        "persona montada"
+    } else {
+        "persona"
+    })
 }
 
 // --- Colores --------------------------------------------------------------------------------

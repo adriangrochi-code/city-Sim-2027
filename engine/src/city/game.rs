@@ -137,6 +137,10 @@ pub enum InspectKind {
     Service(u32),
     /// La iglesia matriz (obra por fases).
     Church,
+    // [ia] Un portón de la muralla (su cola y su aduana) y un vecino o vehículo en la calle:
+    // fichas propias, sin los botones de la calle ni del terreno.
+    Porton,
+    Agente,
 }
 
 /// Nombre de la etapa de la ciudad según su población (como en el prototipo).
@@ -662,11 +666,11 @@ impl Game {
         }
         // Un vecino, jinete o carreta justo ahí (a menos de 2,5 m). [ia] Con la persona.
         if let Some((title, lines)) = self.city.agentes.cerca_de(&self.city.net, p, 2.5).and_then(|id| self.city.agentes.describir(id, self.city.poblacion.fundada.then_some(&self.city.poblacion))) {
-            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Terrain, ..Default::default() });
+            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Agente, ..Default::default() }); // [ia]
         }
         // [ia] Un portón de la muralla: su cola, la espera y lo que cobra.
         if let Some((title, lines)) = self.city.agentes.ficha_porton(p) {
-            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Road, ..Default::default() });
+            return Some(Inspect { title, lines, why: vec![], kind: InspectKind::Porton, ..Default::default() }); // [ia]
         }
         if let Some(e) = self.city.net.nearest_edge(p, 8.0) {
             let ed = &self.city.net.edges[&e.edge];

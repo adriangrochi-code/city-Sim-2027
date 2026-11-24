@@ -92,9 +92,16 @@ pub fn plan(semilla: u64, k: u64, v: &Vecino, d: &Dia) -> Vec<Actividad> {
     };
     if d.domingo {
         // Misa: probabilidad según la devoción.
+        // [ia] La misa mayor termina a la misma hora para todos; después, un rato en el atrio
+        // (más los sociables): la plaza se llena y la salida se ve.
         if x(Motivo::Misa) < r.misa_domingo * (0.35 + 0.65 * pf.devocion()) {
-            let h = 9.2 + entre(semilla, k, d.dia, Motivo::Misa, 1, -0.35, 0.35);
-            salida(&mut out, Actividad::new(Proposito::AMisa, Lugar::Iglesia, h, entre(semilla, k, d.dia, Motivo::Duracion, 0, 1.0, 1.4), false), 0);
+            let o = &datos().oficios;
+            let h = 9.0 + entre(semilla, k, d.dia, Motivo::Misa, 1, -0.4, 0.1);
+            let charla = entre(semilla, k, d.dia, Motivo::Atrio, 0, 0.0, 0.4) + 0.6 * pf.social();
+            let charla = (o.atrio_minutos[0] + (o.atrio_minutos[1] - o.atrio_minutos[0]) * charla.min(1.0)) / 60.0;
+            let ida = Actividad::new(Proposito::AMisa, Lugar::Iglesia, h, 0.2, false);
+            out.push(ida);
+            out.push(Actividad { desde: o.misa_fin_domingo + charla, que: Proposito::VuelveDeMisa, ..casa });
         }
         // Visita a los parientes (padres o hijos casados que viven en otra casa).
         if let Some(l) = v.visita {

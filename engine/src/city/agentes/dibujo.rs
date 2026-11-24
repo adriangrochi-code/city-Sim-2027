@@ -133,6 +133,11 @@ pub fn perfil(t: &TerrainGen, e: &Edge) -> Vec<f32> {
         .collect()
 }
 
+/// [ia] Altura en un perfil de tramo a `ps` m desde su nodo `a`.
+pub(crate) fn altura_en(perfil: &[f32], ps: f32) -> f32 {
+    altura(perfil, ps)
+}
+
 fn altura(perfil: &[f32], ps: f32) -> f32 {
     if perfil.is_empty() {
         return 0.0;
@@ -222,13 +227,18 @@ fn oficio_sintetico(i: u8) -> Oficio {
 /// Quién es un agente, para vestirlo: su persona de la demografía si la tiene; si no, lo que
 /// se sabe del vecino sintético (nombre, oficio, origen, casa); si no, un carretero.
 pub fn quien(ag: &Agentes, a: &Agente, v: &Vestuario) -> Quien {
-    if let (Some(id), Some(pob)) = (a.persona, v.poblacion) {
+    quien_de(ag, a.persona, a.vecino, a.id as u64 ^ ((a.conductor.0 as u64) << 40), v)
+}
+
+/// [ia] Quién es un vecino (por su persona o su clave), o alguien sin vecino (por la semilla).
+pub fn quien_de(ag: &Agentes, persona: Option<u32>, vecino: Option<u64>, semilla: u64, v: &Vestuario) -> Quien {
+    if let (Some(id), Some(pob)) = (persona, v.poblacion) {
         if let Some(p) = pob.persona(id) {
             let principal = p.riqueza > 600.0 || (p.estamento == Estamento::Vecino && p.riqueza > 250.0);
             return Quien { mujer: p.sexo == Sexo::Mujer, edad: p.edad(pob.mes).clamp(0, 120) as u8, oficio: p.oficio, principal, raiz: p.raiz, semilla: id as u64 ^ 0x5EED_0000 };
         }
     }
-    if let Some(vec) = a.vecino.and_then(|k| ag.e.vecinos.get(&k).map(|v| (k, v))) {
+    if let Some(vec) = vecino.and_then(|k| ag.e.vecinos.get(&k).map(|v| (k, v))) {
         let (k, vc) = vec;
         let s = mezcla(k);
         let edad = match vc.rol {
@@ -246,7 +256,7 @@ pub fn quien(ag: &Agentes, a: &Agente, v: &Vestuario) -> Quien {
         let principal = v.lots.and_then(|l| l.lots.get(&vc.casa)).is_some_and(|l| l.level >= 3);
         return Quien { mujer: vc.nombre.0 >= 12, edad, oficio: oficio_sintetico(vc.oficio), principal, raiz, semilla: k };
     }
-    let s = mezcla(a.id as u64 ^ ((a.conductor.0 as u64) << 40));
+    let s = mezcla(semilla);
     Quien { mujer: false, edad: 25 + (s % 30) as u8, oficio: Oficio::Peon, principal: false, raiz: [Raiz::Europea, Raiz::Mixta, Raiz::Indigena][(s % 3) as usize], semilla: s }
 }
 
@@ -255,6 +265,14 @@ pub fn quien(ag: &Agentes, a: &Agente, v: &Vestuario) -> Quien {
 /// y `t` los segundos (para mirar alrededor).
 #[allow(clippy::too_many_arguments)]
 pub fn detallado(out: &mut Vec<Caja>, tipo: Tipo, base: Vec3, giro: f32, q: &Quien, anio: i32, dist: f32, vel: f32, t: f32, id: u32, pelaje: u8) {
+    detallado_con(out, tipo, super::Proposito::Paseo, base, giro, q, anio, dist, vel, t, id, pelaje);
+}
+
+/// [ia] Como [`detallado`], con lo que hace (el aguador con su pipa, el sereno con el farol y
+/// el chuzo).
+#[allow(clippy::too_many_arguments)]
+pub fn detallado_con(out: &mut Vec<Caja>, tipo: Tipo, que: super::Proposito, base: Vec3, giro: f32, q: &Quien, anio: i32, dist: f32, vel: f32, t: f32, id: u32, pelaje: u8) {
+    use super::Proposito as P;
     use crate::detalle::{biblioteca, emitir, modelos, ropa, sombra, Id, Parte, VOX};
     let b = biblioteca();
     let en = |v: Vec3| base + girar(v, giro);
@@ -269,6 +287,15 @@ pub fn detallado(out: &mut Vec<Caja>, tipo: Tipo, base: Vec3, giro: f32, q: &Qui
     };
     let semilla_caballo = id.wrapping_mul(7).wrapping_add(pelaje as u32);
     match tipo {
+        // [ia] El sereno: el farol de sebo en la izquierda, el chuzo en la derecha.
+        Tipo::APie if matches!(que, P::Ronda | P::EnciendeFaroles) => {
+            let mut pose = if amp > 0.05 { anim::caminar(anim::fase(dist, anim::CICLO_PERSONA), amp, mirar * 0.4) } else { anim::persona_quieta(t, id) };
+            pose.set(Parte::BrazoI, 0.0, -0.25);
+            pose.set(Parte::BrazoD, 0.0, -0.12);
+            emitir(out, b.persona(at, false), &pal, base, giro, &pose, id);
+            emitir(out, b.objeto(Id::AparejoSereno), &modelos::paleta(Id::AparejoSereno, id), base, giro, &pose, id);
+            sombra(out, base, giro, [0.27, 0.2], 130);
+        }
         Tipo::APie => persona(out, base, dist),
         Tipo::Jinete => {
             let o = en(Vec3::new(0.0, 0.0, -1.6));
@@ -296,8 +323,16 @@ pub fn detallado(out: &mut Vec<Caja>, tipo: Tipo, base: Vec3, giro: f32, q: &Qui
                 emitir(out, b.objeto(Id::Buey), &modelos::paleta(Id::Buey, s), p, giro, &anim::cuadrupedo(anim::fase(dist + k as f32 * 0.5, anim::CICLO_VACUNO), amp), s);
                 sombra(out, p, giro, [0.32, 1.1], 120);
             }
-            // El boyero camina al lado de la yunta.
-            persona(out, en(Vec3::new(-1.15, 0.0, -1.0)), dist);
+            // El boyero camina al lado de la yunta, con la picana levantada [ia].
+            let p = en(Vec3::new(-1.15, 0.0, -1.0));
+            let ciclo = if at.nino() { 1.0 } else { anim::CICLO_PERSONA };
+            let mut pose = if amp > 0.05 { anim::caminar(anim::fase(dist, ciclo), amp, mirar * 0.4) } else { anim::persona_quieta(t, id) };
+            // La picana sube y baja de a ratos (pica a los bueyes).
+            let pica = ((t * 0.7 + id as f32 * 0.9).sin() * 0.5 + 0.5).powi(6) * 0.25;
+            pose.set(Parte::BrazoD, 0.15, -0.75 + pica);
+            emitir(out, b.persona(at, false), &pal, p, giro, &pose, id);
+            emitir(out, b.objeto(Id::Picana), &modelos::paleta(Id::Picana, id), p, giro, &pose, id);
+            sombra(out, p, giro, [0.27, 0.2], 130);
         }
         // [ia] La punta del arreo: el capataz a caballo (la tropa la pone `tropa`).
         Tipo::Arreo => {
@@ -317,7 +352,9 @@ pub fn detallado(out: &mut Vec<Caja>, tipo: Tipo, base: Vec3, giro: f32, q: &Qui
             let mut pose = crate::detalle::Pose::default();
             anim::ruedas(&mut pose, dist, 12.0 * VOX);
             let c = en(Vec3::new(0.0, 0.0, -4.2));
-            emitir(out, b.objeto(Id::Carro), &modelos::paleta(Id::Carro, id), c, giro, &pose, id);
+            // [ia] El aguador lleva la pipa.
+            let carro = if que == P::Aguador { Id::CarroAguatero } else { Id::Carro };
+            emitir(out, b.objeto(carro), &modelos::paleta(carro, id), c, giro, &pose, id);
             sombra(out, c, giro, [0.75, 1.0], 120);
             let mut pd = anim::caminar(0.0, 0.0, mirar);
             pd.set(Parte::BrazoI, 0.0, -0.6);
@@ -376,7 +413,12 @@ impl Agentes {
         let mut vis: Vec<(f32, &Agente, Vec2, Vec2)> = Vec::new();
         for a in &self.e.agentes {
             let (p, d) = pose(net, a);
-            let (p, d) = match a.antes {
+            // La pose del paso anterior solo para los que quedan cerca (se descarta antes a los
+            // lejanos con la pose de ahora: en un paso nadie se mueve más de unos metros).
+            if p.distance(centro) > RADIO + 12.0 {
+                continue;
+            }
+            let (p, d) = match super::pose_antes(net, a) {
                 Some((q, dq)) if q.distance(p) < 12.0 => (q.lerp(p, alfa), dq.lerp(d, alfa).normalize_or(d)),
                 _ => (p, d),
             };
@@ -406,7 +448,9 @@ impl Agentes {
                 let q = quien(self, a, v);
                 // Lo recorrido: la posición en la pata (más un corrimiento por pata).
                 let recorrido = a.s + a.li as f32 * 53.0;
-                detallado(out, a.tipo, base, giro, &q, v.anio, recorrido, a.v, v.t, a.id, a.pelaje);
+                // [ia] Quien mira un incendio lo mira de frente.
+                let giro = if a.marcha == super::Marcha::MiraElFuego { self.e.incendios.iter().map(|i| Vec2::from(i.pos)).min_by(|x, y| x.distance(p).total_cmp(&y.distance(p))).map_or(giro, |f| (f - p).x.atan2((f - p).y)) } else { giro };
+                detallado_con(out, a.tipo, a.proposito, base, giro, &q, v.anio, recorrido, a.v, v.t, a.id, a.pelaje);
             } else {
                 modelo(out, a.tipo, base, giro, a.ropa, a.pelaje);
             }

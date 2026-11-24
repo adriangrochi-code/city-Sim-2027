@@ -118,7 +118,29 @@ pub fn paleta(id: Id, semilla: u32) -> Paleta {
             set(r::CAPA, [150, 144, 132]);
             set(r::HIERRO, [24, 30, 34]);
         }
-        Id::Carreta | Id::CarretaParada | Id::Carro => {
+        // [ia] Oficios, poses y fachadas.
+        Id::AparejoSereno => {
+            // El farol de sebo encendido.
+            set(r::CLARO, [250, 214, 130]);
+            set(r::HIERRO, [40, 36, 34]);
+        }
+        Id::Silla => set(r::CAPA, [[196, 168, 108], [182, 150, 92], [170, 146, 100]][(s % 3) as usize]),
+        Id::Postigo | Id::PostigoAbierto => {
+            // Postigos pintados (verde, azul, pardo o la madera aceitada) [E].
+            let k = (s % 5) as usize;
+            set(r::MADERA, [[70, 92, 70], [64, 80, 104], [104, 78, 54], [118, 86, 56], [90, 70, 52]][k]);
+            set(r::MADERA_OSC, [[50, 68, 52], [46, 58, 78], [76, 56, 40], [80, 60, 42], [64, 50, 38]][k]);
+        }
+        Id::Cancel => {
+            set(r::HIERRO, [[36, 34, 33], [34, 44, 38], [30, 30, 32]][(s % 3) as usize]);
+            set(r::CLARO, [176, 196, 200]);
+        }
+        Id::BancoPiedra => {
+            // Piedra, o ladrillo revocado y blanqueado.
+            set(r::CAPA, [[160, 154, 142], [214, 208, 194], [150, 120, 96]][(s % 3) as usize]);
+            set(r::ACENTO, [[130, 124, 114], [184, 178, 166], [124, 98, 78]][(s % 3) as usize]);
+        }
+        Id::Carreta | Id::CarretaParada | Id::Carro | Id::CarroAguatero | Id::Picana | Id::BaldeEnMano => {
             let k = (s % 3) as usize;
             set(r::MADERA, [[118, 86, 56], [128, 98, 66], [104, 80, 58]][k]);
             set(r::MADERA_OSC, [[78, 58, 40], [86, 64, 44], [70, 54, 40]][k]);
@@ -136,7 +158,7 @@ pub fn paleta(id: Id, semilla: u32) -> Paleta {
 /// ¿Lleva sombra de contacto en el suelo? (los animales y lo que tiene huella).
 pub fn con_sombra(id: Id) -> bool {
     // Lo que cuelga de una fachada no toca el suelo.
-    !matches!(id, Id::Bote | Id::Veleta | Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta | Id::FarolBrazo | Id::FarolGasBrazo | Id::Maceta | Id::Llamador)
+    !matches!(id, Id::Bote | Id::Veleta | Id::RejaPlana | Id::RejaPlanaAlta | Id::RejaVolada | Id::RejaVoladaAlta | Id::FarolBrazo | Id::FarolGasBrazo | Id::Maceta | Id::Llamador | Id::AparejoSereno | Id::Picana | Id::BaldeEnMano | Id::Postigo | Id::PostigoAbierto | Id::Cancel)
 }
 
 /// Arma un modelo de la biblioteca.
@@ -173,6 +195,15 @@ pub fn armar(id: Id) -> Modelo {
         Id::FarolGasBrazo => farol_gas_brazo(),
         Id::Maceta => maceta(),
         Id::Llamador => llamador(),
+        Id::CarroAguatero => carro_aguatero(),
+        Id::AparejoSereno => aparejo_sereno(),
+        Id::Picana => picana(),
+        Id::BaldeEnMano => balde_en_mano(),
+        Id::Silla => silla(),
+        Id::Postigo => postigo(false),
+        Id::PostigoAbierto => postigo(true),
+        Id::Cancel => cancel(),
+        Id::BancoPiedra => banco_piedra(),
     }
 }
 
@@ -744,4 +775,186 @@ pub fn cabeza_pastando(id: Id) -> f32 {
         Id::Perro => 0.6,
         _ => PI * 0.25,
     }
+}
+
+// --- [ia] Oficios de la colonia, cosas en la mano y más detalles de las fachadas ---------------
+//
+// Lo que se lleva en la mano usa las partes de los brazos con los pivotes del hombro de un
+// hombre adulto (`ropa::figura`: hombro a 20,5 micro-vóxeles, brazo en x = ±4, mano a 12-14):
+// se emite con la misma pose que la persona y sigue al brazo. Medidas [E].
+
+/// Hombros de un hombre adulto (los pivotes de `ropa::figura`).
+const HOMBRO_I: [f32; 3] = [-4.0, 20.5, 0.0];
+const HOMBRO_D: [f32; 3] = [4.0, 20.5, 0.0];
+
+/// Disco de radio `rad` en el plano xy (centro en x = 0, y = `cy`), de z0 a z1.
+fn disco_z(l: &mut Lienzo, ranura: u8, cy: i32, rad: f32, z0: i32, z1: i32) {
+    let n = rad.ceil() as i32;
+    for dy in -n..n {
+        let yc = dy as f32 + 0.5;
+        let w = (rad * rad - yc * yc).max(0.0).sqrt().round() as i32;
+        if w > 0 {
+            l.caja(Fijo, ranura, [-w, cy + dy, z0], [w, cy + dy + 1, z1]);
+        }
+    }
+}
+
+/// Carro del aguador: la pipa acostada a lo largo, sobre dos ruedas, con la canilla atrás y
+/// un balde colgado; las varas hasta el caballo [E].
+fn carro_aguatero() -> Modelo {
+    let mut l = Lienzo::new([-12, 0, -18], [12, 34, 52]);
+    let eje = 12;
+    l.pivote(RuedaI, [-9.5, eje as f32, 0.0]);
+    l.pivote(RuedaD, [9.5, eje as f32, 0.0]);
+    l.caja(Fijo, r::MADERA_OSC, [-8, eje - 1, -1], [8, eje + 1, 1]);
+    l.centrada(Fijo, r::MADERA, 6, [eje + 1, eje + 2], [-14, 14]);
+    for x in [-6, 5] {
+        l.caja(Fijo, r::MADERA, [x, eje + 1, 14], [x + 1, eje + 3, 50]);
+    }
+    // La pipa: duelas en rodajas a lo largo de z, más panzona en el medio, con aros de hierro.
+    let cy = eje + 8;
+    for (z0, z1, rad) in [(-14, -11, 5.2), (-11, -6, 6.0), (-6, 6, 6.5), (6, 11, 6.0), (11, 14, 5.2)] {
+        disco_z(&mut l, r::MADERA, cy, rad, z0, z1);
+    }
+    for (z, rad) in [(-12, 5.6), (-5, 6.7), (5, 6.7), (12, 5.6)] {
+        disco_z(&mut l, r::HIERRO, cy, rad, z, z + 1);
+    }
+    // Boca arriba, canilla atrás y el balde colgado.
+    l.caja(Fijo, r::MADERA_OSC, [-1, cy + 6, -1], [1, cy + 8, 2]);
+    l.caja(Fijo, r::HIERRO, [-1, cy - 3, -16], [1, cy - 1, -14]);
+    l.cilindro_y(Fijo, r::MADERA_OSC, [5, -16], 2.0, [eje - 4, eje + 1]);
+    l.caja(Fijo, r::HIERRO, [5, eje + 1, -16], [6, eje + 3, -15]);
+    let mut m = l;
+    m.rueda(RuedaI, r::MADERA_OSC, r::MADERA, [-11, -8], 12, 2, 12, 10);
+    m.rueda(RuedaD, r::MADERA_OSC, r::MADERA, [8, 11], 12, 2, 12, 10);
+    m.armar("carro aguatero")
+}
+
+/// Lo del sereno: el farol de sebo colgado de la mano izquierda y el chuzo (la pica) en la
+/// derecha.
+fn aparejo_sereno() -> Modelo {
+    let mut l = Lienzo::new([-8, 0, -4], [8, 44, 6]);
+    l.pivote(BrazoI, HOMBRO_I);
+    l.pivote(BrazoD, HOMBRO_D);
+    // Farol: asa, sombrerete, vidrios encendidos y base.
+    l.caja(BrazoI, r::HIERRO, [-5, 10, 0], [-4, 12, 1]);
+    l.caja(BrazoI, r::HIERRO, [-7, 9, -2], [-2, 10, 3]);
+    l.caja(BrazoI, r::CLARO, [-6, 5, -1], [-3, 9, 2]);
+    for (x, z) in [(-7, -2), (-3, -2), (-7, 2), (-3, 2)] {
+        l.caja(BrazoI, r::HIERRO, [x, 5, z], [x + 1, 9, z + 1]);
+    }
+    l.caja(BrazoI, r::HIERRO, [-7, 4, -2], [-2, 5, 3]);
+    // Chuzo: el asta por la mano y la moharra de hierro arriba.
+    l.caja(BrazoD, r::MADERA_OSC, [4, 1, 1], [5, 38, 2]);
+    l.caja(BrazoD, r::HIERRO, [4, 38, 1], [5, 42, 2]);
+    l.caja(BrazoD, r::HIERRO, [3, 38, 1], [6, 39, 2]);
+    l.armar("aparejo del sereno")
+}
+
+/// Picana del boyero: caña de unos 2,5 m con el aguijón de hierro en la punta, tomada de la
+/// mano derecha y hacia adelante (el brazo levantado la inclina hacia arriba) [E].
+fn picana() -> Modelo {
+    let mut l = Lienzo::new([2, 0, -6], [8, 22, 46]);
+    l.pivote(BrazoD, HOMBRO_D);
+    l.caja(BrazoD, r::MADERA, [4, 12, -4], [5, 13, 40]);
+    l.caja(BrazoD, r::MADERA_OSC, [4, 12, 8], [5, 13, 10]);
+    l.caja(BrazoD, r::HIERRO, [4, 12, 40], [5, 13, 43]);
+    l.armar("picana")
+}
+
+/// Balde de madera con aros de hierro, en la mano derecha (la cadena de un incendio).
+fn balde_en_mano() -> Modelo {
+    let mut l = Lienzo::new([0, 0, -4], [10, 22, 6]);
+    l.pivote(BrazoD, HOMBRO_D);
+    l.cilindro_y(BrazoD, r::MADERA, [5, 2], 2.6, [6, 11]);
+    l.cilindro_y(BrazoD, r::HIERRO, [5, 2], 2.8, [7, 8]);
+    l.cilindro_y(BrazoD, r::HIERRO, [5, 2], 2.8, [10, 11]);
+    l.caja(BrazoD, r::HIERRO, [4, 11, 1], [5, 13, 3]);
+    l.armar("balde en la mano")
+}
+
+/// Silla de paja: asiento a medio metro, cuatro patas y el respaldo.
+fn silla() -> Modelo {
+    let mut l = Lienzo::new([-5, 0, -5], [5, 16, 5]);
+    for (x, z) in [(-4, -4), (3, -4), (-4, 3), (3, 3)] {
+        l.caja(Fijo, r::MADERA_OSC, [x, 0, z], [x + 1, 7, z + 1]);
+    }
+    l.caja(Fijo, r::CAPA, [-4, 7, -4], [4, 8, 4]);
+    for x in [-4, 3] {
+        l.caja(Fijo, r::MADERA_OSC, [x, 8, -4], [x + 1, 16, -3]);
+    }
+    l.caja(Fijo, r::MADERA_OSC, [-3, 13, -4], [3, 14, -3]);
+    l.caja(Fijo, r::MADERA_OSC, [-3, 10, -4], [3, 11, -3]);
+    l.armar("silla")
+}
+
+/// Postigos de madera de una ventana de 1 m × 2 m: cerrados en el vano (dos hojas con
+/// tableros en relieve, un ventanillo y la falleba), o abiertos contra el muro a los dos
+/// lados. Origen: el borde de abajo del vano en el plano de la hoja (z = 0, +z a la calle).
+fn postigo(abierto: bool) -> Modelo {
+    let h = 32;
+    let mut l = Lienzo::new([-17, 0, 0], [17, h, 2]);
+    let hoja = |l: &mut Lienzo, x0: i32| {
+        l.caja(Fijo, r::MADERA_OSC, [x0, 0, 0], [x0 + 8, h, 1]);
+        // Tableros en relieve.
+        for (y0, y1) in [(2, 13), (15, 30)] {
+            l.caja(Fijo, r::MADERA, [x0 + 1, y0, 1], [x0 + 7, y1, 2]);
+        }
+    };
+    if abierto {
+        hoja(&mut l, -17);
+        hoja(&mut l, 9);
+        for x in [-9, 8] {
+            for y in [4, 27] {
+                l.caja(Fijo, r::HIERRO, [x, y, 0], [x + 1, y + 1, 1]);
+            }
+        }
+    } else {
+        hoja(&mut l, -8);
+        hoja(&mut l, 0);
+        // Ventanillo en la hoja izquierda y la falleba.
+        l.caja(Fijo, r::MADERA_OSC, [-6, 18, 1], [-2, 24, 2]);
+        l.caja(Fijo, r::HIERRO, [-1, 10, 1], [1, 22, 2]);
+    }
+    l.armar(if abierto { "postigos abiertos" } else { "postigos" })
+}
+
+/// Cancel de hierro y vidrio al fondo del zaguán: marco, montantes, travesaños y el abanico
+/// de arriba, con vidrios claros entre los hierros. Origen: el piso en el plano del cancel.
+fn cancel() -> Modelo {
+    let (w, h) = (12, 40);
+    let mut l = Lienzo::new([-w, 0, 0], [w, h, 1]);
+    l.caja(Fijo, r::CLARO, [-w + 1, 1, 0], [w - 1, h - 1, 1]);
+    l.caja(Fijo, r::HIERRO, [-w, 0, 0], [w, 1, 1]);
+    l.caja(Fijo, r::HIERRO, [-w, h - 1, 0], [w, h, 1]);
+    for x in [-w, -1, w - 1] {
+        l.caja(Fijo, r::HIERRO, [x, 0, 0], [x + 1, h, 1]);
+    }
+    for x in [-8, -5, 4, 7] {
+        l.caja(Fijo, r::HIERRO, [x, 1, 0], [x + 1, 28, 1]);
+    }
+    for y in [10, 28] {
+        l.caja(Fijo, r::HIERRO, [-w, y, 0], [w, y + 1, 1]);
+    }
+    // Abanico: rayos desde el centro del travesaño.
+    for k in 1..6 {
+        let a = PI * k as f32 / 6.0;
+        for t in 1..11 {
+            let x = (a.cos() * t as f32).round() as i32;
+            let y = 28 + (a.sin() * t as f32).round() as i32;
+            if y < h - 1 && x > -w && x < w - 1 {
+                l.punto(Fijo, r::HIERRO, x, y, 0);
+            }
+        }
+    }
+    l.armar("cancel")
+}
+
+/// Poyo junto a la puerta: banco de piedra (o de ladrillo revocado) de 1,25 m × 0,5 m,
+/// pegado a la fachada. Origen: la base, en la cara del muro (z = 0, +z a la calle).
+fn banco_piedra() -> Modelo {
+    let mut l = Lienzo::new([-10, 0, 0], [10, 8, 7]);
+    l.caja(Fijo, r::CAPA, [-10, 0, 0], [10, 7, 6]);
+    l.caja(Fijo, r::ACENTO, [-10, 7, 0], [10, 8, 7]);
+    l.armar("poyo")
 }

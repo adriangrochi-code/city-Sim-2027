@@ -431,10 +431,30 @@ pub enum Id {
     Maceta,
     /// Aldaba o llamador de la puerta de calle.
     Llamador,
+    // [ia] Oficios de la colonia, poses y más detalles de las fachadas.
+    /// Carro del aguador: la pipa acostada sobre dos ruedas, con su canilla y el balde.
+    CarroAguatero,
+    /// Lo que lleva el sereno: el farol de mano (izquierda) y el chuzo (derecha). Se emite
+    /// con la pose de la persona (sus partes son los brazos de un hombre adulto).
+    AparejoSereno,
+    /// Picana del boyero (caña con aguijón), en la mano derecha.
+    Picana,
+    /// Balde de la cadena de un incendio, en la mano derecha.
+    BaldeEnMano,
+    /// Silla de paja (la gente que toma el fresco en la vereda).
+    Silla,
+    /// Postigos de madera cerrados en el vano de una ventana de 1 m × 2 m.
+    Postigo,
+    /// Postigos abiertos contra el muro, a los lados de la ventana.
+    PostigoAbierto,
+    /// Cancel de hierro y vidrio al fondo del zaguán (1,5 m × 2,5 m).
+    Cancel,
+    /// Poyo: banco de piedra o de material junto a la puerta.
+    BancoPiedra,
 }
 
 impl Id {
-    pub const TODOS: [Id; 31] = [
+    pub const TODOS: [Id; 40] = [
         Id::Caballo,
         Id::CaballoEnsillado,
         Id::Vaca,
@@ -466,6 +486,15 @@ impl Id {
         Id::FarolGasBrazo,
         Id::Maceta,
         Id::Llamador,
+        Id::CarroAguatero,
+        Id::AparejoSereno,
+        Id::Picana,
+        Id::BaldeEnMano,
+        Id::Silla,
+        Id::Postigo,
+        Id::PostigoAbierto,
+        Id::Cancel,
+        Id::BancoPiedra,
     ];
 }
 
@@ -474,6 +503,8 @@ pub struct Biblioteca {
     pub objetos: Vec<Modelo>,
     /// Personas: `ropa::Atuendo as usize * 2 + montado`.
     pub personas: Vec<Modelo>,
+    /// [ia] Personas sentadas (origen: el asiento, a 0,5 m del suelo): una por atuendo.
+    pub sentadas: Vec<Modelo>,
 }
 
 impl Biblioteca {
@@ -483,9 +514,13 @@ impl Biblioteca {
     pub fn persona(&self, a: ropa::Atuendo, montado: bool) -> &Modelo {
         &self.personas[a as usize * 2 + montado as usize]
     }
+    /// [ia] La persona sentada (en un banco, una silla o un poyo de 0,5 m).
+    pub fn sentada(&self, a: ropa::Atuendo) -> &Modelo {
+        &self.sentadas[a as usize]
+    }
     /// Cajas y bytes de memoria de toda la biblioteca.
     pub fn medida(&self) -> (usize, usize) {
-        let n: usize = self.objetos.iter().chain(&self.personas).map(|m| m.cajas.len()).sum();
+        let n: usize = self.objetos.iter().chain(&self.personas).chain(&self.sentadas).map(|m| m.cajas.len()).sum();
         (n, n * std::mem::size_of::<CajaM>())
     }
 }
@@ -495,6 +530,7 @@ pub fn biblioteca() -> &'static Biblioteca {
     B.get_or_init(|| Biblioteca {
         objetos: Id::TODOS.iter().map(|&i| modelos::armar(i)).collect(),
         personas: ropa::Atuendo::TODOS.iter().flat_map(|&a| [false, true].map(|m| ropa::figura(a, m))).collect(),
+        sentadas: ropa::Atuendo::TODOS.iter().map(|&a| ropa::figura_sentada(a)).collect(),
     })
 }
 
