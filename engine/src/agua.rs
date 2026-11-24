@@ -635,7 +635,10 @@ mod tests {
             for &(x, z) in &COSTAS {
                 let m = columna(lod, x, z);
                 for (c, fondo, _) in caras_de_arriba(&m, AGUA_RIO) {
-                    let h = t.height(c.x, c.y);
+                    // [render] Desde el vóxel de 2 m la altura del vóxel es el promedio de su
+                    // planta (prefiltrado, `stream::altura_prefiltrada`): la costa queda donde
+                    // la deja ese promedio.
+                    let h = crate::stream::altura_prefiltrada(&t, c.x, c.y, vs);
                     for nivel in [-1.3, 0.0, 0.3, 1.2, 2.4] {
                         if rio_visible(fondo, nivel, vs).is_some() {
                             vistas += 1;

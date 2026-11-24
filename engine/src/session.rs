@@ -53,6 +53,8 @@ pub fn upload_ops(streamer: &mut Streamer, r: &mut Renderer, vertex_budget: usiz
     let tm = Instant::now();
     r.maintain();
     let maintain_ms = tm.elapsed().as_secs_f64() * 1000.0;
+    // [render] El envío de este cuadro es el de lo que se subió en el anterior.
+    streamer.ritmo.medir_envio(maintain_ms);
     let tu = Instant::now();
     for op in ops {
         match op {
@@ -64,7 +66,7 @@ pub fn upload_ops(streamer: &mut Streamer, r: &mut Renderer, vertex_budget: usiz
         }
     }
     let bytes = r.uploaded_bytes - b0;
-    streamer.ritmo.medir(bytes, tu.elapsed().as_secs_f64() * 1000.0);
+    streamer.ritmo.ultima = (bytes, tu.elapsed().as_secs_f64() * 1000.0);
     UploadFrame { ops: n, bytes, ms: t0.elapsed().as_secs_f64() * 1000.0, poll_ms, maintain_ms }
 }
 
@@ -233,6 +235,8 @@ impl Session {
         // [entorno amplio] Hasta dónde llega el terreno: más allá, niebla (ver `Renderer::reach`).
         let (c, reach) = self.streamer.reach();
         r.reach = [c.x, c.y, reach];
+        // [render] Niebla de lo que falta (ver `Streamer::sectores_faltan`).
+        r.set_faltan(&self.streamer.sectores_faltan());
         // Río y luna del juego (sin partida: río en su nivel medio y media luna).
         match &self.game {
             Some(g) if g.city.plaza.is_some() => {

@@ -37,7 +37,10 @@ pub fn bytes_malla(m: &Mesh) -> usize {
 }
 
 struct Entrada {
-    malla: Mesh,
+    /// [render] En una caja: al crecer el mapa (se duplica) se mueven 48 B por entrada y no la
+    /// malla entera (~250 B). Con decenas de miles de entradas, cada duplicación costaba 4–17 ms
+    /// en un solo cuadro del vuelo.
+    malla: Box<Mesh>,
     bytes: usize,
     uso: u64,
 }
@@ -55,7 +58,18 @@ pub struct CacheMallas {
 
 impl CacheMallas {
     pub fn new(presupuesto: usize) -> CacheMallas {
-        CacheMallas { mapa: Default::default(), orden: BTreeMap::new(), reloj: 0, bytes: 0, presupuesto, aciertos: 0, desalojos: 0 }
+        let mut c = CacheMallas { mapa: Default::default(), orden: BTreeMap::new(), reloj: 0, bytes: 0, presupuesto, aciertos: 0, desalojos: 0 };
+        c.reservar();
+        c
+    }
+
+    /// [render] Lugar en el mapa para lo que entra en el presupuesto (~2 KB por malla en
+    /// promedio): así no se duplica en medio del vuelo.
+    fn reservar(&mut self) {
+        let n = (self.presupuesto / 2048).clamp(1024, 1 << 17);
+        if n > self.mapa.capacity() {
+            self.mapa.reserve(n - self.mapa.len());
+        }
     }
 
     pub fn bytes(&self) -> usize {
@@ -89,7 +103,7 @@ impl CacheMallas {
             return;
         }
         let uso = self.tick();
-        if let Some(v) = self.mapa.insert((key, firma), Entrada { malla, bytes, uso }) {
+        if let Some(v) = self.mapa.insert((key, firma), Entrada { malla: Box::new(malla), bytes, uso }) {
             self.orden.remove(&v.uso);
             self.bytes -= v.bytes;
         }
@@ -106,7 +120,7 @@ impl CacheMallas {
         e.uso = uso;
         self.orden.insert(uso, (key, firma));
         self.aciertos += 1;
-        Some(e.malla.clone())
+        Some((*e.malla).clone())
     }
 
     /// Saca la malla de la caché (sin copiarla), si está con esa firma.
@@ -115,7 +129,7 @@ impl CacheMallas {
         self.orden.remove(&e.uso);
         self.bytes -= e.bytes;
         self.aciertos += 1;
-        Some(e.malla)
+        Some(*e.malla)
     }
 
     /// Marca la entrada como recién usada (una columna que sale de los anillos es la que más
@@ -141,6 +155,7 @@ impl CacheMallas {
             return;
         }
         self.presupuesto = bytes;
+        self.reservar();
         self.recortar();
     }
 

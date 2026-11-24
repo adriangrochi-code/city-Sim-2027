@@ -38,5 +38,23 @@ fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     }
     let s = max(dot(dir, g.sun_dir.xyz), 0.0);
     col += g.sun_color.rgb * (pow(s, 600.0) * 6.0 + pow(s, 12.0) * 0.25) * (1.0 - g.params.y);
-    return vec4(col, 1.0);
+    return vec4(curva_tonal(col), 1.0);
+}
+
+// Curva tonal suave: hasta 0,75 de luminancia, un contraste leve en los medios ([render]: las
+// sombras ~5 % más hondas, los medios ~3 % más claros; continua en 0 y en 0,75); más arriba
+// comprime de a poco (sin cambiar el tono), así los claros al sol no se queman en amarillo
+// saturado. La misma curva en el cielo, el agua, la flora y los agentes.
+fn curva_tonal(c: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    if (l <= 0.0) {
+        return c;
+    }
+    if (l <= 0.75) {
+        let l2 = l + 0.6 * l * (0.75 - l) * (l - 0.3);
+        return c * (l2 / l);
+    }
+    let x = l - 0.75;
+    let l2 = 0.75 + x / (1.0 + x * 2.5);
+    return c * (l2 / l);
 }

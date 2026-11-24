@@ -77,6 +77,95 @@ impl DrawMode {
     }
 }
 
+/// [render] Subidas del *streaming* juntas, una vez por cuadro. Antes cada columna hacía
+/// cuatro `queue.write_buffer` (caras, origen, visibilidad y fila de la tabla) y cada retirada
+/// una más: en el vuelo del banco, ~370 000 llamadas, cada una con su búfer intermedio que wgpu
+/// crea, rastrea y libera al enviar (el 40 % del trabajo del hilo principal). Ahora las caras se
+/// copian directo a un `StagingBelt` (búferes intermedios reusados) y las tablas de columnas y
+/// orígenes tienen un espejo en la CPU: al final del cuadro se suben solo los tramos tocados,
+/// unidos si están cerca. La visibilidad la escribe también el descarte en la GPU, así que de
+/// ella se escriben solo los lugares tocados, sin unir.
+struct Subidas {
+    belt: wgpu::util::StagingBelt,
+    enc: Option<wgpu::CommandEncoder>,
+    cols: Vec<ColGpu>,
+    origins: Vec<[f32; 4]>,
+    sucias: Vec<u32>,
+    visibles: Vec<u32>,
+}
+
+/// Lugares libres entre dos tocados de la tabla que todavía conviene subir juntos (copiar 64 B
+/// de más cuesta menos que otra copia).
+const SUBIDA_HUECO: u32 = 8;
+
+impl Subidas {
+    fn new() -> Subidas {
+        Subidas { belt: wgpu::util::StagingBelt::new(1 << 20), enc: None, cols: vec![ColGpu::zeroed(); ORIGIN_SLOTS as usize], origins: vec![[0.0; 4]; ORIGIN_SLOTS as usize], sucias: Vec::new(), visibles: Vec::new() }
+    }
+
+    /// Lugar en el búfer intermedio para `size` bytes que van a `target` en `off`.
+    fn escribir<'a>(&'a mut self, device: &wgpu::Device, target: &wgpu::Buffer, off: u64, size: u64) -> wgpu::BufferViewMut<'a> {
+        let enc = self.enc.get_or_insert_with(|| device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("subidas") }));
+        self.belt.write_buffer(enc, target, off, wgpu::BufferSize::new(size).expect("subida vacía"), device)
+    }
+
+    fn poner_col(&mut self, slot: u32, col: ColGpu, origin: Option<[f32; 4]>, visible: bool) {
+        self.cols[slot as usize] = col;
+        if let Some(o) = origin {
+            self.origins[slot as usize] = o;
+        }
+        self.sucias.push(slot);
+        if visible {
+            self.visibles.push(slot);
+        }
+    }
+
+    /// Tramos `[a, b]` de lugares; `hueco` = cuántos lugares sin tocar puede haber en el medio.
+    fn tramos(v: &mut Vec<u32>, hueco: u32) -> Vec<(u32, u32)> {
+        v.sort_unstable();
+        v.dedup();
+        let mut out: Vec<(u32, u32)> = Vec::new();
+        for &s in v.iter() {
+            match out.last_mut() {
+                Some(t) if s <= t.1 + 1 + hueco => t.1 = s,
+                _ => out.push((s, s)),
+            }
+        }
+        v.clear();
+        out
+    }
+
+    /// Envía lo juntado en el cuadro. Devuelve si hubo un envío.
+    fn enviar(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, cols: &wgpu::Buffer, origins: &wgpu::Buffer, visible: &wgpu::Buffer) -> bool {
+        if !self.sucias.is_empty() {
+            let mut v = std::mem::take(&mut self.sucias);
+            for (a, b) in Subidas::tramos(&mut v, SUBIDA_HUECO) {
+                let (a, b) = (a as usize, b as usize + 1);
+                let c: Vec<ColGpu> = self.cols[a..b].to_vec();
+                let o: Vec<[f32; 4]> = self.origins[a..b].to_vec();
+                self.escribir(device, cols, a as u64 * 64, (b - a) as u64 * 64).copy_from_slice(bytemuck::cast_slice(&c));
+                self.escribir(device, origins, a as u64 * 16, (b - a) as u64 * 16).copy_from_slice(bytemuck::cast_slice(&o));
+            }
+            self.sucias = v;
+        }
+        if !self.visibles.is_empty() {
+            let mut v = std::mem::take(&mut self.visibles);
+            for (a, b) in Subidas::tramos(&mut v, 0) {
+                let n = (b - a + 1) as usize;
+                self.escribir(device, visible, a as u64 * 4, n as u64 * 4).copy_from_slice(bytemuck::cast_slice(&vec![1u32; n]));
+            }
+            self.visibles = v;
+        }
+        let Some(enc) = self.enc.take() else {
+            return false;
+        };
+        self.belt.finish();
+        queue.submit([enc.finish()]);
+        self.belt.recall();
+        true
+    }
+}
+
 /// Columna en la tabla de la GPU (64 bytes, igual que `Col` en cull.wgsl).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -307,6 +396,9 @@ pub struct Renderer {
     palette: wgpu::Buffer,
     /// Luces de los faroles cerca de la cámara, en una grilla de celdas (ver [`luces`]).
     luces: wgpu::Buffer,
+    /// [render] Distancia a lo que todavía falta subir por sector (ver `Streamer::sectores_faltan`).
+    faltan: wgpu::Buffer,
+    faltan_val: [f32; crate::stream::SECTORES],
     luces_key: u64,
     /// Mapas de sombra: una capa por cascada (vista de todo el arreglo y una por capa).
     shadow_view: wgpu::TextureView,
@@ -397,6 +489,8 @@ pub struct Renderer {
     next_slot: u32,
     batches: Vec<Batch>,
     columns: HashMap<(u32, IVec2), Batch, crate::fxhash::FxBuild>,
+    /// [render] Subidas del cuadro juntas (ver [`Subidas`]).
+    subidas: std::cell::RefCell<Subidas>,
     overlay: wgpu::Buffer,
     overlay_count: u32,
     targets: Option<Targets>,
@@ -516,7 +610,8 @@ fn make_shadow_maps(device: &wgpu::Device, q: ShadowQuality) -> (wgpu::TextureVi
 }
 
 #[allow(clippy::too_many_arguments)]
-fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer, luces: &wgpu::Buffer) -> wgpu::BindGroup {
+#[allow(clippy::too_many_arguments)]
+fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &wgpu::TextureView, sampler: &wgpu::Sampler, origins: &wgpu::Buffer, palette: &wgpu::Buffer, sombras: &wgpu::Buffer, luces: &wgpu::Buffer, faltan: &wgpu::Buffer) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout,
@@ -528,6 +623,7 @@ fn make_main_bg(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: 
             wgpu::BindGroupEntry { binding: 4, resource: palette.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 5, resource: sombras.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 7, resource: luces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 8, resource: faltan.as_entire_binding() },
         ],
     })
 }
@@ -729,6 +825,8 @@ impl Renderer {
                     count: None,
                 },
                 storage_entry(7, wgpu::ShaderStages::FRAGMENT, true),
+                // [render] Niebla de lo que falta (ver `Renderer::set_faltan`).
+                storage_entry(8, wgpu::ShaderStages::FRAGMENT, true),
             ],
         });
         // Pase de sombras: orígenes de las columnas y la matriz de la cascada (desplazamiento
@@ -764,7 +862,8 @@ impl Renderer {
         let simple_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("solo globales"), entries: &[uniform_entry] });
         let luces_ini = luces::armar(glam::Vec2::ZERO, &[]);
         let luces_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("luces de los faroles"), contents: bytemuck::cast_slice(&luces_ini), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
-        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras, &luces_buf);
+        let faltan_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("niebla de lo que falta"), contents: bytemuck::cast_slice(&[crate::stream::SIN_FALTA; crate::stream::SECTORES]), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
+        let main_bg = make_main_bg(&device, &main_bgl, &globals, &shadow_view, &shadow_sampler, &origins, &palette, &sombras, &luces_buf, &faltan_buf);
         let shadow_vox_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &shadow_bgl,
@@ -855,7 +954,7 @@ impl Renderer {
                 // Posición y corriente (m/s en x, z; cero en el río).
                 buffers: &[wgpu::VertexBufferLayout { array_stride: 20, step_mode: wgpu::VertexStepMode::Vertex, attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2] }],
             },
-            fragment: Some(wgpu::FragmentState { module: &water_mod, entry_point: "fs_main", compilation_options: Default::default(), targets: &[blend_target.clone()] }),
+            fragment: Some(wgpu::FragmentState { module: &water_mod, entry_point: "fs_plano", compilation_options: Default::default(), targets: &[blend_target.clone()] }),
             primitive: Default::default(),
             // Sin sesgo de profundidad: la tierra firme nunca queda al ras del nivel del mar (ver
             // `stream::top_from_height`: su cara de arriba está por lo menos un vóxel arriba, y la
@@ -1134,6 +1233,8 @@ impl Renderer {
             palette,
             luces: luces_buf,
             luces_key: 0,
+            faltan: faltan_buf,
+            faltan_val: [crate::stream::SIN_FALTA; crate::stream::SECTORES],
             shadow_view,
             shadow_layers,
             quality,
@@ -1198,6 +1299,7 @@ impl Renderer {
             next_slot: 0,
             batches: Vec::new(),
             columns: HashMap::default(),
+            subidas: std::cell::RefCell::new(Subidas::new()),
             overlay,
             overlay_count: 0,
             targets: None,
@@ -1243,7 +1345,7 @@ impl Renderer {
     fn free_batch(&mut self, b: Batch) {
         self.scene_version += 1;
         // La columna deja de dibujarse en la GPU y su bloque se libera con retraso.
-        self.queue.write_buffer(&self.cols, b.slot as u64 * 64, bytemuck::bytes_of(&ColGpu::zeroed()));
+        self.subidas.get_mut().poner_col(b.slot, ColGpu::zeroed(), None, false);
         self.alloc.free_later(self.frame, b.start / QUAD_UNIT, b.order);
         self.free_slots.push(b.slot);
     }
@@ -1255,6 +1357,8 @@ impl Renderer {
             if let Some((off, order)) = self.alloc.alloc(units) {
                 return (off * QUAD_UNIT, order);
             }
+            // [render] Lo que ya se copió al búfer viejo tiene que llegar antes de la copia.
+            self.flush_uploads();
             let old_bytes = self.quads.size();
             self.alloc.grow();
             let bigger = make_quad_buffer(&self.device, self.alloc.capacity());
@@ -1272,24 +1376,37 @@ impl Renderer {
         }
         let (lo, hi) = m.bounds();
         self.shadow_dirty_box(lo, hi);
-        let (mut quads, groups) = m.quads_grouped();
-        // [agua en vóxeles]
-        quads.extend_from_slice(&m.water);
-        let slot = self.alloc_slot();
-        for q in quads.iter_mut() {
-            q.slot = slot;
+        let n = m.quad_count();
+        let mut groups = [0u32; 7];
+        let mut acc = 0u32;
+        for (k, g) in m.quads.iter().enumerate() {
+            groups[k] = acc;
+            acc += g.len() as u32;
         }
-        let (start, order) = self.alloc_quads(quads.len() as u32);
-        let bytes: &[u8] = bytemuck::cast_slice(&quads);
-        self.queue.write_buffer(&self.quads, start as u64 * QUAD_BYTES, bytes);
-        self.uploaded_bytes += bytes.len() as u64;
+        groups[6] = acc;
+        let slot = self.alloc_slot();
+        let (start, order) = self.alloc_quads(n as u32);
+        // [render] Las caras se copian directo al búfer intermedio del cuadro (sin un Vec de
+        // por medio), con el número de columna puesto.
+        let bytes = n as u64 * QUAD_BYTES;
+        {
+            let sub = self.subidas.get_mut();
+            let mut view = sub.escribir(&self.device, &self.quads, start as u64 * QUAD_BYTES, bytes);
+            let dst: &mut [Quad] = bytemuck::cast_slice_mut(&mut view[..]);
+            let mut i = 0;
+            for src in m.quads.iter().chain(std::iter::once(&m.water)) {
+                for q in src {
+                    dst[i] = Quad { slot, ..*q };
+                    i += 1;
+                }
+            }
+        }
+        self.uploaded_bytes += bytes;
         let origin = [m.origin.x, m.origin.y, m.origin.z, m.voxel];
-        self.queue.write_buffer(&self.origins, slot as u64 * 16, bytemuck::cast_slice(&origin));
-        // Columna nueva: se dibuja en la primera pasada del Hi-Z (seguramente tapa algo).
-        self.queue.write_buffer(&self.visible, slot as u64 * 4, bytemuck::bytes_of(&1u32));
         let col = ColGpu { lo: [lo.x, lo.y, lo.z, lod as f32], hi: [hi.x, hi.y, hi.z, 1.0], start, g: [groups[0], groups[1], groups[2], groups[3], groups[4], groups[5], groups[6]] };
-        self.queue.write_buffer(&self.cols, slot as u64 * 64, bytemuck::bytes_of(&col));
-        Some(Batch { start, order, groups, quads: quads.len() as u32, water: m.water.len() as u32, lod, slot, lo, hi })
+        // Columna nueva: se dibuja en la primera pasada del Hi-Z (seguramente tapa algo).
+        self.subidas.get_mut().poner_col(slot, col, Some(origin), true);
+        Some(Batch { start, order, groups, quads: n as u32, water: m.water.len() as u32, lod, slot, lo, hi })
     }
 
     /// Un cambio de geometría solo obliga a rehacer una cascada si cae dentro de su caja de luz
@@ -1346,6 +1463,20 @@ impl Renderer {
         }
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("flora"), contents: bytemuck::cast_slice(&all), usage: wgpu::BufferUsages::VERTEX });
         *self.detail_buf.borrow_mut() = Some((buf, n as u32));
+    }
+
+    /// [render] Niebla de lo que falta (técnicas del mod LOD §2.12, `NieblaSectores`): por cada
+    /// uno de los sectores alrededor del centro de los anillos, la distancia a la primera zona
+    /// que todavía no tiene nada dibujado. Los shaders funden con la niebla desde un poco antes:
+    /// al entrar, teletransportarse o alejar rápido, lo que falta no se ve como el plano del río.
+    /// Se sube solo si cambió.
+    pub fn set_faltan(&mut self, d: &[f32; crate::stream::SECTORES]) {
+        if *d == self.faltan_val {
+            return;
+        }
+        self.faltan_val = *d;
+        self.scene_version += 1;
+        self.queue.write_buffer(&self.faltan, 0, bytemuck::cast_slice(d));
     }
 
     /// Luces de los faroles alrededor de `centro` (x, y, z, alcance, intensidad): se suben solo
@@ -1407,11 +1538,19 @@ impl Renderer {
         }
     }
 
+    /// [render] Envía las subidas juntadas en el cuadro (antes de dibujar o de agrandar el
+    /// megabúfer).
+    fn flush_uploads(&self) -> bool {
+        self.subidas.borrow_mut().enviar(&self.device, &self.queue, &self.cols, &self.origins, &self.visible)
+    }
+
     /// Avanza el contador de cuadros y libera los bloques que la GPU ya no usa.
     pub fn maintain(&mut self) {
         // Un envío (aunque esté vacío) hace que wgpu ejecute las copias pendientes de las
         // mallas nuevas y libere sus búferes intermedios; sin ventana casi no hay envíos.
-        self.queue.submit(std::iter::empty());
+        if !self.flush_uploads() {
+            self.queue.submit(std::iter::empty());
+        }
         self.device.poll(wgpu::Maintain::Poll);
         self.frame += 1;
         self.alloc.collect(self.frame, FRAMES_IN_FLIGHT);
@@ -1442,7 +1581,7 @@ impl Renderer {
         }
         self.quality = q;
         let (all, layers) = make_shadow_maps(&self.device, q);
-        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras, &self.luces);
+        self.main_bg = make_main_bg(&self.device, &self.main_bgl, &self.globals, &all, &self.shadow_sampler, &self.origins, &self.palette, &self.sombras, &self.luces, &self.faltan);
         self.shadow_view = all;
         self.shadow_layers = layers;
         *self.casc.borrow_mut() = CascState { force: true, dirty: [true; MAX_CASCADES], ..Default::default() };
@@ -1463,6 +1602,9 @@ impl Renderer {
         self.batches.clear();
         self.free_slots.clear();
         self.next_slot = 0;
+        // [render] Lo pendiente va antes de borrar la tabla (si no, la pisaría después).
+        self.flush_uploads();
+        self.subidas.get_mut().cols.fill(ColGpu::zeroed());
         self.alloc = Buddy::new(INITIAL_ORDER);
         self.quads = make_quad_buffer(&self.device, self.alloc.capacity());
         let zeros = vec![0u8; ORIGIN_SLOTS as usize * 64];
@@ -1480,6 +1622,7 @@ impl Renderer {
 
     /// Dibuja un cuadro fuera de pantalla y mide CPU y tiempo total (banco de pruebas).
     pub fn bench_frame(&mut self, cam: &OrbitCamera, hour: f32, width: u32, height: u32) -> FrameStats {
+        self.flush_uploads(); // [render]
         if self.targets.as_ref().map(|t| (t.width, t.height)) != Some((width, height)) {
             self.targets = Some(self.make_targets(width, height));
         }
@@ -2084,6 +2227,7 @@ impl Renderer {
     /// Dibuja un cuadro en la ventana; `ui` pinta la interfaz encima de la escena.
     pub fn render_surface(&mut self, surface: &wgpu::Surface<'static>, config: &wgpu::SurfaceConfiguration, cam: &OrbitCamera, hour: f32, ui: Option<UiHook>) -> Result<(), String> {
         use std::sync::atomic::Ordering as AO;
+        self.flush_uploads(); // [render]
         // [lod] Tiempo de GPU del pase principal, leído uno o dos cuadros tarde (sin esperar).
         if let Some((_, _, read, period)) = &self.timestamps {
             self.device.poll(wgpu::Maintain::Poll);
@@ -2153,6 +2297,7 @@ impl Renderer {
 
     /// Dibuja la escena (y la interfaz, si hay) y devuelve la imagen.
     pub fn capture_image(&self, cam: &OrbitCamera, hour: f32, width: u32, height: u32, ui: Option<UiHook>) -> image::RgbImage {
+        self.flush_uploads(); // [render]
         let v = self.write_globals(cam, hour, width as f32 / height as f32, usize::MAX);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let targets = self.make_targets(width, height);
@@ -2225,6 +2370,16 @@ mod tests {
 
     /// Una columna lejana cuya caja queda apenas por encima del borde superior de la vista,
     /// pero cuyo terreno se dibuja más abajo por la curvatura, no se puede descartar.
+    /// [render] Tramos de lugares tocados para subir juntas las filas de la tabla.
+    #[test]
+    fn los_lugares_tocados_se_suben_en_tramos() {
+        let mut v = vec![40, 3, 5, 3, 4, 20, 100, 12];
+        assert_eq!(Subidas::tramos(&mut v, 0), vec![(3, 5), (12, 12), (20, 20), (40, 40), (100, 100)]);
+        assert!(v.is_empty());
+        let mut v = vec![40, 3, 5, 3, 4, 20, 100, 12];
+        assert_eq!(Subidas::tramos(&mut v, 8), vec![(3, 20), (40, 40), (100, 100)]);
+    }
+
     #[test]
     fn el_descarte_tiene_en_cuenta_la_curvatura() {
         let cam = OrbitCamera { target: Vec3::new(0.0, 0.0, 0.0), yaw: 0.0, pitch: 8.0, distance: 200.0, fov_y: 50.0 };

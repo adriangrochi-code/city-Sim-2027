@@ -122,6 +122,10 @@ pub struct Streamer {
     ready: FxMap<Key, u32>,
     uploads: Vec<ColumnResult>,
     retired: FxSet<Key>,
+    /// [render] Estado con el que se miraron las retiradas sin quitar ninguna (ver `poll_budget`).
+    retired_mark: Option<(u32, usize, usize, usize, usize, usize, u64)>,
+    /// [render] Última niebla de lo que falta, con qué estado y cuándo se calculó.
+    faltan: ([f32; SECTORES], Option<(u32, usize, usize, usize)>, Option<std::time::Instant>),
     next_version: u32,
     center: Vec2,
     /// Nivel más fino que se genera (LOD por tamaño en pantalla).
@@ -175,11 +179,15 @@ pub struct Streamer {
 pub struct RitmoSubida {
     pub ms: f64,
     pub ns_por_byte: f64,
+    /// [render] Tiempo del cuadro que ya se fue en el streaming antes de subir (recentrar).
+    pub gastado_ms: f64,
+    /// [render] Última subida (bytes, ms), a la que se le suma el envío del cuadro siguiente.
+    pub ultima: (u64, f64),
 }
 
 impl Default for RitmoSubida {
     fn default() -> Self {
-        RitmoSubida { ms: 2.0, ns_por_byte: 1.0 }
+        RitmoSubida { ms: 2.0, ns_por_byte: 1.0, gastado_ms: 0.0, ultima: (0, 0.0) }
     }
 }
 
@@ -188,6 +196,14 @@ impl RitmoSubida {
     pub fn bytes(&self) -> usize {
         ((self.ms * 1e6 / self.ns_por_byte.max(0.01)) as usize).max(64 * 1024)
     }
+    /// [render] Bytes que entran en `ms` (lo que queda del cuadro). Sin tiempo, ninguno (igual
+    /// sube una columna: ver `Streamer::poll_budget`); con poco, por lo menos 16 KB.
+    pub fn bytes_para(&self, ms: f64) -> usize {
+        if ms <= 0.0 {
+            return 0;
+        }
+        ((ms * 1e6 / self.ns_por_byte.max(0.01)) as usize).max(16 * 1024)
+    }
     /// Suma una medida (subida de `bytes` en `ms`); las chicas no dicen nada del costo.
     pub fn medir(&mut self, bytes: u64, ms: f64) {
         if bytes >= 32 * 1024 {
@@ -195,7 +211,18 @@ impl RitmoSubida {
             self.ns_por_byte = 0.8 * self.ns_por_byte + 0.2 * x;
         }
     }
+    /// [render] Cierra la medida de la subida anterior con lo que costó enviarla a la GPU (el
+    /// `maintain` del cuadro siguiente: las copias juntas se envían ahí).
+    pub fn medir_envio(&mut self, ms_envio: f64) {
+        let (b, ms) = std::mem::take(&mut self.ultima);
+        self.medir(b, ms + ms_envio);
+    }
 }
+
+/// [render] Sectores de la niebla de lo que falta (ver [`Streamer::sectores_faltan`]).
+pub const SECTORES: usize = 64;
+/// [render] Distancia de un sector sin nada que falte.
+pub const SIN_FALTA: f32 = 1.0e9;
 
 /// [lod] Bytes que se suben a la GPU con una malla.
 pub fn upload_bytes(m: &Mesh) -> usize {
@@ -242,6 +269,8 @@ impl Streamer {
             ready: FxMap::default(),
             uploads: Vec::new(),
             retired: FxSet::default(),
+            retired_mark: None,
+            faltan: ([SIN_FALTA; SECTORES], None, None),
             next_version: 1,
             center: Vec2::ZERO,
             first: 0,
@@ -603,8 +632,11 @@ impl Streamer {
     /// Recentra los anillos y elige el nivel más fino según la altura de la cámara sobre el
     /// terreno, para no generar detalle que mediría menos de medio píxel.
     pub fn update_view(&mut self, center: Vec2, eye_height: f32, fov_y: f32, view_h: f32) {
+        let t0 = std::time::Instant::now();
         let first = choose_first_level(self.first, eye_height, fov_y, view_h, self.active);
         self.update_with(center, first);
+        // [render] Lo que costó recentrar sale del presupuesto de subida de este cuadro.
+        self.ritmo.gastado_ms += t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     /// Centro de los anillos de detalle y radio del círculo que el último anillo cubre seguro
@@ -641,11 +673,21 @@ impl Streamer {
         let mut cols = level_columns_from(&self.specs[..self.active as usize], center, first);
         cols.resize(self.specs.len(), Vec::new());
         let mut new_sets = Vec::new();
+        // [render] Un nivel cuyo anillo y cuyo hueco (el anillo del nivel de adentro) no se
+        // movieron queda igual: no se rearma su conjunto ni se compara (al recentrar casi
+        // siempre se mueven solo los niveles finos).
+        let same_flags = self.regions.last() == regions.last() && self.regions.len() == regions.len();
         for (li, list) in cols.into_iter().enumerate() {
             let lod = li as u32;
+            let same = same_flags && li < self.sets.len() && self.regions[li] == regions[li] && (li == 0 || self.regions[li - 1] == regions[li - 1]);
+            if same {
+                new_sets.push(self.sets[li].clone());
+                continue;
+            }
             let new: HashSet<IVec2> = list.into_iter().collect();
-            let old: HashSet<IVec2> = self.sets.get(li).map(|s| (**s).clone()).unwrap_or_default();
-            let added: Vec<IVec2> = new.difference(&old).copied().collect();
+            let old_arc = self.sets.get(li).cloned().unwrap_or_default();
+            let old: &HashSet<IVec2> = &old_arc;
+            let added: Vec<IVec2> = new.difference(old).copied().collect();
             let removed: Vec<IVec2> = old.difference(&new).copied().collect();
             for c in &removed {
                 self.versions.remove(&(lod, *c));
@@ -786,6 +828,7 @@ impl Streamer {
     /// [lod] Igual que [`poll`], con un tope de vértices **y** uno de bytes por cuadro (el de
     /// bytes sale del ritmo de subida medido, ver [`RitmoSubida`]). Siempre sube al menos una.
     pub fn poll_budget(&mut self, vertex_budget: usize, byte_budget: usize) -> Vec<Op> {
+        let t0 = std::time::Instant::now();
         self.poll_relief();
         self.poll_occlusion();
         while let Ok(r) = self.rx.try_recv() {
@@ -794,6 +837,11 @@ impl Streamer {
                 self.uploads.push(r);
             }
         }
+        // [render] El presupuesto en ms es de todo el trabajo del cuadro en el streaming: lo que
+        // ya se gastó (recentrar, la oclusión, recibir) se descuenta de lo que se puede subir.
+        // Antes un cuadro que recentraba subía además el presupuesto entero (eran los del p99).
+        let gastado = std::mem::take(&mut self.ritmo.gastado_ms) + t0.elapsed().as_secs_f64() * 1000.0;
+        let byte_budget = if byte_budget == usize::MAX { byte_budget } else { byte_budget.min(self.ritmo.bytes_para(self.ritmo.ms - gastado)) };
         // Lo más cercano primero.
         self.uploads.sort_by(|a, b| b.prio.partial_cmp(&a.prio).unwrap_or(Ordering::Equal));
         let mut ops = Vec::new();
@@ -827,9 +875,17 @@ impl Streamer {
         // retiradas (viajes o zoom rápidos). En los dos casos quedaban huecos rectangulares
         // por un cuadro o más (se veía el plano del río debajo). Solo queda un tope de
         // seguridad muy alto para no agotar las tablas de la GPU.
-        if !self.retired.is_empty() {
+        //
+        // [render] Antes se preguntaba `covered` por cada retirada en cada cuadro, recorriendo
+        // en cada nivel fino todo lo que ese nivel quiere: con ~740 retiradas esperando (zoom y
+        // vuelo) eran 4–5 ms por cuadro aunque nada hubiera cambiado. Ahora se mira solo si
+        // cambió algo de lo que decide la cobertura, y con un índice de lo que falta.
+        let marca = (self.next_version, self.stats.uploads, self.ready.len(), self.hidden.len(), self.stats.occl_evals, self.retired.len(), self.occl_epoch);
+        if !self.retired.is_empty() && self.retired_mark != Some(marca) {
             let flush = self.retired.len() > RETIRED_SAFETY;
-            let done: Vec<Key> = self.retired.iter().copied().filter(|k| flush || self.covered(*k)).collect();
+            let faltan = if flush { FxSet::default() } else { self.missing_index() };
+            let done: Vec<Key> = self.retired.iter().copied().filter(|k| flush || self.covered_by(&faltan, *k)).collect();
+            let quedan = done.is_empty();
             for key in done {
                 self.retired.remove(&key);
                 self.ready.remove(&key);
@@ -838,12 +894,126 @@ impl Streamer {
                 }
                 ops.push(Op::Remove(key));
             }
+            // Si no se quitó nada, la próxima vez se mira solo si algo cambió.
+            self.retired_mark = if quedan { Some(marca) } else { None };
         }
         ops
     }
 
+    /// [render] Lo que falta subir, proyectado a los niveles más gruesos: `(k, l, c)` = el nivel
+    /// `k` quiere una columna que todavía no está al día dentro de la columna `c` del nivel
+    /// `l ≥ k`. Es lo que pregunta [`Self::covered`], sin recorrer los anillos.
+    fn missing_index(&self) -> FxSet<(u32, u32, IVec2)> {
+        let mut out = FxSet::default();
+        let n = self.specs.len() as u32;
+        for (&key, v) in &self.versions {
+            if self.ready.get(&key) == Some(v) || self.hidden.contains(&key) {
+                continue;
+            }
+            for l in key.0..n {
+                let f = 1i32 << (l - key.0);
+                out.insert((key.0, l, IVec2::new(key.1.x.div_euclid(f), key.1.y.div_euclid(f))));
+            }
+        }
+        out
+    }
+
+    /// [render] Niebla de lo que falta (técnicas del mod LOD §2.12): para cada uno de los
+    /// [`SECTORES`] alrededor del centro de los anillos, la distancia (m, en el plano) a la
+    /// primera columna querida que no está en la GPU y cuya zona no tapa ninguna otra columna
+    /// dibujada (de otro nivel, más fina o más gruesa, aunque esté retirada). Las tapadas por el
+    /// relieve no cuentan (no se ven). Se recalcula a lo sumo cada 100 ms y al recentrar.
+    pub fn sectores_faltan(&mut self) -> [f32; SECTORES] {
+        let marca = (self.next_version, self.stats.uploads, self.ready.len(), self.hidden.len());
+        if self.faltan.1 == Some(marca) || self.faltan.2.is_some_and(|t| t.elapsed().as_millis() < 100) {
+            return self.faltan.0;
+        }
+        self.faltan.1 = Some(marca);
+        self.faltan.2 = Some(std::time::Instant::now());
+        let mut out = [SIN_FALTA; SECTORES];
+        let n = self.specs.len() as u32;
+        // Lo dibujado, proyectado a los niveles más gruesos (como `missing_index`).
+        let mut drawn: FxSet<(u32, u32, IVec2)> = FxSet::default();
+        for &key in self.ready.keys() {
+            for l in key.0..n {
+                let f = 1i32 << (l - key.0);
+                drawn.insert((key.0, l, IVec2::new(key.1.x.div_euclid(f), key.1.y.div_euclid(f))));
+            }
+        }
+        let tau = std::f32::consts::TAU;
+        for (&key, v) in &self.versions {
+            if self.ready.contains_key(&key) || self.hidden.contains(&key) {
+                continue;
+            }
+            let _ = v;
+            let (l, c) = key;
+            let covered = (0..n).any(|k| match k.cmp(&l) {
+                Ordering::Less => drawn.contains(&(k, l, c)),
+                Ordering::Greater => {
+                    let f = 1i32 << (k - l);
+                    drawn.contains(&(k, k, IVec2::new(c.x.div_euclid(f), c.y.div_euclid(f))))
+                }
+                Ordering::Equal => false,
+            });
+            if covered {
+                continue;
+            }
+            let cm = self.specs[l as usize].chunk_m();
+            let (lo, hi) = (c.as_vec2() * cm - self.center, (c + IVec2::ONE).as_vec2() * cm - self.center);
+            let near = Vec2::new(0f32.clamp(lo.x, hi.x), 0f32.clamp(lo.y, hi.y));
+            let d = near.length();
+            if lo.x <= 0.0 && hi.x >= 0.0 && lo.y <= 0.0 && hi.y >= 0.0 {
+                out = [0.0; SECTORES];
+                break;
+            }
+            // Sectores que abarca la columna: los ángulos de sus esquinas respecto del de su centro.
+            let mid = (lo + hi) * 0.5;
+            let a0 = mid.y.atan2(mid.x);
+            let (mut amin, mut amax) = (0f32, 0f32);
+            for q in [lo, hi, Vec2::new(lo.x, hi.y), Vec2::new(hi.x, lo.y)] {
+                let mut da = q.y.atan2(q.x) - a0;
+                if da > std::f32::consts::PI {
+                    da -= tau;
+                } else if da < -std::f32::consts::PI {
+                    da += tau;
+                }
+                amin = amin.min(da);
+                amax = amax.max(da);
+            }
+            let s0 = (((a0 + amin) / tau + 0.5) * SECTORES as f32).floor() as i32;
+            let s1 = (((a0 + amax) / tau + 0.5) * SECTORES as f32).floor() as i32;
+            for s in s0..=s1 {
+                let i = s.rem_euclid(SECTORES as i32) as usize;
+                out[i] = out[i].min(d);
+            }
+        }
+        self.faltan.0 = out;
+        out
+    }
+
+    /// [render] Igual que [`Self::covered`] con el índice de [`Self::missing_index`].
+    fn covered_by(&self, faltan: &FxSet<(u32, u32, IVec2)>, key: Key) -> bool {
+        let (l, c) = key;
+        for k in 0..self.specs.len() as u32 {
+            if k == l {
+                continue;
+            }
+            let hole = if k < l {
+                faltan.contains(&(k, l, c))
+            } else {
+                let f = 1i32 << (k - l);
+                faltan.contains(&(k, k, IVec2::new(c.x.div_euclid(f), c.y.div_euclid(f))))
+            };
+            if hole {
+                return false;
+            }
+        }
+        true
+    }
+
     /// ¿La zona de esta columna (que ya no se quiere) está cubierta por columnas de otros
     /// niveles que ya están en la GPU con su versión al día?
+    #[cfg_attr(not(test), allow(dead_code))]
     fn covered(&self, key: Key) -> bool {
         let (l, c) = (key.0 as i32, key.1);
         // Todos los niveles (antes solo ±3): un zoom rápido puede saltar el nivel más fino de
@@ -1394,6 +1564,24 @@ fn raster_tree(tr: &VoxTree, lo: IVec3, top: &[i32], pad: &mut [Mat]) -> usize {
     n
 }
 
+/// [render] ¿Se prefiltra la altura en vóxeles de lado `vs`? Desde el de 2 m (nivel 3). El
+/// material de la superficie sigue saliendo del centro del vóxel: un voto entre muestras se
+/// probó y se descartó (ver `docs/sistemas/tecnicas-minecraft-lod.md` §6: se quedaba siempre
+/// con el pasto más común y el campo lejano perdía sus manchas verdes).
+pub fn prefiltra(vs: f32) -> bool {
+    vs >= 2.0 && std::env::var("MOTOR_SIN_PREFILTRO").is_err()
+}
+
+/// [render] Altura de un vóxel del nivel de lado `vs` con centro en (`x`, `z`), como la usa
+/// `build_column_inner`: el promedio de sus 4 esquinas desde el vóxel de 2 m, el centro antes.
+pub fn altura_prefiltrada(t: &TerrainGen, x: f32, z: f32, vs: f32) -> f32 {
+    if !prefiltra(vs) {
+        return t.height(x, z);
+    }
+    let h = 0.5 * vs;
+    0.25 * (t.height(x - h, z - h) + t.height(x + h, z - h) + t.height(x - h, z + h) + t.height(x + h, z + h))
+}
+
 /// Genera y malla una columna de chunks completa de un nivel.
 pub fn build_column(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &EditStore, spec: LevelSpec, col: IVec2, ring: &HashSet<IVec2>) -> Mesh {
     let t_start = std::time::Instant::now();
@@ -1415,12 +1603,36 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
     // Alturas con dos vóxeles de margen (uno para el borde y otro para la pendiente).
     let th = std::time::Instant::now();
     let mut hs = vec![0f32; (p * p) as usize];
-    let coast: Vec<f32> = (0..p).map(|i| t.coast_z(((base.x + i - 2) as f32 + 0.5) * vs)).collect();
-    for j in 0..p {
-        for i in 0..p {
-            let x = ((base.x + i - 2) as f32 + 0.5) * vs;
-            let z = ((base.y + j - 2) as f32 + 0.5) * vs;
-            hs[(i + j * p) as usize] = t.height_with_coast(x, z, coast[i as usize]);
+    // [render] Prefiltrado (Fase 3, técnicas del mod LOD §2.2): desde el vóxel de 2 m la altura de
+    // un vóxel es el promedio de las alturas de sus 4 esquinas, no la de su centro. Una sola
+    // muestra en un vóxel de 32 m tomaba el detalle de 10 m (médanos, cauces) de ese punto: al
+    // cambiar de nivel la ladera saltaba un vóxel. Las esquinas son compartidas entre vóxeles
+    // vecinos: cuesta lo mismo que antes. Los niveles 0–2 no cambian.
+    if prefiltra(vs) {
+        let pc = p + 1;
+        let mut cg = vec![0f32; (pc * pc) as usize];
+        for i in 0..pc {
+            let x = (base.x + i - 2) as f32 * vs;
+            let coast = t.coast_z(x);
+            for j in 0..pc {
+                let z = (base.y + j - 2) as f32 * vs;
+                cg[(i + j * pc) as usize] = t.height_with_coast(x, z, coast);
+            }
+        }
+        for j in 0..p {
+            for i in 0..p {
+                let c = |a: i32, b: i32| cg[((i + a) + (j + b) * pc) as usize];
+                hs[(i + j * p) as usize] = 0.25 * (c(0, 0) + c(1, 0) + c(0, 1) + c(1, 1));
+            }
+        }
+    } else {
+        let coast: Vec<f32> = (0..p).map(|i| t.coast_z(((base.x + i - 2) as f32 + 0.5) * vs)).collect();
+        for j in 0..p {
+            for i in 0..p {
+                let x = ((base.x + i - 2) as f32 + 0.5) * vs;
+                let z = ((base.y + j - 2) as f32 + 0.5) * vs;
+                hs[(i + j * p) as usize] = t.height_with_coast(x, z, coast[i as usize]);
+            }
         }
     }
     HEIGHT_NS.fetch_add(th.elapsed().as_nanos() as u64, AtOrd::Relaxed);
@@ -1613,7 +1825,7 @@ fn build_column_inner(t: &TerrainGen, arroyos: &crate::agua::Arroyos, store: &Ed
         }
         CHUNKS.fetch_add(1, AtOrd::Relaxed);
         let tm = std::time::Instant::now();
-        let m = mesher::mesh_chunk_grad(&pad, IVec3::new(0, (cy - y0) * N, 0), Some(&grad));
+        let m = mesher::mesh_chunk_ao(&pad, IVec3::new(0, (cy - y0) * N, 0), Some(&grad), mesher::AoModo::para_nivel(spec.lod)); // [render]
         out.append(&m);
         *mesh_ns += tm.elapsed().as_nanos() as u64;
     }
@@ -1771,13 +1983,94 @@ mod tests {
         let t0 = Instant::now();
         while !s.idle() && t0.elapsed() < Duration::from_secs(120) {
             s.poll(20_000);
+            // [render] El índice de lo que falta responde igual que el recorrido de antes.
+            let idx = s.missing_index();
             for k in &s.retired {
                 assert!(!s.covered(*k), "la columna {k:?} sigue subida con su zona ya cubierta");
+                assert_eq!(s.covered(*k), s.covered_by(&idx, *k), "índice de lo que falta distinto en {k:?}");
             }
             std::thread::sleep(Duration::from_millis(2));
         }
         s.poll(usize::MAX);
         assert!(s.retired.is_empty());
+    }
+
+    /// [render] Prefiltrado: la altura de un vóxel grueso se acerca al promedio de las alturas
+    /// finas de su planta (con tolerancia: son 4 esquinas, no todas) y los niveles 0–2 no
+    /// cambian. Además, la columna generada usa esa altura (cara de arriba de cada vóxel).
+    #[test]
+    fn la_altura_prefiltrada_es_el_promedio_de_las_finas() {
+        let t = TerrainGen::new(1726);
+        let mut peor: f32 = 0.0;
+        for i in 0..60 {
+            let (x, z) = (9000.0 + i as f32 * 211.7, 12000.0 + (i * 37 % 60) as f32 * 157.3);
+            for lod in 0..=2u32 {
+                let vs = crate::lod::BASE_VOXEL * (1 << lod) as f32;
+                assert_eq!(altura_prefiltrada(&t, x, z, vs), t.height(x, z));
+            }
+            for lod in [4u32, 6] {
+                let vs = crate::lod::BASE_VOXEL * (1 << lod) as f32;
+                let n = 16;
+                let mut fina = 0.0;
+                for b in 0..n {
+                    for a in 0..n {
+                        fina += t.height(x + ((a as f32 + 0.5) / n as f32 - 0.5) * vs, z + ((b as f32 + 0.5) / n as f32 - 0.5) * vs);
+                    }
+                }
+                fina /= (n * n) as f32;
+                let d = (altura_prefiltrada(&t, x, z, vs) - fina).abs();
+                peor = peor.max(d / vs);
+                assert!(d < 0.25 * vs, "nivel {lod}: {d:.2} m de diferencia con el promedio fino en ({x}, {z})");
+            }
+        }
+        assert!(peor < 0.25, "{peor}");
+        // La columna de nivel 4 usa la altura prefiltrada para la cara de arriba de sus vóxeles.
+        let store = EditStore::new(5);
+        let spec = LevelSpec::new(4);
+        let col = IVec2::new(13500 / 128, 16300 / 128);
+        let ring: HashSet<IVec2> = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| col + IVec2::new(dx, dz))).collect();
+        let arroyos = crate::agua::Arroyos::new(&t);
+        let m = build_column(&t, &arroyos, &store, spec, col, &ring);
+        let vs = spec.voxel();
+        let mut vistos = 0;
+        for q in &m.quads[0] {
+            if !crate::mesher::is_terrain(q.material()) {
+                continue;
+            }
+            let [x, y, z] = q.base();
+            let (w, h) = q.size();
+            for dz in 0..h {
+                for dx in 0..w {
+                    let cx = m.origin.x + (x + dx) as f32 * vs + 0.5 * vs;
+                    let cz = m.origin.z + (z + dz) as f32 * vs + 0.5 * vs;
+                    let top = m.origin.y + y as f32 * vs;
+                    let esperado = (top_from_height(altura_prefiltrada(&t, cx, cz, vs), vs) + 1) as f32 * vs;
+                    // Las calles, la costa y la flora pueden cambiar la cara: se cuentan las iguales.
+                    vistos += ((top - esperado).abs() < 0.01) as usize;
+                }
+            }
+        }
+        assert!(vistos > 500, "solo {vistos} caras de arriba a la altura prefiltrada");
+    }
+
+    /// [render] Niebla de lo que falta: al empezar no hay nada dibujado (el centro falta: todos
+    /// los sectores en 0); con todo subido, ningún sector tiene niebla.
+    #[test]
+    fn la_niebla_de_lo_que_falta_empieza_en_el_centro_y_se_va_al_terminar() {
+        let t = Arc::new(TerrainGen::new(1726));
+        let store = Arc::new(RwLock::new(EditStore::new(3)));
+        let mut s = Streamer::new(t, store, 3, 2);
+        s.update(Vec2::new(13500.0, 16300.0));
+        assert!(s.sectores_faltan().iter().all(|&d| d == 0.0));
+        pump(&mut s, 120);
+        s.faltan.2 = None;
+        assert!(s.sectores_faltan().iter().all(|&d| d == SIN_FALTA));
+        // Al moverse, lo nuevo que falta queda a una distancia > 0 en algún sector (lo de antes
+        // sigue dibujado hasta que lo nuevo lo cubre).
+        s.update(Vec2::new(13500.0 + 150.0, 16300.0));
+        s.faltan.2 = None;
+        let f = s.sectores_faltan();
+        assert!(f.iter().all(|&d| d > 0.0), "{f:?}");
     }
 
     /// Lo que "ve" la GPU: claves de las columnas subidas, después de aplicar las órdenes.
