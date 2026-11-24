@@ -10,6 +10,31 @@ Cómo numerar (mientras el juego esté en desarrollo, 0.x):
 - **0.X.Y**: arreglos y ajustes sobre la anterior (subir Y).
 - Cada versión que se manda a probar se anota acá y lleva una etiqueta de git `vX.Y.Z`.
 
+## v0.12.0 (2026-11-24)
+**IA de los vecinos y tránsito colonial** (`docs/sistemas/ia-y-transito.md`):
+- Agenda encadenada (nadie en dos lugares a la vez); los agentes son las personas de la
+  población, con perfil de conducta determinista, y se visten como ellas.
+- Portones de la muralla con aduana (cola por sentido, revisión, derecho, cierre de 21 a 6 h,
+  contrabandistas), arreos de ganado por fuera del recinto, adelantamiento, prioridad de la
+  calle empedrada, peatones que cruzan, lluvia y barro, pulpería, recova, misa y paseo.
+- Ficha del portón, capa «Cola en portones» y agenda del día en la ficha del vecino.
+
+**Ciudad, agua e islas:**
+- Época 2: el colector cubre los lotes (antes 0 en el demo) y el ensanche empalma solo con la
+  ciudad vieja.
+- Rejas, faroles de fachada (aceite / gas desde 1853), macetas y aldabas como modelos de detalle.
+- Lagunas y espejos de agua de los bañados en vóxeles.
+- Islas de Flores, Gorriti y Lobos con su contorno real (IDE) y altura (Copernicus GLO-90);
+  en el mapa del país también Ratas, San Gabriel y Farallón.
+
+**Render:**
+- Vuelo sin los tirones de la v0.11.0 (peor cuadro 20 → 5,5 ms en render por CPU).
+- Altura prefiltrada lejos (−3 a −12 % de caras), niebla de lo que falta, franja de pasto en
+  barrancas, variación de color a gran escala, niebla por altura con dispersión del sol y curva
+  tonal leve.
+- Pendiente: fundido entre niveles, relleno y cobertura lejana, SSAO lejano, escalado;
+  escalones de 25 cm en calles en pendiente.
+
 ## v0.11.0 (2026-11-23)
 **Atlas ecológico histórico del Uruguay** (`docs/sistemas/atlas-ecologico.md`):
 - Capa «Ecosistemas» en el mapa del país (tecla M): los 18 códigos del atlas más 3 propios
