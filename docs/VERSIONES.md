@@ -10,6 +10,20 @@ Cómo numerar (mientras el juego esté en desarrollo, 0.x):
 - **0.X.Y**: arreglos y ajustes sobre la anterior (subir Y).
 - Cada versión que se manda a probar se anota acá y lleva una etiqueta de git `vX.Y.Z`.
 
+## v0.13.1 (2026-11-25)
+**Arreglo de los tirones y FPS inestables de la v0.13.0:**
+- Las rampas de las calles en pendiente se armaban en el hilo principal (hasta 105–345 ms en
+  un cuadro en la ciudad de la época 3): ahora en un hilo aparte, sin cambio de imagen.
+  Peor cuadro del hilo principal en la época 3: 109 → 9,8 ms a nivel de calle, 352 → 19,9 ms
+  a media altura (render por CPU).
+- Auto-ajuste sin oscilar: el SSAO se prendía y apagaba (115 veces en 400 s en la prueba,
+  recreando texturas cada vez); ahora con bloqueo creciente, ≤ 10 cambios. Si la escala no
+  gana, solo vuelve la escala al 100 %.
+- Sombras de personajes: no se redibujan si nada cambió; apagadas en Mínimo y en el piso
+  del auto-ajuste.
+- `medir-tirones.bat` escribe cada 15 s una tabla por sección (vecinos, rampas, luces,
+  sombras, fundido, SSAO…) y en cada cuadro lento sus cuatro secciones más largas.
+
 ## v0.13.0 (2026-11-24)
 **Época 3, Inmigración (≈1870–1930), jugable** (`docs/sistemas/arquitectura-epoca3.md`):
 - Paso de época 2 → 3 (3.000 habitantes, teatro, ensanche y la llegada del ferrocarril:
