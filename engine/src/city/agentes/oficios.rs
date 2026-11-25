@@ -725,9 +725,34 @@ impl Agentes {
 
 /// Las rampas de los escalones de cada tramo, armadas la primera vez que el tramo queda cerca
 /// de la vista (no se guardan).
+///
+/// Armar las de un tramo lleva unos 5 ms (alturas de la calzada columna por columna): en la
+/// ventana se arman en un hilo aparte ([`Agentes::rampas_en_hilo`]) y el cuadro solo junta las
+/// que ya están. La lista de tramos cercanos se recalcula solo si la vista se movió más de
+/// [`RAMPAS_MOVER`] m o cambió la red; en cada cuadro se mide la distancia exacta a esos
+/// candidatos, así lo dibujado es lo mismo que recorriendo toda la red.
 #[derive(Debug, Default)]
 pub struct Rampas {
     por_tramo: Mutex<HashMap<u32, (u64, Arc<Vec<Caja>>)>>,
+    /// (firma de la red, centro, candidatos a menos de `RADIO_ESCENAS + RAMPAS_MOVER`).
+    cerca: Mutex<Option<(u64, Vec2, Vec<u32>)>>,
+    /// Terreno para el hilo de trabajo (sin él, se arman en el cuadro, como antes).
+    hilo: Mutex<Option<HiloRampas>>,
+}
+
+struct HiloRampas {
+    terreno: Arc<TerrainGen>,
+    /// Copia de la red con la que trabaja el hilo, con su firma.
+    red: Option<(u64, Arc<RoadNetwork>)>,
+    /// Lo que terminó el hilo: (tramo, firma, cajas).
+    listos: Arc<Mutex<Vec<(u32, u64, Vec<Caja>)>>>,
+    en_vuelo: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl std::fmt::Debug for HiloRampas {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HiloRampas").field("red", &self.red.as_ref().map(|r| r.0)).finish()
+    }
 }
 
 impl Clone for Rampas {
@@ -739,10 +764,46 @@ impl Clone for Rampas {
 /// Sin rampas (para las capturas de antes y después del recorrido).
 pub static SIN_RAMPAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Tramos nuevos que se arman por cuadro (para no trabar un cuadro al llegar a un barrio).
+/// Tramos nuevos que se arman por cuadro sin hilo (para no trabar un cuadro al llegar a un barrio).
 const RAMPAS_POR_CUADRO: usize = 3;
+/// Tramos por tanda del hilo de trabajo (después se vuelve a mirar qué falta cerca).
+const RAMPAS_POR_TANDA: usize = 8;
+/// Cuánto se puede mover la vista (m) sin recalcular la lista de tramos cercanos.
+pub const RAMPAS_MOVER: f32 = 20.0;
+
+/// Firma de un tramo para sus rampas (si cambia, se vuelven a armar).
+fn firma_tramo(e: &crate::city::roads::Edge, plaza: crate::city::voxelize::PlazaSquare) -> u64 {
+    (e.pts.len() as u64) << 40 ^ e.len().to_bits() as u64 ^ (e.kind as u64) << 32 ^ (plaza.map_or(0, |p| p.0.x.to_bits() as u64) << 20)
+}
+
+/// Firma de la red entera (tramos, sus puntas y sus firmas) y de la plaza.
+fn firma_red(net: &RoadNetwork, plaza: crate::city::voxelize::PlazaSquare) -> u64 {
+    let mut h = mezcla(net.edges.len() as u64 ^ (net.nodes.len() as u64) << 32);
+    for (&id, e) in &net.edges {
+        h = mezcla(h ^ id as u64 ^ firma_tramo(e, plaza) ^ (e.a as u64) << 8 ^ (e.b as u64) << 24);
+    }
+    mezcla(h ^ plaza.map_or(0, |p| p.0.x.to_bits() as u64 ^ (p.0.y.to_bits() as u64) << 32))
+}
+
+/// Distancia de `p` a un tramo.
+fn distancia_tramo(e: &crate::city::roads::Edge, p: Vec2) -> f32 {
+    e.pts.windows(2).map(|w| crate::city::roads::closest_on_segment(p, w[0], w[1]).distance(p)).fold(f32::INFINITY, f32::min)
+}
 
 impl Agentes {
+    /// Arma las rampas en un hilo aparte con este terreno (la ventana): el cuadro no espera a
+    /// que se armen, se dibujan cuando están. Con `None`, en el cuadro (las capturas).
+    pub fn rampas_en_hilo(&self, t: Option<&Arc<TerrainGen>>) {
+        let mut h = self.rampas.hilo.lock().unwrap_or_else(|e| e.into_inner());
+        match t {
+            Some(t) if h.as_ref().is_none_or(|h| !Arc::ptr_eq(&h.terreno, t)) => {
+                *h = Some(HiloRampas { terreno: t.clone(), red: None, listos: Default::default(), en_vuelo: Default::default() });
+            }
+            None if h.is_some() => *h = None,
+            _ => {}
+        }
+    }
+
     /// Las rampas de los escalones de las calles a menos de 140 m de `centro`.
     pub fn cajas_rampas(&self, c: &crate::city::City, t: &TerrainGen, centro: Vec2, out: &mut Vec<Caja>) {
         if SIN_RAMPAS.load(std::sync::atomic::Ordering::Relaxed) {
@@ -752,31 +813,46 @@ impl Agentes {
     }
 
     /// Arma las rampas de los tramos cerca de `centro` que faltan (todas, sin el tope por
-    /// cuadro): para las capturas.
+    /// cuadro ni el hilo): para las capturas.
     pub fn precalentar_rampas(&self, c: &crate::city::City, t: &TerrainGen, centro: Vec2) {
         self.armar_rampas(c, t, centro, usize::MAX, None);
     }
 
     /// Las rampas de los tramos cerca de `centro`, del más cercano al más lejano; arma hasta
-    /// `tope` tramos que falten.
+    /// `tope` tramos que falten (con el hilo de trabajo, los encarga y no espera).
     fn armar_rampas(&self, c: &crate::city::City, t: &TerrainGen, centro: Vec2, tope: usize, mut out: Option<&mut Vec<Caja>>) {
-        let mut g = self.rampas.por_tramo.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|id, _| c.net.edges.contains_key(id));
         let plaza = c.plaza_square();
-        let mut cerca: Vec<(f32, u32)> = c
-            .net
-            .edges
-            .iter()
-            .map(|(&id, e)| (e.pts.windows(2).map(|w| crate::city::roads::closest_on_segment(centro, w[0], w[1]).distance(centro)).fold(f32::INFINITY, f32::min), id))
-            .filter(|x| x.0 < RADIO_ESCENAS)
-            .collect();
+        let red = firma_red(&c.net, plaza);
+        let mut g = self.rampas.por_tramo.lock().unwrap_or_else(|e| e.into_inner());
+        // Candidatos: los tramos a menos del radio más lo que se puede mover la vista.
+        let mut cerca_g = self.rampas.cerca.lock().unwrap_or_else(|e| e.into_inner());
+        if cerca_g.as_ref().is_none_or(|(f, p, _)| *f != red || p.distance(centro) > RAMPAS_MOVER) {
+            g.retain(|id, _| c.net.edges.contains_key(id));
+            let lista = c.net.edges.iter().filter(|(_, e)| distancia_tramo(e, centro) < RADIO_ESCENAS + RAMPAS_MOVER).map(|(&id, _)| id).collect();
+            *cerca_g = Some((red, centro, lista));
+        }
+        let mut cerca: Vec<(f32, u32)> = cerca_g.as_ref().unwrap().2.iter().map(|&id| (distancia_tramo(&c.net.edges[&id], centro), id)).filter(|x| x.0 < RADIO_ESCENAS).collect();
+        drop(cerca_g);
         cerca.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut hilo = self.rampas.hilo.lock().unwrap_or_else(|e| e.into_inner());
+        // Con el hilo (y no para las capturas): primero lo que ya terminó.
+        let hilo = hilo.as_mut().filter(|_| tope != usize::MAX);
+        if let Some(h) = hilo.as_ref() {
+            for (id, f, cajas) in h.listos.lock().unwrap_or_else(|e| e.into_inner()).drain(..) {
+                g.insert(id, (f, Arc::new(cajas)));
+            }
+        }
+        let mut faltan: Vec<(u32, u64)> = Vec::new();
         let mut nuevos = 0;
         for (_, id) in cerca {
             let e = &c.net.edges[&id];
-            let firma = (e.pts.len() as u64) << 40 ^ e.len().to_bits() as u64 ^ (e.kind as u64) << 32 ^ (plaza.map_or(0, |p| p.0.x.to_bits() as u64) << 20);
+            let firma = firma_tramo(e, plaza);
             let vigente = g.get(&id).is_some_and(|x| x.0 == firma);
             if !vigente {
+                if hilo.is_some() {
+                    faltan.push((id, firma));
+                    continue;
+                }
                 if nuevos >= tope {
                     continue;
                 }
@@ -785,6 +861,26 @@ impl Agentes {
             }
             if let Some(out) = out.as_deref_mut() {
                 out.extend(g[&id].1.iter().filter(|k| Vec2::new(k.pos[0], k.pos[2]).distance(centro) < RADIO_ESCENAS));
+            }
+        }
+        // Encargar al hilo los que faltan (del más cercano al más lejano), si no está ocupado.
+        if let Some(h) = hilo {
+            use std::sync::atomic::Ordering;
+            if !faltan.is_empty() && !h.en_vuelo.load(Ordering::Acquire) {
+                if h.red.as_ref().is_none_or(|r| r.0 != red) {
+                    h.red = Some((red, Arc::new(c.net.clone())));
+                }
+                let net = h.red.as_ref().unwrap().1.clone();
+                let (terreno, listos, en_vuelo) = (h.terreno.clone(), h.listos.clone(), h.en_vuelo.clone());
+                faltan.truncate(RAMPAS_POR_TANDA);
+                en_vuelo.store(true, Ordering::Release);
+                std::thread::spawn(move || {
+                    for (id, f) in faltan {
+                        let cajas = crate::city::voxelize::escalones(&terreno, &net, id, plaza);
+                        listos.lock().unwrap_or_else(|e| e.into_inner()).push((id, f, cajas));
+                    }
+                    en_vuelo.store(false, Ordering::Release);
+                });
             }
         }
     }

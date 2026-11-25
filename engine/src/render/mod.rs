@@ -582,6 +582,8 @@ pub struct Renderer {
     agent_buf: Option<wgpu::Buffer>,
     agent_count: u32,
     agent_key: u64,
+    /// [render] Firma (cajas y matriz) con que se dibujó el mapa de sombra de los personajes.
+    agent_shadow_key: std::cell::Cell<u64>,
     water: wgpu::Buffer,
     /// Agua de los arroyos (cintas sobre el cauce), si el mapa las tiene.
     origins: wgpu::Buffer,
@@ -624,6 +626,8 @@ pub struct Renderer {
     /// [lod] Espera de la superficie en el último cuadro de la ventana (tomar la imagen y
     /// presentarla: ahí se espera el vsync), en ms. El trabajo del cuadro es el resto.
     pub last_wait_ms: f64,
+    /// Veces que se rehicieron los destinos de la escena (cambio de tamaño, de escala o de SSAO).
+    pub destinos_rehechos: u32,
     /// Bytes de caras subidos (acumulado; el título y el banco de pruebas muestran la diferencia).
     pub uploaded_bytes: u64,
     /// Sube con cada cambio de geometría o de resaltado (parte de la clave del cuadro).
@@ -685,6 +689,10 @@ struct View {
     focal: f32,
     /// [render] Dibujar el mapa de sombra de los personajes en este cuadro.
     agentes: bool,
+    /// [render] Hay que volver a dibujar el mapa de sombra de los personajes (cambiaron las
+    /// cajas o la matriz de la cascada 0; con la partida en pausa se reutiliza).
+    agentes_redibujar: bool,
+    agentes_firma: u64,
 }
 
 /// Luz del día según la hora (0–24). Sol del norte: estamos en el hemisferio sur.
@@ -1498,6 +1506,7 @@ impl Renderer {
             agent_cast_bg,
             agent_cast_pipe,
             sombra_agentes: true,
+            agent_shadow_key: Default::default(),
             agent_buf: None,
             agent_count: 0,
             agent_key: 0,
@@ -1531,6 +1540,7 @@ impl Renderer {
             gpu_read: Default::default(),
             last_gpu_ms: None,
             last_wait_ms: 0.0,
+            destinos_rehechos: 0,
             uploaded_bytes: 0,
             scene_version: 0,
             overlay_key: 0,
@@ -1761,6 +1771,12 @@ impl Renderer {
             self.agent_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("agentes"), size, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
         }
         self.queue.write_buffer(self.agent_buf.as_ref().unwrap(), 0, bytes);
+    }
+
+    /// [render] El mapa de sombra de los personajes se vuelve a dibujar en el próximo cuadro
+    /// (aunque no hayan cambiado las cajas; para el banco).
+    pub fn rehacer_sombra_agentes(&self) {
+        self.agent_shadow_key.set(0);
     }
 
     /// Cajas de agentes del último cuadro.
@@ -2242,7 +2258,17 @@ impl Renderer {
             extra: [if !self.smooth_terrain { 0.0 } else if self.voxel_terrain { 2.0 } else { 1.0 }, self.water_level, self.moon, self.wind.0.rem_euclid(360.0).round() * 100.0 + self.wind.1.clamp(0.0, 99.0)],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&g));
-        View { eye: cam.eye(), view_proj, near: (cam.distance * 0.002).clamp(0.1, 20.0), sun, cascades: draw, focal: 1.0 / (cam.fov_y.to_radians() * 0.5).tan(), agentes: sg.misc[3] > 0.5 }
+        let agentes = sg.misc[3] > 0.5;
+        let firma = {
+            let mut h = crate::fxhash::FxHasher::default();
+            std::hash::Hasher::write(&mut h, bytemuck::cast_slice(&sg.vp[0]));
+            std::hash::Hasher::write_u64(&mut h, self.agent_key ^ (self.agent_count as u64) << 40);
+            std::hash::Hasher::finish(&h) | 1
+        };
+        // La firma se anota al dibujar el mapa (en `encode`): no todas las globales escritas
+        // terminan en un cuadro dibujado.
+        let agentes_redibujar = agentes && self.agent_shadow_key.get() != firma;
+        View { eye: cam.eye(), view_proj, near: (cam.distance * 0.002).clamp(0.1, 20.0), sun, cascades: draw, focal: 1.0 / (cam.fov_y.to_radians() * 0.5).tan(), agentes, agentes_redibujar, agentes_firma: firma }
     }
 
     /// [render] ¿Sirven estos destinos para una salida de `w × h` con la escala y el SSAO de ahora?
@@ -2534,7 +2560,8 @@ impl Renderer {
             st.draws_shadow += self.draw_voxels(&mut pass, gpu.then(|| &self.args_shadow[*i]), slots, indirect, cpu, if gpu { 0 } else { offsets[k] });
         }
         // [render] Sombra proyectada de los personajes y animales (mapa propio, cada cuadro).
-        if let (Some(buf), true) = (&self.agent_buf, view.agentes) {
+        if let (Some(buf), true) = (&self.agent_buf, view.agentes_redibujar) {
+            self.agent_shadow_key.set(view.agentes_firma);
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sombra de los personajes"),
                 color_attachments: &[],
@@ -2618,6 +2645,7 @@ impl Renderer {
         // [render] Fundido entre niveles: las columnas que entran y las que salen, con tramado
         // complementario y en una pasada aparte (técnicas del mod LOD §2.5). Son pocas: tramos de
         // la CPU, uno por grupo de caras que mira a la cámara.
+        let t_fundido = std::time::Instant::now();
         if !self.entrantes.is_empty() || !self.salientes.is_empty() {
             let vp = frustum_planes(view.view_proj);
             let entran = self.entrantes.iter().filter_map(|(k, slot, _)| self.columns.get(k).filter(|b| b.slot == *slot && b.entra));
@@ -2638,6 +2666,7 @@ impl Renderer {
                 st.draws_main += self.draw_voxels(&mut pass, None, 0, false, &rangos, 0);
             }
         }
+        crate::perfil::sumar(crate::perfil::Sec::Fundido, t_fundido);
         self.refresh_detail();
         let detail = self.detail_buf.borrow();
         if let Some((buf, n)) = detail.as_ref() {
@@ -2739,6 +2768,7 @@ impl Renderer {
         let (w, h) = (frame.texture.width(), frame.texture.height());
         if !self.targets_ok(self.targets.as_ref(), w, h) {
             self.targets = Some(self.make_targets(w, h));
+            self.destinos_rehechos += 1;
         }
         let v = self.write_globals(cam, hour, w as f32 / h as f32, self.shadow_budget);
         let view = frame.texture.create_view(&Default::default());

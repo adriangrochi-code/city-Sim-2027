@@ -176,7 +176,9 @@ pub fn segment_intersection(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2) -> Option<Ve
 
 // --- Red ---------------------------------------------------------------------------
 
-#[derive(Default)]
+/// (`Clone`: las rampas de los escalones se arman en un hilo con una copia, ver
+/// `agentes::oficios::Rampas`.)
+#[derive(Default, Clone)]
 pub struct RoadNetwork {
     pub nodes: BTreeMap<u32, Vec2>,
     pub node_edges: BTreeMap<u32, Vec<u32>>,

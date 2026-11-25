@@ -49,6 +49,7 @@ mod world;
 mod relieve; // [lod]
 mod autoajuste; // [lod]
 mod agua;
+mod perfil;
 
 use camera::OrbitCamera;
 use glam::{IVec3, Vec2, Vec3};

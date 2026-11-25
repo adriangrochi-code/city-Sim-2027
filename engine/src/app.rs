@@ -94,6 +94,10 @@ struct App {
     /// [render] Prueba del escalado de render ("apagar si no gana", `autoajuste::PruebaEscalado`):
     /// la que corre o la que terminó con las opciones actuales.
     prueba_escala: Option<crate::autoajuste::PruebaEscalado>,
+    /// Desglose del cuadro por sección (`CITYSIM_PERFIL=1`, `medir-tirones`), y cuándo se
+    /// escribió la última tabla.
+    muestras: crate::perfil::Muestras,
+    tabla_desde: Instant,
 }
 
 /// Con la escena quieta solo se redibuja para animar el agua, a este intervalo.
@@ -140,6 +144,8 @@ pub fn run(session: Session, opts: Options, menu: Menu) -> Result<(), String> {
         skipped_since: false,
         tope_ms: 0.0,
         prueba_escala: None,
+        muestras: Default::default(),
+        tabla_desde: Instant::now(),
     };
     app.tuner.activo = app.menu.settings.autoajuste;
     event_loop.run_app(&mut app).map_err(|e| format!("error en el bucle de eventos: {e}"))?;
@@ -205,6 +211,9 @@ impl App {
         s.view_h = gpu.config.height as f32;
         let t0 = Instant::now();
         // Tope de vértices subidos por cuadro: repartir la carga entre cuadros evita tirones.
+        // Rampas de las calles en un hilo aparte (salvo en el recorrido automático, que las
+        // arma en el cuadro como las capturas).
+        s.rampas_en_hilo = self.tour.is_none();
         s.apply_ops(&mut gpu.renderer, crate::session::WINDOW_VERTEX_BUDGET);
         let ms_upload = t0.elapsed().as_secs_f32() * 1000.0;
         let t0 = Instant::now();
@@ -230,6 +239,7 @@ impl App {
         if same && self.last_draw.elapsed() < IDLE_REDRAW {
             self.skipped += 1;
             self.skipped_since = true;
+            crate::perfil::tomar();
             return;
         }
         if same {
@@ -289,6 +299,7 @@ impl App {
         }
         drop(hook);
         let ms_render = t0.elapsed().as_secs_f32() * 1000.0 - cpu_ui as f32;
+        let t_ajuste = Instant::now();
         // Perfil: el cuadro más lento del medio segundo y dónde se fue el tiempo.
         let total = t_frame.elapsed().as_secs_f32() * 1000.0;
         // [lod] Auto-ajuste: un cuadro dibujado seguido del anterior (sin reposo entre medio).
@@ -318,9 +329,7 @@ impl App {
                 if let Some(ok) = p.muestra(muestra.gpu_ms.unwrap_or(muestra.trabajo_ms)) {
                     println!("Escala de render al {} %: {}", self.tuner.techo.escala(), if ok { "gana más de un 3 %, sigue" } else { "no gana más de un 3 %, se apaga" });
                     if !ok {
-                        let mut t = self.tuner.techo;
-                        t.escala = crate::autoajuste::ESCALAS_PASOS.len() - 1;
-                        self.tuner.set_techo(t, self.menu.settings.fps_objetivo as f64);
+                        self.tuner.apagar_escala();
                         self.menu.status = Some(("La escala de render no ganaba rendimiento en este equipo: se apagó".into(), false));
                     }
                 }
@@ -329,6 +338,31 @@ impl App {
                 }
             }
         }
+        if self.perfil {
+            use crate::perfil::{sumar_ms, Sec};
+            // La subida (cajas, luces, mallas) ya se midió por partes en `apply_ops`.
+            sumar_ms(Sec::Simulacion, ms_sim as f64);
+            sumar_ms(Sec::Seleccion, ms_pick as f64);
+            sumar_ms(Sec::Interfaz, cpu_ui);
+            sumar_ms(Sec::Dibujo, (ms_render as f64 - renderer.last_wait_ms).max(0.0));
+            sumar_ms(Sec::Espera, renderer.last_wait_ms);
+            sumar_ms(Sec::Autoajuste, t_ajuste.elapsed().as_secs_f64() * 1000.0);
+            self.muestras.cerrar_cuadro(frame_gap as f64, renderer.last_gpu_ms);
+            if self.tabla_desde.elapsed().as_secs_f64() >= 15.0 && !self.muestras.is_empty() {
+                let titulo = format!(
+                    "Desglose del cuadro (ms) · {} · {} · destinos de render rehechos {} · {}",
+                    self.menu.settings.calidad.map_or("personalizado", |c| c.nombre()),
+                    if menu_open { "con el menú abierto" } else { "jugando" },
+                    renderer.destinos_rehechos,
+                    self.tuner.estado()
+                );
+                println!("{}", self.muestras.tabla(&titulo));
+                self.muestras.vaciar();
+                self.tabla_desde = Instant::now();
+            }
+        } else {
+            crate::perfil::tomar();
+        }
         let parts = [("simulación", ms_sim), ("subir mallas", ms_upload), ("selección", ms_pick), ("interfaz", cpu_ui as f32), ("dibujo", ms_render)];
         let (who, _) = parts.iter().cloned().fold(("", 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
         if frame_gap > self.worst.0 {
@@ -336,8 +370,9 @@ impl App {
         }
         if self.perfil && frame_gap > 25.0 {
             println!(
-                "Cuadro lento: {frame_gap:.1} ms entre cuadros · trabajo {total:.1} ms (simulación {ms_sim:.1}, subir mallas {ms_upload:.1}, selección {ms_pick:.1}, interfaz {:.1}, dibujo {ms_render:.1}) · pendientes {} · cascadas de sombra dibujadas {} · Hi-Z {}",
+                "Cuadro lento: {frame_gap:.1} ms entre cuadros · trabajo {total:.1} ms (simulación {ms_sim:.1}, subir mallas {ms_upload:.1}, selección {ms_pick:.1}, interfaz {:.1}, dibujo {ms_render:.1}; lo más largo: {}) · pendientes {} · cascadas de sombra dibujadas {} · Hi-Z {}",
                 cpu_ui,
+                self.muestras.mayores_del_ultimo(4),
                 s.streamer.pending(),
                 renderer.last_shadow_passes,
                 if renderer.hiz && renderer.draw_mode == crate::render::DrawMode::GpuCull { "sí" } else { "no" }
@@ -714,6 +749,10 @@ pub fn apply_knobs(k: &crate::autoajuste::Perillas, streamer: &mut crate::stream
     if r.shadow_quality() != q {
         r.set_shadow_quality(q);
     }
+    // [render] La sombra proyectada de los personajes va con las sombras: en el escalón más bajo
+    // (preset Mínimo, o el auto-ajuste en el piso) no se dibuja su mapa (cuesta ~7 % del cuadro
+    // en lavapipe, casi todo fijo: limpiar el mapa de 2048² y leerlo en cada píxel).
+    r.sombra_agentes = k.sombras > 0;
     streamer.set_ring(k.anillo());
     streamer.set_active_levels(k.niveles);
     if streamer.concurrency() != k.hilos.min(streamer.threads()).max(1) {

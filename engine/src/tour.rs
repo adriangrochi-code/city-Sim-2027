@@ -44,6 +44,9 @@ pub enum Act {
     /// [ia] Deja pasar unos cuadros (lo que cambió sin mover la cámara, como las rampas de las
     /// calles, se sube a la GPU antes de la captura).
     Cuadros(u32),
+    /// Banco del juego: cuadros como en la ventana, con el desglose por sección (ver
+    /// `bench::medir_juego`).
+    MedirJuego(&'static str),
 }
 
 /// Interfaz para las capturas sin pantalla: contexto de egui, pintor y estado del juego.
@@ -194,6 +197,9 @@ fn cam_quieta(s: &Session, x: f32, z: f32, prof: f32, dist: f32) -> Option<[f32;
 pub fn city_steps() -> Vec<Act> {
     use crate::city::game_demo as d;
     use Act::*;
+    if std::env::var("MOTOR_BANCO_JUEGO").is_ok() {
+        return pasos_banco_juego();
+    }
     if std::env::var("MOTOR_SOLO_ARQ").is_ok() {
         return pasos_solo_arquitectura();
     }
@@ -710,6 +716,53 @@ fn pasos_epoca2() -> Vec<Act> {
 /// ferrocarril propio, la estación, la usina eléctrica, los tranvías, el hotel de inmigrantes y
 /// el puerto moderno, cuatro años de crecimiento, calles de muestra con el kit de la época,
 /// capturas de día y de noche, y guardar y cargar.
+/// Banco del juego (`MOTOR_BANCO_JUEGO=1 motor --demo-ciudad carpeta`): la ciudad poblada de la
+/// época 1 (y con `MOTOR_BANCO_JUEGO=3`, también la de la época 3), medida cuadro a cuadro como
+/// en la ventana (ver `bench::medir_juego`).
+fn pasos_banco_juego() -> Vec<Act> {
+    use crate::city::game_demo as d;
+    use crate::city::game_demo2 as d2;
+    use crate::city::game_demo3 as d3;
+    use Act::*;
+    let c = d::PLAZA;
+    let mut v = vec![
+        Cam([c.x, c.y, 700.0, 200.0, 45.0]),
+        Hour(10.5),
+        Game("fundar la plaza", d::found),
+        Game("damero", d::grid),
+        Game("calle curva", d::curve),
+        Game("zonificar", d::zone),
+        Game("servicios, puerto, muralla y campo", d::servicios),
+        Game("escuelas, salud, seguridad y saneamiento", d::barrio),
+        Game("crecer 60 meses", d::grow),
+        Game("unir los pedazos del damero", d::unir_calles),
+        Game("vecinos y vehículos", d::vecinos),
+    ];
+    let epoca3 = std::env::var("MOTOR_BANCO_JUEGO").is_ok_and(|x| x == "3");
+    if !epoca3 {
+        v.extend([CamFn(|s| d::calle_concurrida(s, 38.0, 30.0)), WaitIdle("calle concurrida"), MedirJuego("época 1")]);
+        return v;
+    }
+    v.extend([
+        Game("iglesia matriz", d::iglesia),
+        Game("pasar a la Ciudad Nueva", d2::pasar),
+        Game("ensanche sobre el ejido", d2::ensanche),
+        Game("zonificar el ensanche", d2::zonificar),
+        Game("usina de gas, teatro, agua corriente y colector", d2::servicios),
+        Game("cuatro años de Ciudad Nueva", d2::crecer),
+        Game("pasar a la época de la inmigración", d3::pasar),
+        Game("estación, usina eléctrica, tranvías, hotel de inmigrantes y puerto", d3::servicios),
+        Game("barrio de fábricas", d3::zonificar),
+        Game("cuatro años de inmigración", d3::crecer),
+        Game("vecinos y vehículos", d::vecinos),
+        Hour(10.5),
+        CamFn(|s| d::calle_concurrida(s, 38.0, 30.0)),
+        WaitIdle("calle concurrida"),
+        MedirJuego("época 3"),
+    ]);
+    v
+}
+
 fn pasos_epoca3() -> Vec<Act> {
     use crate::city::game_demo as d;
     use crate::city::game_demo2 as d2;
@@ -1646,6 +1699,14 @@ impl Tour {
                     }
                     println!("{line}");
                     self.report.push(line);
+                    self.next();
+                }
+                Act::MedirJuego(label) => {
+                    let md = crate::bench::medir_juego(s, r, self.width, self.height, label);
+                    println!("{md}");
+                    let path = format!("{}/juego-{}.md", self.dir, label.replace(' ', "-"));
+                    let _ = std::fs::write(&path, &md);
+                    self.report.push(format!("banco del juego ({label}): {path}"));
                     self.next();
                 }
                 Act::MedirVecinos(label) => {

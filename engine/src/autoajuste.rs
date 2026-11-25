@@ -193,6 +193,9 @@ pub struct Perillas {
 /// [render] Escalas de render de menos a más (índices de la perilla `Escala`).
 pub const ESCALAS_PASOS: [u32; 4] = [67, 75, 85, 100];
 
+/// Cantidad de perillas.
+const PERILLAS: usize = 7;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Perilla {
     Sombras,
@@ -328,6 +331,15 @@ pub const ESPERA_FALLA: u32 = 30;
 pub const ESPERA_FALLA_MAX: u32 = 240;
 /// Ciclos sin tocar nada después de un cambio (las mallas nuevas tardan en llegar).
 pub const CICLOS_ASENTAR: u32 = 2;
+/// Una perilla que se subió y hubo que bajar algo antes de estos ciclos: la subida falló y esa
+/// perilla no se vuelve a subir por [`ESPERA_FALLA`] ciclos (el doble con cada falla seguida,
+/// hasta [`ESPERA_FALLA_MAX`]). Sin esto, con el cuadro justo en el borde, una perilla subía y
+/// bajaba cada 4 o 5 s (con el SSAO o la escala, rehaciendo las texturas de la escena: un tirón
+/// cada vez).
+pub const CICLOS_FALLA: u32 = CICLOS_ASENTAR + 4;
+/// El SSAO lejano y la escala de render rehacen los destinos de la escena al cambiar: después
+/// de moverse no se vuelven a subir por lo menos en estos ciclos.
+pub const CICLOS_QUIETA: u32 = 10;
 
 pub struct Autoajuste {
     pub activo: bool,
@@ -344,6 +356,10 @@ pub struct Autoajuste {
     bloqueo_hasta: u32,
     espera: u32,
     tirones: bool,
+    /// [render] Por perilla: ciclo hasta el que no se sube y la espera de la última falla.
+    bloqueo_perilla: [(u32, u32); PERILLAS],
+    /// Última subida: perilla y ciclo.
+    subida: Option<(Perilla, u32)>,
     /// Lo que se vio en el último ciclo (para el diagnóstico).
     pub lado: Option<Lado>,
     pub en_tope: bool,
@@ -371,6 +387,8 @@ impl Autoajuste {
             bloqueo_hasta: 0,
             espera: 0,
             tirones: false,
+            bloqueo_perilla: [(0, 0); PERILLAS],
+            subida: None,
             lado: None,
             en_tope: false,
             ultimo: None,
@@ -391,6 +409,8 @@ impl Autoajuste {
         self.acumulado = 0.0;
         self.margen_seguido = 0;
         self.prueba_hasta = None;
+        self.bloqueo_perilla = [(0, 0); PERILLAS];
+        self.subida = None;
     }
 
     /// ¿Está todo en el piso? (el motor ya no puede ayudar más en este equipo).
@@ -460,6 +480,12 @@ impl Autoajuste {
         // 1) Pasado del objetivo (y no por el tope): bajar.
         if !en_tope && prom > objetivo * 1.05 {
             self.margen_seguido = 0;
+            // Si se acaba de subir algo, se deshace eso (y queda bloqueado un rato).
+            if let Some(p) = self.subida_fallida() {
+                if let Some(c) = self.mover(&[p], false, "subida que no se sostuvo") {
+                    return Some(c);
+                }
+            }
             let ordenes: &[Perilla] = match lado {
                 Lado::Gpu => &[Perilla::Ssao, Perilla::Sombras, Perilla::Escala, Perilla::Anillo, Perilla::Niveles],
                 Lado::Cpu => &[Perilla::Hilos, Perilla::Subida, Perilla::Anillo, Perilla::Niveles],
@@ -474,6 +500,7 @@ impl Autoajuste {
         // 2) Tirones con buen promedio: menos generación a la vez.
         if self.tirones {
             self.margen_seguido = 0;
+            let _ = self.subida_fallida();
             return self.mover(&[Perilla::Hilos], false, "tirones");
         }
         // 3) Margen: recuperar de a un paso.
@@ -514,10 +541,21 @@ impl Autoajuste {
             if sube && p == Perilla::Hilos && self.tirones {
                 continue;
             }
+            // Bloqueada después de una subida fallida o de un cambio caro.
+            if sube && self.ciclo < self.bloqueo_perilla[p as usize].0 {
+                continue;
+            }
             let (v, lim) = (self.actual.get(p), if sube { self.techo.get(p) } else { self.piso.get(p) });
             if (sube && v < lim) || (!sube && v > lim) {
                 self.actual.set(p, v + if sube { 1 } else { -1 });
                 self.asentar = CICLOS_ASENTAR;
+                if sube {
+                    self.subida = Some((p, self.ciclo));
+                }
+                if matches!(p, Perilla::Ssao | Perilla::Escala) {
+                    let b = &mut self.bloqueo_perilla[p as usize].0;
+                    *b = (*b).max(self.ciclo + CICLOS_QUIETA);
+                }
                 self.cambios += 1;
                 let c = Cambio { perilla: p, sube, motivo };
                 self.ultimo = Some(c);
@@ -525,6 +563,29 @@ impl Autoajuste {
             }
         }
         None
+    }
+
+    /// Si hay que bajar poco después de una subida, esa subida falló: la perilla queda
+    /// bloqueada (el doble que la vez anterior si vuelve a fallar enseguida).
+    fn subida_fallida(&mut self) -> Option<Perilla> {
+        let (p, c) = self.subida.take()?;
+        if self.ciclo > c + CICLOS_FALLA {
+            return None;
+        }
+        let (hasta, espera) = &mut self.bloqueo_perilla[p as usize];
+        // Fallas seguidas (dentro de la espera anterior más un margen): el doble.
+        *espera = if *espera > 0 && self.ciclo <= *hasta + *espera { (*espera * 2).min(ESPERA_FALLA_MAX) } else { ESPERA_FALLA };
+        *hasta = self.ciclo + *espera;
+        Some(p)
+    }
+
+    /// [render] La prueba del escalado no ganó: la escala queda al 100 % sin tocar las demás
+    /// perillas (antes se volvía al techo entero: un salto de calidad y un tirón).
+    pub fn apagar_escala(&mut self) {
+        let ultimo = ESCALAS_PASOS.len() - 1;
+        self.techo.escala = ultimo;
+        self.actual.escala = ultimo;
+        self.piso.escala = piso_escala(&self.techo);
     }
 
     /// Una línea para el diagnóstico (contador de FPS y perfil).
@@ -790,6 +851,45 @@ mod tests {
             assert_eq!(ciclo(&mut a, Muestra { cuadro_ms: 100.0, trabajo_ms: 1.0, gpu_ms: None, tope_ms: 0.0, dibujado: true, menu: true }), None);
         }
         assert_eq!(a.actual, a.techo);
+    }
+
+    /// El SSAO lejano en el borde: prendido pasa el objetivo, apagado sobra margen. Antes se
+    /// prendía y apagaba cada 4 o 5 s (rehaciendo las texturas de la escena cada vez); ahora la
+    /// subida que no se sostiene se deshace y queda bloqueada cada vez más tiempo.
+    #[test]
+    fn el_ssao_en_el_borde_no_se_prende_y_apaga_en_bucle() {
+        let costo = |p: &Perillas| 12.0 + 6.0 * p.ssao as f64;
+        let mut a = Autoajuste::new(techo().con_efectos(true, 100), 60.0);
+        let mut cambios = Vec::new();
+        for k in 0..400 {
+            let g = costo(&a.actual);
+            if let Some(c) = ciclo(&mut a, Muestra { cuadro_ms: g, trabajo_ms: 3.0, gpu_ms: Some(g), tope_ms: 0.0, dibujado: true, menu: false }) {
+                cambios.push((k, c.perilla, c.sube));
+            }
+        }
+        let ssao = cambios.iter().filter(|c| c.1 == Perilla::Ssao).count();
+        assert!(ssao <= 10, "{ssao} cambios del SSAO en 400 s: {cambios:?}");
+        // Solo se tocó el SSAO (deshacer la subida fallida no baja otra perilla).
+        assert!(cambios.iter().all(|c| c.1 == Perilla::Ssao), "{cambios:?}");
+    }
+
+    /// La escala de render en el borde tampoco oscila.
+    #[test]
+    fn la_escala_en_el_borde_no_oscila() {
+        // Elegida al 75 %: al 67 % sobra margen, al 75 % pasa el objetivo.
+        let costo = |p: &Perillas| if p.escala() < 75 { 12.0 } else { 18.0 };
+        let mut t = techo().con_efectos(false, 75);
+        t.sombras = 0;
+        let mut a = Autoajuste::new(t, 60.0);
+        a.piso.sombras = 0;
+        let mut n = 0;
+        for _ in 0..400 {
+            let g = costo(&a.actual);
+            if ciclo(&mut a, Muestra { cuadro_ms: g, trabajo_ms: 3.0, gpu_ms: Some(g), tope_ms: 0.0, dibujado: true, menu: false }).is_some_and(|c| c.perilla == Perilla::Escala) {
+                n += 1;
+            }
+        }
+        assert!(n <= 10, "{n} cambios de la escala en 400 s");
     }
 
     /// Un sistema simulado: el cuadro sale del costo de las perillas. En régimen no oscila.

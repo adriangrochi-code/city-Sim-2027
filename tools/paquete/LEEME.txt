@@ -43,6 +43,9 @@ Contiene dos programas:
    TIRONES: ./medir-tirones.sh (Windows: medir-tirones.bat) abre el juego y anota
    cada cuadro lento y en qué se fue el tiempo en tirones.txt (también cuántas
    cascadas de sombra se dibujaron y si estaba el descarte de lo tapado, Hi-Z).
+   Cada 15 s escribe además una tabla con el tiempo de cada parte del cuadro
+   (simulación, vecinos, rampas, luces, mallas, dibujo, espera...): mediana,
+   p95, p99 y peor. Conviene jugar un rato en la calle y otro de más arriba.
    En Opciones, "Mostrar FPS" muestra también el peor cuadro del último medio
    segundo, y "Sombras" elige la calidad (Baja a Muy alta).
 

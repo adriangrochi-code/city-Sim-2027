@@ -104,6 +104,9 @@ pub struct Session {
     pub view_h: f32,
     /// Modo juego: la ciudad colonial (calles, solares, crecimiento). `None` = sandbox.
     pub game: Option<Game>,
+    /// Rampas de las calles armadas en un hilo aparte (la ventana y el banco del juego; las
+    /// capturas del recorrido las arman en el cuadro, como siempre).
+    pub rampas_en_hilo: bool,
 }
 
 impl Session {
@@ -133,7 +136,7 @@ impl Session {
         });
         let ground = terrain.height(cam[0], cam[1]).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(cam[0], ground, cam[1]), yaw: cam[3], pitch: cam[4], distance: cam[2], fov_y: 50.0 };
-        Session { terrain, streamer, cam, hour, day_paused: true, tool: 2, rot: 0, hit: None, scene_ready: None, started, first_frame: None, seed: 1, scene_rx: Some(rx), view_h: 900.0, game: None }
+        Session { terrain, streamer, cam, hour, day_paused: true, tool: 2, rot: 0, hit: None, scene_ready: None, started, first_frame: None, seed: 1, scene_rx: Some(rx), view_h: 900.0, game: None, rampas_en_hilo: false }
     }
 
     /// Sesión del modo juego: terreno virgen y la ciudad por fundar.
@@ -155,7 +158,7 @@ impl Session {
         streamer.prewarm_relief(); // [lod]
         let ground = terrain.height(cam[0], cam[1]).max(0.0);
         let cam = OrbitCamera { target: Vec3::new(cam[0], ground, cam[1]), yaw: cam[3], pitch: cam[4], distance: cam[2], fov_y: 50.0 };
-        Session { terrain, streamer, cam, hour, day_paused: false, tool: 2, rot: 0, hit: None, scene_ready: Some(Duration::ZERO), started, first_frame: None, seed: 1, scene_rx: None, view_h: 900.0, game: Some(game) }
+        Session { terrain, streamer, cam, hour, day_paused: false, tool: 2, rot: 0, hit: None, scene_ready: Some(Duration::ZERO), started, first_frame: None, seed: 1, scene_rx: None, view_h: 900.0, game: Some(game), rampas_en_hilo: false }
     }
 
     /// Cámara actual como en `--cam`: x, z, distancia, giro, inclinación.
@@ -239,6 +242,7 @@ impl Session {
 
     /// Sube a la GPU lo que terminaron los hilos de trabajo (con un presupuesto por cuadro).
     pub fn apply_ops(&mut self, r: &mut Renderer, vertex_budget: usize) -> usize {
+        use crate::perfil::{medir, Sec};
         // [entorno amplio] Hasta dónde llega el terreno: más allá, niebla (ver `Renderer::reach`).
         let (c, reach) = self.streamer.reach();
         r.reach = [c.x, c.y, reach];
@@ -262,19 +266,22 @@ impl Session {
         match &self.game {
             Some(g) => {
                 let mut cajas = Vec::new();
+                g.city.agentes.rampas_en_hilo(self.rampas_en_hilo.then_some(&self.terrain));
                 // [personajes] vecinos, animales y detalles de micro-vóxeles
                 crate::city::agentes::fauna::cajas_ciudad(&g.city, &self.terrain, Vec2::new(self.cam.target.x, self.cam.target.z), self.hour, &mut cajas);
                 // [ciudad] rejas, faroles de fachada, macetas y llamadores de las casas
-                g.city.fachadas.vigentes(&g.city.lots).cajas(Vec2::new(self.cam.target.x, self.cam.target.z), &mut cajas);
-                r.set_agents(&cajas);
+                medir(Sec::Fachadas, || g.city.fachadas.vigentes(&g.city.lots).cajas(Vec2::new(self.cam.target.x, self.cam.target.z), &mut cajas));
+                medir(Sec::SubirAgentes, || r.set_agents(&cajas));
             }
             None => r.set_agents(&[]),
         }
         // Luces de los faroles cerca de la vista (gas y sebo; ver `render::luces`).
+        let t_luces = Instant::now();
         let centro = Vec2::new(self.cam.target.x, self.cam.target.z);
         let luces = self.game.as_ref().map_or(Vec::new(), |g| g.city.luces_cerca(centro, 300.0, crate::render::luces::MAX));
         r.set_lights(centro, &luces);
-        let n = upload_ops(&mut self.streamer, r, vertex_budget).ops;
+        crate::perfil::sumar(Sec::Luces, t_luces);
+        let n = medir(Sec::Streaming, || upload_ops(&mut self.streamer, r, vertex_budget)).ops;
         if self.first_frame.is_none() && r.column_count() > 0 {
             self.first_frame = Some(self.started.elapsed());
         }

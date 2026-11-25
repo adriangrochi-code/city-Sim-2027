@@ -45,7 +45,8 @@ SANDBOX:  sandbox.bat   (recorrer, colocar estructuras, excavar y rellenar)
 
 MEDIR EL RENDIMIENTO:
   medir-fps.bat      (tarda unos minutos; enviar salida\bench.md)
-  medir-tirones.bat  (jugar un rato; al cerrar, enviar tirones.txt)
+  medir-tirones.bat  (jugar un rato; al cerrar, enviar tirones.txt: anota los
+                      cuadros lentos y cada 15 s el tiempo de cada parte del cuadro)
 
 Requisitos: Windows 10 u 11 de 64 bits con los controladores de la placa de
 video al día (DirectX 12 o Vulkan). Windows puede avisar que el programa no

@@ -1122,3 +1122,96 @@ alternadas; "sin fundido" es el mismo binario con `MOTOR_SIN_FUNDIDO=1`.
   (§6.1), que en una placa hace la GPU: el criterio **no se cumple acá** (la v0.12.0 ya estaba en
   el mismo nivel que la Fase 0) y hay que volver a medirlo con `medir-fps.bat` en placa. No se
   encontró una mejora barata más allá de las del fundido.
+
+## 8. "Se lagea más que antes": v0.12.0 → v0.13.0 en el juego (2026-11-25)
+
+Reporte del usuario (Windows, placa real): la v0.13.0 se siente más lenta y con los FPS más
+inestables que la v0.12.0. Los bancos de vistas quietas y del vuelo no lo mostraban porque no
+corren la ciudad: faltaba medir **como el juego**.
+
+### 8.1 Cómo se mide
+
+- **Banco del juego** (`MOTOR_BANCO_JUEGO=1 motor --demo-ciudad carpeta --size 1280x720`;
+  `MOTOR_BANCO_JUEGO=3` también arma la época 3; `MOTOR_BANCO_JUEGO_CUADROS=n`, 360 por omisión):
+  funda, traza, zonifica, crece 60 meses y larga los vecinos (época 3: Ciudad Nueva e Inmigración
+  con tranvías y fábricas), pone la cámara sobre la calle más concurrida y hace dos recorridos de
+  `n` cuadros con el reloj del juego a 60 cuadros por segundo: **calle** (30 m, 12°) y **media
+  altura** (260 m, 36°), paneando como con W/A/S/D, girando y con un zoom de ida y vuelta (±45 %).
+  Cada cuadro hace lo mismo que la ventana (`Session::update`, `apply_ops` con el tope de subida de
+  la ventana, selección bajo el cursor, dibujo) y escribe `juego-época-N.md` con mediana, p95,
+  p99, peor y media de cada sección. Al final de cada recorrido mide la sombra de los personajes
+  (mínimo de 10 cuadros, con y sin el mapa).
+- **Secciones** (`perfil.rs`, acumuladores por hilo, dos lecturas del reloj por sección):
+  simulación, cajas (vecinos, escenas, rampas, fauna y detalles, fachadas), subir agentes, luces,
+  streaming, selección, interfaz, dibujo (CPU), fundido (parte del dibujo), espera (vsync/GPU) y
+  auto-ajuste; "trabajo del hilo principal" es la suma sin la espera.
+- **En la placa del jugador**: `medir-tirones` (`CITYSIM_PERFIL=1`) escribe en `tirones.txt`
+  la misma tabla cada 15 s de juego (con el preset, si está en el menú, cuántas veces se
+  rehicieron los destinos de la escena y el estado del auto-ajuste), cada cambio de perilla, y en
+  cada cuadro lento las cuatro secciones más largas.
+- Lavapipe (render por CPU, 4 núcleos): el "cuadro" es 0,5–2,5 s de rasterizado y no dice nada;
+  valen el **trabajo del hilo principal** (que en la placa es lo que tiene que entrar en 16,7 ms)
+  y las proporciones de la GPU. v0.12.0 se midió con el mismo banco portado a su código
+  (`d3ef56b` + `perfil.rs`, sin escenas ni rampas, que no existían).
+
+### 8.2 Qué se encontró (trabajo del hilo principal, ms: mediana / p99 / peor)
+
+| Escenario | v0.12.0 | v0.13.0 | Arreglado |
+|---|---|---|---|
+| Época 1, calle (360 cuadros) | 1,50 / 5,80 / 7,1 | 1,81 / 7,02 / **15,2** | 1,77 / 5,37 / 7,5 |
+| Época 1, media altura | 10,6 / 20,4 / 26,2 | 11,3 / 25,7 / **30,1** | 10,5 / 20,8 / 35,6 ¹ |
+| Época 3, calle (240 cuadros) | — | 3,40 / 15,0 / **109** | 3,43 / 9,6 / 9,8 |
+| Época 3, media altura | — | 9,1 / 35,6 / **352** | 8,4 / 16,3 / 19,9 |
+
+¹ Un solo cuadro con el dibujo en 31,8 ms (lavapipe; la sección de rampas, 0,13 ms).
+
+1. **Rampas de los escalones (la causa de los tirones).** `armar_rampas` armaba hasta 3 tramos
+   nuevos por cuadro en el hilo principal. Un tramo no cuesta 5 ms: cuesta lo que mide (alturas
+   de la calzada columna por columna); en la época 3 (avenidas y tranvías) un cuadro llegó a
+   **105 y 345 ms**, y a media altura, donde la vista recorre barrios nuevos todo el tiempo, el
+   p95 de la sección era 12,4 ms y el p99 24 ms. En la época 1, peor 13–18 ms. Ahora
+   (`oficios::Rampas`): en la ventana se arman en un **hilo aparte** con una copia de la red
+   (`RoadNetwork: Clone`, rehecha solo si cambia la firma de la red), de a 8 tramos por tanda, y
+   el cuadro junta las que ya están; la lista de tramos cercanos se recalcula solo si la vista se
+   movió más de 20 m o cambió la red (en cada cuadro se mide la distancia exacta a esos
+   candidatos: lo dibujado es lo mismo que recorriendo toda la red). Sección rampas: peor
+   13,1 / 18,4 / 105 / 345 → 0,25 / 0,13 / 0,46 / 0,32 ms. Las capturas del recorrido (y la ventana
+   con `--auto-test`) las siguen armando en el cuadro, como antes (`Session::rampas_en_hilo`).
+2. **Más agentes en la época 3.** Con la ciudad de la inmigración hay 20 767 cajas a la vista de
+   la calle (época 1: 6 439; v0.12.0: 5 009): cajas de vecinos 0,68 ms, subir agentes 0,51,
+   luces 0,32 (recorren todos los faroles de gas, sebo y eléctricos), escenas 0,25, fachadas 0,17
+   de mediana: ~2 ms por cuadro contra ~0,5 de la v0.12.0. No da tirones, pero en un procesador
+   lento (A12 de la A275, unas 3–4× más lento que esta máquina por núcleo) son 6–8 ms por cuadro.
+   No se tocó (sin tirones; cachear las luces o el hash de las cajas daría décimas de ms): queda
+   para cuando haya datos de la placa.
+3. **Sombra de los personajes.** Con el mapa rehecho en cada cuadro: época 1 calle (6 439 cajas)
+   −1,3 % (ruido); época 3 calle (20 767) **+6,7 %** del cuadro; media altura (1 948) +6,6 %: casi
+   todo es fijo (limpiar el mapa de 2048² y leerlo en cada píxel), no por caja. Ahora el mapa no
+   se redibuja si no cambiaron las cajas ni la matriz de la cascada 0 (partida en pausa, cámara
+   quieta sin agentes moviéndose), y va con la perilla de sombras: **en el escalón más bajo
+   (preset Mínimo, o el auto-ajuste en el piso) no se dibuja** (única diferencia de imagen, y solo
+   ahí).
+4. **Auto-ajuste: el SSAO y la escala oscilaban.** Fuera del tope (sin vsync), con el SSAO en el
+   borde (prendido pasa el objetivo, apagado sobra el 20 %) se prendía y apagaba cada 3–4 s:
+   **115 cambios en 400 s** en la simulación de la prueba
+   `el_ssao_en_el_borde_no_se_prende_y_apaga_en_bucle`, y cada cambio rehace los destinos de la
+   escena (MSAA, profundidad, Hi-Z, SSAO). Lo mismo puede pasar con cualquier perilla, pero las dos
+   nuevas son las caras de mover y las primeras del orden de la GPU. Ahora: si hay que bajar dentro
+   de los 6 ciclos de una subida, **se deshace esa subida** y la perilla queda bloqueada 30 ciclos
+   (60, 120, hasta 240 si vuelve a fallar enseguida); el SSAO y la escala no se vuelven a subir
+   antes de 10 ciclos de haberse movido. Resultado: ≤ 10 cambios en 400 s (pruebas
+   `el_ssao_en_el_borde…` y `la_escala_en_el_borde_no_oscila`). La prueba del escalado que no gana
+   ya no vuelve el techo entero a sus valores (antes `set_techo` subía de golpe todo lo que el
+   auto-ajuste había bajado): solo deja la escala al 100 % (`Autoajuste::apagar_escala`).
+5. **Fundido entre niveles**: en el juego, 0,00–0,01 ms de mediana y 0,04 ms de p99 de CPU por
+   cuadro (pocas columnas por cuadro al caminar o hacer zoom, a diferencia del vuelo de §7.4). Se
+   deja prendido desde Medio; su costo de GPU queda para la placa.
+6. **GPU del pase principal** (lavapipe, época 1, calle): v0.12.0 464 ms, v0.13.0 500 ms (+8 %),
+   arreglado 483 ms (las cifras de lavapipe varían ±5 % entre corridas).
+
+### 8.3 Qué no se pudo medir sin la placa
+
+El costo de GPU real del fundido, del SSAO, de la escala y de la sombra de los personajes (en
+lavapipe la GPU es la CPU y comparte los núcleos con los hilos de generación); si el vsync y el
+tope de FPS del jugador dejan el auto-ajuste en el tope o fuera de él; y cuánto pesan los ~2 ms de
+cajas y luces de la época 3 en su procesador. Para eso está el desglose de `tirones.txt`.

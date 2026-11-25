@@ -385,7 +385,12 @@ fn bench_view(o: &Options, r: &mut Renderer, terrain: &Arc<TerrainGen>, store: &
         use crate::city::agentes::dibujo::{multitud_con, CERCA, MAX_DIBUJADOS};
         let medir = |r: &mut Renderer| {
             r.bench_frame(&cam, v.hour, w, h);
-            (0..o.frames.max(3)).map(|_| r.bench_frame(&cam, v.hour, w, h).total_ms).fold(f64::INFINITY, f64::min)
+            (0..o.frames.max(3))
+                .map(|_| {
+                    r.rehacer_sombra_agentes(); // [render] como con los agentes moviéndose
+                    r.bench_frame(&cam, v.hour, w, h).total_ms
+                })
+                .fold(f64::INFINITY, f64::min)
         };
         r.set_agents(&[]);
         let sin = medir(r);
@@ -782,4 +787,89 @@ fn new_streamer(o: &Options, terrain: &Arc<TerrainGen>, store: &Arc<RwLock<EditS
         s.ritmo.ms = ms;
     }
     s
+}
+
+// --- Banco del juego -----------------------------------------------------------------------
+
+/// Cuadros por recorrido del banco del juego (a 60 cuadros por segundo de juego).
+const JUEGO_CUADROS: u32 = 360;
+
+/// Banco "como el juego" (`MOTOR_BANCO_JUEGO=1 motor --demo-ciudad carpeta`, con la ciudad
+/// poblada): la cámara a nivel de la calle y a media altura, paneando, girando y con zoom, con
+/// el reloj del juego a 60 cuadros por segundo. Cada cuadro hace lo mismo que la ventana:
+/// simulación, cajas de los agentes, luces, subida de mallas con el tope de la ventana,
+/// selección bajo el cursor y dibujo. Devuelve la tabla por sección ([`crate::perfil`]) de
+/// cada recorrido.
+pub fn medir_juego(s: &mut crate::session::Session, r: &mut Renderer, w: u32, h: u32, nombre: &str) -> String {
+    use crate::perfil::{sumar, sumar_ms, Muestras, Sec};
+    let c0 = s.cam;
+    let dt = 1.0 / 60.0;
+    // Como en la ventana: rampas en el hilo de trabajo y fundido entre niveles (preset Medio
+    // en adelante).
+    s.rampas_en_hilo = true;
+    r.fundir = std::env::var("MOTOR_SIN_FUNDIDO").is_err();
+    let cuadros = std::env::var("MOTOR_BANCO_JUEGO_CUADROS").ok().and_then(|v| v.parse().ok()).unwrap_or(JUEGO_CUADROS);
+    let mut md = String::new();
+    let recorridos: [(&str, f32, f32); 2] = [("calle", 30.0, 12.0), ("media altura", 260.0, 36.0)];
+    for (rec, dist, pitch) in recorridos {
+        s.cam = OrbitCamera { distance: dist, pitch, ..c0 };
+        s.update(0.0);
+        // Que el streaming cargue la vista antes de medir (como al llegar en el juego).
+        let t_carga = Instant::now();
+        while !s.streamer.idle() && t_carga.elapsed() < Duration::from_secs(120) {
+            s.apply_ops(r, usize::MAX);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        s.apply_ops(r, usize::MAX);
+        r.bench_frame(&s.cam, s.hour, w, h);
+        crate::perfil::tomar();
+        let mut m = Muestras::default();
+        let mut cuadro = Instant::now();
+        for k in 0..cuadros {
+            // Paneo como con el teclado (W/A/S/D), giro (Q/E) y un zoom de ida y vuelta.
+            let fase = k as f32 / cuadros as f32 * std::f32::consts::TAU;
+            let speed = s.cam.distance * 0.9 * dt;
+            s.cam.pan(fase.cos() * speed, fase.sin().abs() * speed + 0.3 * speed);
+            s.cam.yaw += 25.0 * dt;
+            let objetivo = dist * (1.0 + 0.45 * (fase * 2.0).sin());
+            s.cam.zoom(objetivo / s.cam.distance);
+            let t0 = Instant::now();
+            s.update(dt);
+            sumar(Sec::Simulacion, t0);
+            s.apply_ops(r, crate::session::WINDOW_VERTEX_BUDGET);
+            let t0 = Instant::now();
+            let (o, d) = s.cam.ray(w as f32 * 0.5, h as f32 * 0.55, w as f32, h as f32);
+            s.pick(o, d);
+            r.set_overlay(&s.overlay());
+            sumar(Sec::Seleccion, t0);
+            r.time += dt;
+            let fs = r.bench_frame(&s.cam, s.hour, w, h);
+            sumar_ms(Sec::Dibujo, fs.cpu_ms);
+            sumar_ms(Sec::Espera, (fs.total_ms - fs.cpu_ms).max(0.0));
+            let ahora = Instant::now();
+            m.cerrar_cuadro((ahora - cuadro).as_secs_f64() * 1000.0, fs.gpu_ms);
+            cuadro = ahora;
+        }
+        let _ = writeln!(md, "{}\n", m.tabla(&format!("Banco del juego, {nombre}, {rec} (distancia {dist:.0} m, {} cajas de agentes al final)", r.agent_count())));
+        // Costo del mapa de sombra de los personajes (cámara quieta, mínimo de 10 cuadros).
+        if r.agent_count() > 0 {
+            let cam = s.cam;
+            let minimo = |r: &mut Renderer| {
+                (0..10)
+                    .map(|_| {
+                        r.rehacer_sombra_agentes(); // como con los agentes moviéndose
+                        r.bench_frame(&cam, s.hour, w, h).total_ms
+                    })
+                    .fold(f64::INFINITY, f64::min)
+            };
+            let con = minimo(r);
+            r.sombra_agentes = false;
+            let sin = minimo(r);
+            r.sombra_agentes = true;
+            let _ = writeln!(md, "Sombra de los personajes ({} cajas): cuadro con {con:.1} ms, sin {sin:.1} ms ({:+.1} %)\n", r.agent_count(), (con / sin - 1.0) * 100.0);
+        }
+    }
+    s.cam = c0;
+    s.rampas_en_hilo = false;
+    md
 }

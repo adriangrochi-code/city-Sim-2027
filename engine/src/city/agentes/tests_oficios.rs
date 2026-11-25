@@ -320,6 +320,35 @@ fn las_rampas_se_dibujan_cerca_de_la_vista() {
     assert_eq!(todo.len(), todo_sin.len() + con.len(), "las rampas van con los vecinos");
 }
 
+/// En la ventana las rampas se arman en un hilo aparte: el cuadro no las espera y, cuando
+/// terminan, se dibuja lo mismo que armándolas en el cuadro.
+#[test]
+fn las_rampas_en_el_hilo_dan_lo_mismo_sin_trabar_el_cuadro() {
+    let t = std::sync::Arc::new(TerrainGen::new(1726));
+    let mut city = City::default();
+    city.money = 1_000_000;
+    let c = Vec2::new(13500.0, 16300.0);
+    city.found_plaza(&t, c, 0.0).unwrap();
+    let (f, s) = plaza_frame(0.0);
+    let a = c - s * (BLOCK * 1.5) - f * (BLOCK * 1.5);
+    city.build_grid(&t, &grid_lines(a, a + s * BLOCK * 3.0, a + f * BLOCK * 3.0), RoadKind::Stone).unwrap();
+    let mut sincro = Vec::new();
+    let otros = Agentes::default();
+    otros.precalentar_rampas(&city, &t, c);
+    otros.cajas_rampas(&city, &t, c, &mut sincro);
+    assert!(!sincro.is_empty());
+    city.agentes.rampas_en_hilo(Some(&t));
+    let mut con = Vec::new();
+    let t0 = std::time::Instant::now();
+    while con.len() < sincro.len() && t0.elapsed() < std::time::Duration::from_secs(60) {
+        con.clear();
+        city.agentes.cajas_rampas(&city, &t, c, &mut con);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let clave = |k: &crate::detalle::Caja| bytemuck::bytes_of(k).to_vec();
+    assert_eq!(con.iter().map(clave).collect::<Vec<_>>(), sincro.iter().map(clave).collect::<Vec<_>>());
+}
+
 #[test]
 fn las_rampas_apoyan_en_la_calzada_de_vóxeles() {
     // La cara de arriba de cada rampa va del borde del escalón (la calzada de arriba) a la de
